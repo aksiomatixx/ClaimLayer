@@ -438,4 +438,31 @@ describe('GET /api/v1/auth/dev-session', () => {
     expect(cookies).toBeDefined();
     expect(cookies.some(c => c.startsWith('token='))).toBe(true);
   });
+
+  it('returns 403 when NODE_ENV is production', async () => {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const res = await request(app)
+        .get('/api/v1/auth/dev-session');
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/not available in production/i);
+    } finally {
+      process.env.NODE_ENV = original;
+    }
+  });
+
+  it('returns 403 when NODE_ENV is undefined', async () => {
+    const original = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    try {
+      const res = await request(app)
+        .get('/api/v1/auth/dev-session');
+
+      expect(res.status).toBe(403);
+    } finally {
+      process.env.NODE_ENV = original;
+    }
+  });
 });

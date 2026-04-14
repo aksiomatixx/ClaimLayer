@@ -149,7 +149,7 @@ router.post(
 // Issues an admin cookie for local development and demo environments.
 // BLOCKED in production (NODE_ENV === 'production').
 router.get('/dev-session', (req, res) => {
-  if (process.env.NODE_ENV === 'production') {
+  if (!['development', 'test'].includes(process.env.NODE_ENV)) {
     return res.status(403).json({ error: 'Not available in production' });
   }
 
