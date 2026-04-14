@@ -137,7 +137,7 @@ T+0:00   Employer submits FROI  OR  employee opens magic link
 T+0:30   ADP pull → demographics, pay history, AWW, TD rate calculated
 T+0:35   Claim record created in PostgreSQL + FileHandler via REST API
 T+1:00   Claude AI analysis → compensability, reserves, priority, red flags, actions
-T+1:30   AI reasoning PDF generated (jsPDF) → pushed to FileHandler document store
+T+1:30   AI reasoning PDF generated (pdf-lib) → pushed to FileHandler document store
 T+2:00   MPN provider search (3 options by home zip) → employee selects + books
 T+2:05   Authorization letter generated → emailed + faxed to facility
 T+2:10   DWC-1 pre-filled → sent to employee for e-signature (DocuSign or similar)
@@ -220,12 +220,12 @@ Claude generates the diary set from claim facts at claim creation and updates di
 - **`backend/src/services/claimService.js`** — Added `triggerAnalysis(claimId)` (sync, returns cache if exists), `getDiaries(claimId)`, and `claim.diaries[]` array populated by `_seedInitialDiaries`.
 - **`backend/src/services/pdfService.js`** — Added `generateReasoningPDF(claim)` using `pdf-lib`. Sections: compensability/score/priority, reserves, red flags, next actions, rationale. No CDN dependencies.
 - **`backend/src/middleware/auth.js`** — Added `requireMFA` middleware stub. No-op when `SUPABASE_URL` absent; checks `amr: ['totp']` in production.
-- **`backend/src/routes/auth.js`** — Added `GET /api/v1/auth/dev-session` (auto-login for dev/test; blocked in production), `POST /mfa/enroll` + `/mfa/verify` stubs for M4 Supabase wiring.
+- **`backend/src/routes/auth.js`** — Added `GET /api/v1/auth/dev-session` (auto-login for dev/test; blocked in production and when `NODE_ENV` is unset via allowlist guard), `POST /mfa/enroll` + `/mfa/verify` stubs for M4 Supabase wiring.
 - **`frontend/src/services/claims.js`** — Thin fetch wrappers: `fetchClaims`, `fetchClaim`, `updateClaimStatus`, `approveReserves`, `triggerAnalysis`, `fetchDiaries`, `ensureDevSession`.
 - **`frontend/src/services/providers.js`** — `fetchProviders(zipCode, limit)`.
 - **`frontend/src/main.jsx`** — Wrapped `<App>` in `<QueryClientProvider>` (`@tanstack/react-query`).
 - **`frontend/src/App.jsx`** — Replaced `useState(INIT_CLAIMS)` with `useQuery(['claims'], fetchClaims)`. Added `ActionQueue` component (priority-sorted, overdue-diary aware). Updated `ClaimDrawer` with live data, reserve approval form (`useMutation → PATCH /reserves`), diary section, status transition buttons. PDF download calls `GET /api/v1/claims/:id/reasoning-pdf`.
-- **`backend/tests/integration/admin-console.test.js`** — 25 new integration tests covering all M3 endpoints.
+- **`backend/tests/integration/admin-console.test.js`** — 27 integration tests covering all M3 endpoints (includes dev-session production/undefined-env guard tests).
 
 ### M2 — What was built
 
