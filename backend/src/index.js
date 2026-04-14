@@ -1,0 +1,49 @@
+'use strict';
+
+require('dotenv').config();
+
+const express     = require('express');
+const cookieParser = require('cookie-parser');
+const config      = require('./config');
+const logger      = require('./logger');
+const { auditLog } = require('./middleware/audit');
+
+const claimsRouter   = require('./routes/claims');
+const webhooksRouter = require('./routes/webhooks');
+
+const app = express();
+
+// ── Global middleware ────────────────────────────────────────────────────────
+app.use(cookieParser());
+app.use(express.json({ limit: '10mb' }));
+app.use(auditLog);
+
+// ── Health check (unauthenticated) ───────────────────────────────────────────
+app.get('/health', (_req, res) =>
+  res.json({ status: 'ok', ts: new Date().toISOString(), env: config.nodeEnv })
+);
+
+// ── API routes ───────────────────────────────────────────────────────────────
+app.use('/api/v1/claims',  claimsRouter);
+app.use('/webhooks',       webhooksRouter);
+
+// ── 404 ──────────────────────────────────────────────────────────────────────
+app.use((req, res) =>
+  res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` })
+);
+
+// ── Global error handler ─────────────────────────────────────────────────────
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  logger.error({ msg: 'Unhandled error', err: err.message, stack: err.stack });
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// ── Start ────────────────────────────────────────────────────────────────────
+if (require.main === module) {
+  app.listen(config.port, () => {
+    logger.info({ msg: `HomeCare TPA backend listening`, port: config.port, env: config.nodeEnv });
+  });
+}
+
+module.exports = app; // exported for supertest
