@@ -20,8 +20,10 @@ const router = express.Router();
 
 // ── HMAC helper ───────────────────────────────────────────────────────────────
 function validateHMAC(secret, rawBody, signature) {
-  if (!secret) return true; // no secret → skip (dev mode / mocks)
-  if (!signature) return false;
+  // Skip validation entirely outside production (test / mock servers don't sign)
+  if (process.env.NODE_ENV !== 'production') return true;
+
+  if (!secret || !signature) return false;
 
   const expected = crypto
     .createHmac('sha256', secret)
