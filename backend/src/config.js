@@ -9,11 +9,15 @@ const config = {
   jwtSecret: process.env.JWT_SECRET,
 
   filehandler: {
+    // Production: https://api.jwsoftware.com/filehandler/v1
+    // Mock (backend/mocks/mock_filehandler.py): http://localhost:8002
     baseUrl: process.env.FILEHANDLER_BASE_URL || 'https://api.jwsoftware.com/filehandler/v1',
     apiKey:  process.env.FILEHANDLER_API_KEY,
   },
 
   adp: {
+    // Production auth: https://accounts.adp.com/auth/oauth/v2/token
+    // Mock (backend/mocks/mock_adp.py): http://localhost:8001/auth/oauth/v2/token
     authUrl:      process.env.ADP_AUTH_URL      || 'https://accounts.adp.com/auth/oauth/v2/token',
     baseUrl:      process.env.ADP_BASE_URL      || 'https://api.adp.com',
     clientId:     process.env.ADP_CLIENT_ID,

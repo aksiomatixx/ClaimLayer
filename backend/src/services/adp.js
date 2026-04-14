@@ -131,10 +131,16 @@ async function getPayStatements(associateOID) {
   });
 
   return (res.data?.payStatements || []).map(ps => ({
-    grossPay:    parseFloat(ps.grossPay    || 0),
-    regularHours: parseFloat(ps.regularHours || 0),
-    periodStart: ps.payPeriodStartDate,
-    periodEnd:   ps.payPeriodEndDate,
+    // ADP wraps grossPay as { amount, currencyCode } — handle both shapes
+    grossPay:     parseFloat(ps.grossPay?.amount ?? ps.grossPay ?? 0),
+    // Regular hours live inside earnings[0].hours in the ADP response
+    regularHours: parseFloat(
+      ps.earnings?.find(e => e.typeCode?.codeValue === 'REG')?.hours ??
+      ps.regularHours ??
+      0
+    ),
+    periodStart:  ps.payPeriodStartDate,
+    periodEnd:    ps.payPeriodEndDate,
   }));
 }
 

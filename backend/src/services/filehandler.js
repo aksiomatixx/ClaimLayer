@@ -17,7 +17,6 @@
  */
 
 const axios  = require('axios');
-const FormData = require('form-data');
 const config = require('../config');
 const logger = require('../logger');
 
@@ -122,38 +121,18 @@ async function setReserves(fhClaimId, { medical, indemnity, expense, reason }, s
  * Attach a PDF document to a FileHandler claim.
  * docType: 'AI_REASONING_PDF' | 'DWC1' | 'PR2' | 'RFA' | 'AUTHORIZATION' | 'NOTICE'
  * fileBuffer: Buffer containing the PDF bytes
+ *
+ * Sends base64-encoded JSON body (matches both mock and real FileHandler API).
  */
 async function attachDocument(fhClaimId, fileBuffer, docType, description, receivedDate) {
-  const form = new FormData();
-  form.append('file', fileBuffer, {
-    filename:    `${docType}.pdf`,
-    contentType: 'application/pdf',
-  });
-  form.append('docType',      docType);
-  form.append('description',  description);
-  form.append('receivedDate', receivedDate);
-
-  const start = Date.now();
-  try {
-    const res = await withRetry(() =>
-      axios.post(
-        `${config.filehandler.baseUrl}/claims/${fhClaimId}/documents`,
-        form,
-        {
-          timeout: 30_000,
-          headers: {
-            Authorization: `Bearer ${config.filehandler.apiKey}`,
-            ...form.getHeaders(),
-          },
-        }
-      )
-    );
-    logCall({ endpoint: `/claims/${fhClaimId}/documents`, status: res.status, latencyMs: Date.now() - start, claimId: fhClaimId });
-    return res.data;
-  } catch (err) {
-    logCall({ endpoint: `/claims/${fhClaimId}/documents`, status: err.response?.status ?? 0, latencyMs: Date.now() - start, claimId: fhClaimId });
-    throw err;
-  }
+  return request('post', `/claims/${fhClaimId}/documents`, {
+    docType,
+    description,
+    fileName:     `${docType.toLowerCase()}_${fhClaimId}.pdf`,
+    mimeType:     'application/pdf',
+    receivedDate: receivedDate || new Date().toISOString().split('T')[0],
+    file:         fileBuffer.toString('base64'),
+  }, fhClaimId);
 }
 
 /**
