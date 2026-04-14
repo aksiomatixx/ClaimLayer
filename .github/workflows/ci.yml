@@ -8,6 +8,9 @@ on:
     branches: [main]
     paths: ["backend/**"]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     name: Unit + Integration Tests
@@ -49,7 +52,7 @@ jobs:
       # ── Node.js ──────────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: backend/package.json
 
