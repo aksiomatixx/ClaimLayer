@@ -119,7 +119,14 @@ function Toast({msg,type}){const c=type==="error"?C.red:C.green;return <div styl
 function Tabs({tabs,active,onChange}){return <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,marginBottom:22}}>{tabs.map(t=><button key={t.key} onClick={()=>onChange(t.key)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,color:active===t.key?C.text:C.muted,padding:"9px 20px",fontFamily:C.sans,borderBottom:`2px solid ${active===t.key?C.amber:"transparent"}`,transition:"all .15s",marginBottom:-1}}>{t.label}</button>)}</div>;}
 function InfoPair({label,value,mono,accent}){return <div style={{marginBottom:9}}><div style={{fontSize:10,fontFamily:C.mono,color:C.muted,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:3}}>{label}</div><div style={{fontSize:13,fontFamily:mono?C.mono:C.sans,color:accent||C.text,lineHeight:1.6}}>{value||"—"}</div></div>;}
 function RadioGroup({value,onChange,options,name}){return <div style={{display:"flex",gap:18,paddingTop:8}}>{options.map(([lbl,val])=><label key={lbl} style={{display:"flex",alignItems:"center",gap:7,fontSize:13,cursor:"pointer",color:C.dim}}><input type="radio" name={name} checked={value===val} onChange={()=>onChange(val)}/>{lbl}</label>)}</div>;}
-function StepBar({step,total}){return <div style={{display:"flex",gap:6,marginBottom:28}}>{Array.from({length:total},(_,i)=><div key={i} style={{flex:1,height:3,borderRadius:2,background:i<step?C.amber:i===step?C.amber+"88":C.border,transition:"background .3s"}}/>}</div>;}
+function StepBar({step,total}){
+  return <div style={{display:"flex",gap:6,marginBottom:28}}>
+    {Array.from({length:total},(_,i)=>{
+      const bg = i<step ? C.amber : i===step ? C.amber+"88" : C.border;
+      return <div key={i} style={{flex:1,height:3,borderRadius:2,background:bg,transition:"background .3s"}}/>;
+    })}
+  </div>;
+}
 
 // ═══════════════════════════════════════════════════════════
 // LANGUAGE SELECTOR (M2)
