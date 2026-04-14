@@ -38,11 +38,16 @@ function validateHMAC(secret, rawBody, signature) {
 }
 
 function parseJSON(rawBody) {
-  try {
-    return JSON.parse(rawBody);
-  } catch {
-    return null;
+  // express.raw() gives a Buffer; express.json() (applied globally) gives an object.
+  // Handle both so the route works whether or not the body was pre-parsed.
+  if (Buffer.isBuffer(rawBody)) {
+    try { return JSON.parse(rawBody); } catch { return null; }
   }
+  if (typeof rawBody === 'object' && rawBody !== null) return rawBody;
+  if (typeof rawBody === 'string') {
+    try { return JSON.parse(rawBody); } catch { return null; }
+  }
+  return null;
 }
 
 // ── POST /webhooks/dxf/adt — Manifest MedEx ADT event ────────────────────────

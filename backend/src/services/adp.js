@@ -113,7 +113,7 @@ function normaliseWorker(w) {
       zip:    addr.postalCode,
     },
     phone:     comms.landlines?.[0]?.formattedNumber,
-    jobTitle:  comms.jobTitle,
+    jobTitle:  w.jobCode?.shortName,
     hireDate:  w.workerDates?.originalHireDate,
   };
 }
