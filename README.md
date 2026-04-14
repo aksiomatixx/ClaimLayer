@@ -16,28 +16,50 @@ HomeCare TPA is a claims intelligence platform that automates 90%+ of routine WC
 
 ```
 homecare-tpa/
-├── README.md                    ← You are here
-├── frontend/                    ← React application
+├── README.md
+├── frontend/                         ← React application (Vite)
+│   └── src/
+│       ├── App.jsx                   ← Main platform UI (v3, fully mocked)
+│       └── Wireframes.jsx            ← Interactive user stories
+├── backend/                          ← Express (Node.js) API
 │   ├── src/
-│   │   ├── App.jsx              ← Main platform (v3)
-│   │   ├── Wireframes.jsx       ← Interactive wireframes / user stories
-│   │   └── components/
-│   └── package.json
-├── backend/                     ← FastAPI or Express API (TBD by Matt)
-│   ├── api/
-│   ├── services/
-│   ├── models/
-│   └── workers/                 ← Background jobs (DxF polling, diary engine, etc.)
+│   │   ├── index.js                  ← Express app entry point (port 3001)
+│   │   ├── config.js                 ← All environment variables
+│   │   ├── logger.js                 ← Structured JSON logging (Winston)
+│   │   ├── services/
+│   │   │   ├── filehandler.js        ← FileHandler Enterprise client
+│   │   │   ├── adp.js                ← ADP OAuth2 client + AWW/TD calculation
+│   │   │   ├── claimService.js       ← Claim lifecycle orchestration
+│   │   │   └── aiService.js          ← Claude API integration
+│   │   ├── routes/
+│   │   │   ├── claims.js             ← /api/v1/claims
+│   │   │   └── webhooks.js           ← DxF ADT, Enlyte, Lob receivers
+│   │   └── middleware/
+│   │       ├── auth.js               ← JWT validation + role enforcement
+│   │       └── audit.js              ← Request audit logging
+│   ├── prompts/
+│   │   ├── compensability_analysis.txt
+│   │   └── rfa_mtus_evaluation.txt
+│   ├── mocks/
+│   │   ├── mock_adp.py               ← Mock ADP server (port 8001, FastAPI)
+│   │   └── mock_filehandler.py       ← Mock FileHandler server (port 8002, FastAPI)
+│   ├── tests/
+│   │   ├── setup.js
+│   │   ├── unit/
+│   │   │   ├── adp.test.js
+│   │   │   └── filehandler.test.js
+│   │   └── integration/
+│   │       └── claim-flow.test.js    ← Full FROI → ADP → FH → AI flow
+│   ├── package.json
+│   └── .env.example
 ├── docs/
-│   ├── architecture.md          ← Full system design
-│   ├── integrations.md          ← API integration specs
-│   ├── regulatory.md            ← California WC compliance requirements
-│   └── data-model.md            ← PostgreSQL schema documentation
+│   ├── architecture.md               ← Full system design
+│   ├── integrations.md               ← API integration specs
+│   ├── regulatory.md                 ← California WC compliance requirements
+│   └── data-model.md                 ← PostgreSQL schema documentation
 └── .github/
-    ├── ISSUE_TEMPLATE/
-    │   ├── feature.md
-    │   └── bug.md
-    └── PULL_REQUEST_TEMPLATE.md
+    └── workflows/
+        └── ci.yml                    ← GitHub Actions (starts mocks, runs tests, uses repo secret)
 ```
 
 ---
@@ -47,7 +69,7 @@ homecare-tpa/
 | Layer | Technology | Notes |
 |---|---|---|
 | Frontend | React (Vite) | Three portals: Admin, Employer, Employee |
-| Backend | FastAPI (Python) or Express (Node) | Matt's choice based on preference |
+| Backend | Express (Node.js) | REST API + background workers |
 | Database | PostgreSQL via Supabase | Managed, with row-level security |
 | Auth | Supabase Auth | Three roles: admin, employer, employee |
 | AI Engine | Anthropic Claude API (`claude-sonnet-4-20250514`) | Compensability, reserves, RFA evaluation, diaries |
@@ -161,7 +183,7 @@ Claude generates the diary set from claim facts at claim creation and updates di
 
 | Milestone | Description | Status |
 |---|---|---|
-| M1 | Foundation: Auth + DB schema + FileHandler + ADP + end-to-end proof of concept | 🔲 Not started |
+| M1 | Foundation: Express backend, FileHandler client, ADP client, auth middleware, CI pipeline, mock servers, unit + integration test suite | ✅ Complete |
 | M2 | Employee intake: Voice, media upload, provider finder, appointment booking, DWC-1 | 🔲 Not started |
 | M3 | Admin console: Claim review, AI analysis, reserve approval, FileHandler sync | 🔲 Not started |
 | M4 | Employer portal: FROI, magic link, status dashboard | 🔲 Not started |
@@ -170,6 +192,19 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M7 | Diary engine: Auto-generation, event-triggered updates, escalation | 🔲 Not started |
 | M8 | Notice center: Lob.com integration, statutory notice generation | 🔲 Not started |
 | M9 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
+
+### M1 — What was built
+
+- **`backend/src/services/filehandler.js`** — Full FileHandler Enterprise HTTP client: create claim, set reserves, attach documents (base64), create/complete diaries, record payments, get audit ledger. Exponential back-off retry on 429/5xx.
+- **`backend/src/services/adp.js`** — ADP Workforce Now OAuth2 client with in-memory token caching. Employee lookup, 26-period pay statement pull, California LC §4453 AWW calculation, 2026 TD rate (floor $252.03 / ceiling $1,680.29).
+- **`backend/src/services/claimService.js`** — Full FROI → ADP pull → FileHandler create → initial statutory diaries → async Claude analysis lifecycle. State machine with valid status transitions.
+- **`backend/src/services/aiService.js`** — Claude API wrapper for compensability analysis and RFA/MTUS evaluation. Prompt files in `backend/prompts/`. Hard-rejects non-JSON responses — never auto-approves on parse failure.
+- **`backend/src/routes/`** — REST API: `POST /api/v1/claims`, `GET`, `PATCH /reserves`, `PATCH /status`, plus webhook receivers for DxF ADT, Enlyte determination, and Lob delivery events.
+- **`backend/src/middleware/`** — JWT auth (cookie + Bearer), role enforcement (`admin` / `employer` / `employee`), request audit logging.
+- **`backend/mocks/mock_adp.py`** — Mock ADP server (port 8001). 7 test employees covering standard claims, TD floor/ceiling edge cases, surgical, needlestick, sparse pay history.
+- **`backend/mocks/mock_filehandler.py`** — Mock FileHandler server (port 8002). Full in-memory ledger, all endpoints, `/mock/reset` for clean test runs.
+- **`.github/workflows/ci.yml`** — GitHub Actions CI: starts both mocks, runs Jest suite, injects `ANTHROPIC_API_KEY` from repository secret.
+- **`backend/tests/`** — Unit tests (ADP + FileHandler services), integration tests (full claim flow including live Claude assertions when key is present).
 
 ---
 
@@ -192,40 +227,62 @@ Claude generates the diary set from claim facts at claim creation and updates di
 ## Getting Started (Local Development)
 
 ```bash
-# Clone the repo
-git clone https://github.com/[org]/homecare-tpa.git
+git clone https://github.com/aksiomatixx/homecare-tpa.git
 cd homecare-tpa
+```
 
-# Frontend
+### Mock servers (required for backend)
+
+```bash
+pip install fastapi uvicorn pydantic
+
+# Terminal 1 — Mock ADP (port 8001)
+python backend/mocks/mock_adp.py
+
+# Terminal 2 — Mock FileHandler (port 8002)
+python backend/mocks/mock_filehandler.py
+```
+
+### Backend
+
+```bash
+cd backend
+npm install
+cp .env.example .env        # then fill in JWT_SECRET and ANTHROPIC_API_KEY
+npm run dev                 # starts on port 3001
+```
+
+### Tests
+
+```bash
+cd backend
+npm test                    # requires both mock servers running
+```
+
+### Frontend
+
+```bash
 cd frontend
 npm install
 npm run dev
-
-# Backend (once scaffolded by Matt)
-cd backend
-# Python: pip install -r requirements.txt && uvicorn main:app --reload
-# Node:   npm install && npm run dev
 ```
 
-Environment variables required — see `.env.example` (never commit `.env`):
+### Minimum required environment variables
 
 ```
-ANTHROPIC_API_KEY=
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_KEY=
-ADP_CLIENT_ID=
-ADP_CLIENT_SECRET=
-FILEHANDLER_API_KEY=
-FILEHANDLER_BASE_URL=
-MANIFEST_MEDEX_API_KEY=
-HEALTH_GORILLA_API_KEY=
-ENLYTE_UR_API_KEY=
-LOB_API_KEY=
-SENDGRID_API_KEY=
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
+JWT_SECRET=                 # any random 64-char hex string
+ANTHROPIC_API_KEY=          # from console.anthropic.com (stored as GitHub repo secret)
+
+# Mock values — change only when connecting to real services
+FILEHANDLER_API_KEY=mock-fh-key
+FILEHANDLER_BASE_URL=http://localhost:8002
+ADP_CLIENT_ID=mock
+ADP_CLIENT_SECRET=mock
+ADP_AUTH_URL=http://localhost:8001/auth/oauth/v2/token
+ADP_BASE_URL=http://localhost:8001
 ```
+
+Full variable reference: `backend/.env.example`
 
 ---
 
