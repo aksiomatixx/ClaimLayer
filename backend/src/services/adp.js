@@ -162,7 +162,7 @@ function calculateTDRate(payStatements) {
   const TD_MAX = 1_680.29;
 
   const totalGross = payStatements.reduce((sum, ps) => sum + ps.grossPay, 0);
-  const aww        = totalGross / payStatements.length;
+  const aww        = totalGross / (payStatements.length * 2);
   const rawTD      = aww * (2 / 3);
   const tdRate     = Math.max(TD_MIN, Math.min(TD_MAX, rawTD));
 

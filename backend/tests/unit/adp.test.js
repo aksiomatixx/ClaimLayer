@@ -71,8 +71,8 @@ describe('calculateTDRate — California 2026 rules', () => {
   const TD_MAX = 1680.29;
 
   it('calculates a standard TD rate within CA bounds', () => {
-    // Simulate ~$750/wk AWW → TD = $500
-    const statements = Array(26).fill({ grossPay: 750, periodStart: '2025-01-01', periodEnd: '2025-01-13' });
+    // Each statement covers 2 weeks (biweekly). $1,500 gross per period = $750/wk AWW → TD ≈ $500
+    const statements = Array(26).fill({ grossPay: 1500, periodStart: '2025-01-01', periodEnd: '2025-01-13' });
     const result = adp.calculateTDRate(statements);
 
     expect(result.aww).toBeCloseTo(750, 0);
