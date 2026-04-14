@@ -93,7 +93,7 @@ describe('Full FROI → claim creation flow', () => {
     // Claim structure
     expect(createdClaim.id).toBeDefined();
     expect(createdClaim.claimNumber).toMatch(/^HHW-\d{4}-\d{3}$/);
-    expect(createdClaim.status).toBe('pending');
+    expect(createdClaim.status).toBe('new_claim');
 
     // ADP data pulled correctly
     expect(createdClaim.employee.firstName).toBe('Maria');

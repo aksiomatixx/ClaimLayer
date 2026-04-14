@@ -70,7 +70,7 @@ async function createClaim(froiData, employerId) {
     id:          `claim_${Date.now()}`,
     claimNumber,
     employerId,
-    status:      'pending',
+    status:      'new_claim',
 
     employee: {
       adpEmployeeId: froiData.adpEmployeeId,
@@ -200,6 +200,14 @@ async function _seedInitialDiaries(claim) {
       assignedTo: 'system@homecaretpa.com',
       priority:   'HIGH',
       notes:      `DWC-7 notice of rights must be mailed within 1 business day of claim creation`,
+    },
+    {
+      type:       'COMPENSABILITY_DECISION_DUE',
+      dueDate:    new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
+                    .toISOString().split('T')[0],
+      assignedTo: 'system@homecaretpa.com',
+      priority:   'CRITICAL',
+      notes:      `LC §5402 — claim presumed compensable by operation of law if not accepted or denied within 90 calendar days. DOI: ${doi}. Missing this deadline is a critical compliance failure.`,
     },
   ];
 
@@ -338,12 +346,17 @@ async function approveReserves(claimId, reserves, adjusterEmail) {
 
 async function updateStatus(claimId, newStatus, changedBy) {
   const VALID_TRANSITIONS = {
-    pending:        ['accepted', 'denied'],
-    accepted:       ['active_medical', 'closed'],
-    active_medical: ['p_and_s', 'closed'],
-    p_and_s:        ['closed'],
-    denied:         [],
-    closed:         [],
+    new_claim:              ['intake_complete', 'denied'],
+    intake_complete:        ['under_investigation', 'accepted'],
+    under_investigation:    ['accepted', 'denied'],
+    accepted:               ['active_medical'],
+    active_medical:         ['p_and_s', 'litigated'],
+    p_and_s:                ['pd_evaluation', 'litigated'],
+    pd_evaluation:          ['settlement_discussions', 'litigated'],
+    settlement_discussions: ['closed'],
+    litigated:              ['settlement_discussions', 'closed'],
+    denied:                 [],
+    closed:                 [],
   };
 
   const claim = claimsStore.get(claimId);

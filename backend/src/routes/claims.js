@@ -53,7 +53,11 @@ router.get(
   [
     query('status')
       .optional()
-      .isIn(['pending', 'accepted', 'denied', 'active_medical', 'p_and_s', 'closed'])
+      .isIn([
+        'new_claim', 'intake_complete', 'under_investigation', 'accepted',
+        'active_medical', 'p_and_s', 'pd_evaluation',
+        'settlement_discussions', 'litigated', 'denied', 'closed',
+      ])
       .withMessage('Invalid status value'),
   ],
   validate,
@@ -150,7 +154,11 @@ router.patch(
   [
     param('id').notEmpty(),
     body('status')
-      .isIn(['accepted', 'denied', 'active_medical', 'p_and_s', 'closed'])
+      .isIn([
+        'intake_complete', 'under_investigation', 'accepted',
+        'active_medical', 'p_and_s', 'pd_evaluation',
+        'settlement_discussions', 'litigated', 'denied', 'closed',
+      ])
       .withMessage('Invalid target status'),
   ],
   validate,
