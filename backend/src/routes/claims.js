@@ -3,6 +3,7 @@
 const express           = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const claimService      = require('../services/claimService');
+const db                = require('../services/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -173,6 +174,114 @@ router.patch(
     } catch (err) {
       const status = err.message.includes('not found') ? 404 : 400;
       res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/dwc1 — get DWC-1 PDF for a claim ──────────────────
+router.get(
+  '/:id/dwc1',
+  requireAuth,
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.getClaim(req.params.id);
+      if (!claim) return res.status(404).json({ error: 'Claim not found' });
+
+      // Employer/employee scope check
+      if (req.user.role === 'employer') {
+        const empId = req.user.employerId || req.user.sub;
+        if (claim.employerId !== empId) return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const docId = claim.dwc1DocumentId;
+      if (!docId) return res.status(404).json({ error: 'DWC-1 not yet generated for this claim' });
+
+      const doc = db.documents.findById(docId);
+      if (!doc) return res.status(404).json({ error: 'DWC-1 document record not found' });
+
+      // If we have the PDF buffer in-memory (M2), return it as a download
+      if (doc.pdf_buffer_b64) {
+        const pdfBuffer = Buffer.from(doc.pdf_buffer_b64, 'base64');
+        res.set('Content-Type', 'application/pdf');
+        res.set('Content-Disposition', `inline; filename="dwc1_${claim.claimNumber}.pdf"`);
+        return res.send(pdfBuffer);
+      }
+
+      // M3+: return Supabase Storage signed URL
+      res.json({
+        document_id:  doc.id,
+        storage_path: doc.storage_path,
+        // signed_url: await supabase.storage.createSignedUrl(doc.storage_path, 3600)
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/dwc1/request-signature — DocuSign stub ────────────
+// M2 placeholder. Logs claim_event so adjuster knows to follow up manually.
+// Replace with DocuSign envelope creation in a future milestone.
+router.post(
+  '/:id/dwc1/request-signature',
+  requireAuth,
+  requireRole(['employee', 'admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.getClaim(req.params.id);
+      if (!claim) return res.status(404).json({ error: 'Claim not found' });
+
+      claim.events.push({
+        type:      'dwc1_signature_pending',
+        timestamp: new Date().toISOString(),
+        data:      {
+          requestedBy: req.user.sub,
+          note:        'DocuSign not yet integrated — manual follow-up by adjuster required',
+        },
+      });
+
+      res.json({
+        status:  'pending',
+        message: 'Your adjuster will contact you to complete your signature.',
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/intake-progress — update intake step flags ─────────
+router.patch(
+  '/:id/intake-progress',
+  requireAuth,
+  requireRole(['employee', 'admin']),
+  [
+    param('id').notEmpty(),
+    body('step')
+      .isIn(['voice_complete', 'media_complete', 'mpn_acknowledged', 'provider_selected', 'appointment_confirmed', 'dwc1_generated'])
+      .withMessage('Invalid intake step'),
+    body('value').isBoolean().withMessage('value must be a boolean'),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.getClaim(req.params.id);
+      if (!claim) return res.status(404).json({ error: 'Claim not found' });
+
+      if (!claim.intakeProgress) {
+        claim.intakeProgress = {
+          voice_complete: false, media_complete: false, mpn_acknowledged: false,
+          provider_selected: false, appointment_confirmed: false, dwc1_generated: false,
+        };
+      }
+      claim.intakeProgress[req.body.step] = req.body.value;
+      res.json({ intake_progress: claim.intakeProgress });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   }
 );

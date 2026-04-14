@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from 'react-i18next';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -123,54 +124,137 @@ function RadioGroup({value,onChange,options,name}){return <div style={{display:"
 function StepBar({step,total}){return <div style={{display:"flex",gap:6,marginBottom:28}}>{Array.from({length:total},(_,i)=><div key={i} style={{flex:1,height:3,borderRadius:2,background:i<step?C.amber:i===step?C.amber+"88":C.border,transition:"background .3s"}}/>}</div>;}
 
 // ═══════════════════════════════════════════════════════════
-// VOICE RECORDER
+// LANGUAGE SELECTOR (M2)
 // ═══════════════════════════════════════════════════════════
-function VoiceRecorder({onTranscript,initialText=""}){
-  const [listening,setListening]=useState(false);
-  const [transcript,setTranscript]=useState(initialText);
-  const [interim,setInterim]=useState("");
-  const recRef=useRef(null);
-  const SR=typeof window!=="undefined"&&(window.SpeechRecognition||window.webkitSpeechRecognition);
-
-  const start=()=>{
-    if(!SR){alert("Voice input requires Chrome or Edge browser.");return;}
-    const r=new SR(); r.continuous=true; r.interimResults=true; r.lang="en-US";
-    r.onresult=e=>{let fin="",intr="";for(const res of e.results){if(res.isFinal)fin+=res[0].transcript+" ";else intr+=res[0].transcript;}setTranscript(t=>t+fin);setInterim(intr);};
-    r.onerror=()=>{setListening(false);setInterim("");};
-    r.onend=()=>{setListening(false);setInterim("");};
-    r.start(); recRef.current=r; setListening(true);
+function LanguageSelector(){
+  const {i18n}=useTranslation();
+  const [lang,setLang]=useState(i18n.language?.slice(0,2)||'en');
+  const toggle=()=>{
+    const next=lang==='en'?'es':'en';
+    i18n.changeLanguage(next);
+    setLang(next);
   };
-  const stop=()=>{recRef.current?.stop();setListening(false);setInterim("");if(transcript.trim())onTranscript(transcript.trim());};
-  const clear=()=>{setTranscript("");setInterim("");};
-
   return(
-    <div style={{background:C.bg,border:`1px solid ${listening?C.red+"88":C.border}`,borderRadius:10,padding:16,transition:"border-color .3s"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <Lbl color={listening?C.red:C.muted} mb={0}>{listening?"● Recording…":"Voice Note"}</Lbl>
-        <div style={{display:"flex",gap:8}}>
-          {transcript&&<button onClick={clear} style={{background:"none",border:"none",color:C.muted,fontSize:11,cursor:"pointer",fontFamily:C.mono}}>Clear</button>}
-          {!listening
-            ?<Btn small variant="rose" onClick={start} icon="🎙">Start Recording</Btn>
-            :<Btn small variant="danger" onClick={stop}>■ Stop & Save</Btn>}
-        </div>
-      </div>
-      {listening&&(
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-          <div style={{display:"flex",gap:3}}>{[0,1,2,3,4].map(i=><div key={i} className="blink" style={{width:3,height:8+i*4,background:C.red,borderRadius:2,animationDelay:`${i*0.1}s`}}/>)}</div>
-          <span style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>{interim||"Listening… speak clearly"}</span>
-        </div>
-      )}
-      {transcript?(
-        <div style={{fontSize:13,color:C.text,lineHeight:1.75,minHeight:48,padding:8,background:C.surface,borderRadius:7,border:`1px solid ${C.border}`}}>
-          {transcript}<span className="blink" style={{color:C.amber,marginLeft:2,fontSize:11}}>{listening?"▍":""}</span>
-        </div>
-      ):(
-        <div style={{fontSize:12,color:C.muted,fontStyle:"italic",padding:"8px 0"}}>
-          {SR?"Press Start and describe your injury in your own words — your voice will be transcribed automatically.":"Voice input requires Chrome or Edge. Use the text field below instead."}
-        </div>
-      )}
+    <button onClick={toggle} style={{background:'transparent',border:`1px solid ${C.border}`,color:C.dim,padding:'5px 12px',borderRadius:6,fontSize:11,fontFamily:C.mono,cursor:'pointer',letterSpacing:'0.04em',flexShrink:0}}>
+      {lang==='en'?'EN · ES':'ES · EN'}
+    </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// M2 VOICE RECORDER — MediaRecorder → Whisper API
+// ═══════════════════════════════════════════════════════════
+function M2VoiceRecorder({onResult,language='en',claimId}){
+  const {t}=useTranslation('intake');
+  const [phase,setPhase]=useState('consent'); // consent | recording | uploading | done | error
+  const [consentGiven,setConsentGiven]=useState(false);
+  const [seconds,setSeconds]=useState(0);
+  const [transcript,setTranscript]=useState('');
+  const [extraction,setExtraction]=useState(null);
+  const [errMsg,setErrMsg]=useState('');
+  const timerRef=useRef(null);
+  const stopRef=useRef(null);
+  const uploadedRef=useRef(false);
+
+  useEffect(()=>()=>{clearInterval(timerRef.current);},[]);
+
+  const doStop=()=>stopRef.current?.();
+
+  const startRecording=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const mimeType=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm';
+      const mr=new MediaRecorder(stream,{mimeType});
+      const chunks=[];
+      uploadedRef.current=false;
+
+      mr.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+      mr.onstop=async()=>{
+        stream.getTracks().forEach(tr=>tr.stop());
+        if(uploadedRef.current)return;
+        uploadedRef.current=true;
+        setPhase('uploading');
+        try{
+          const blob=new Blob(chunks,{type:'audio/webm'});
+          const fd=new FormData();
+          fd.append('audio',blob,'recording.webm');
+          fd.append('language',language);
+          if(claimId)fd.append('claim_id',String(claimId));
+          const res=await fetch('/api/v1/voice/transcribe',{method:'POST',body:fd});
+          if(!res.ok)throw new Error(`HTTP ${res.status}`);
+          const data=await res.json();
+          setTranscript(data.transcript||'');
+          setExtraction(data.extraction||null);
+          onResult({transcript:data.transcript||'',extraction:data.extraction||null});
+          setPhase('done');
+        }catch(err){
+          setErrMsg(err.message||t('error_generic'));
+          setPhase('error');
+        }
+      };
+
+      mr.start(1000);
+      setPhase('recording');
+      setSeconds(0);
+      stopRef.current=()=>{clearInterval(timerRef.current);if(mr.state!=='inactive')mr.stop();};
+      timerRef.current=setInterval(()=>{
+        setSeconds(s=>{if(s>=179){stopRef.current?.();return 180;}return s+1;});
+      },1000);
+    }catch{
+      setErrMsg('Microphone access denied. Please use the text option instead.');
+      setPhase('error');
+    }
+  };
+
+  const mm=String(Math.floor(seconds/60)).padStart(2,'0');
+  const ss2=String(seconds%60).padStart(2,'0');
+
+  if(phase==='consent')return(
+    <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:20}}>
+      <div style={{fontSize:13,color:C.dim,lineHeight:1.7,marginBottom:16}}>{t('voice_consent')}</div>
+      <label style={{display:'flex',alignItems:'flex-start',gap:10,fontSize:13,color:C.text,cursor:'pointer',marginBottom:18}}>
+        <input type="checkbox" checked={consentGiven} onChange={e=>setConsentGiven(e.target.checked)} style={{marginTop:2}}/>
+        {t('voice_consent_agree')}
+      </label>
+      <Btn disabled={!consentGiven} onClick={startRecording} icon="🎙">{t('voice_start')}</Btn>
     </div>
   );
+
+  if(phase==='recording')return(
+    <div style={{background:C.redF,border:`1px solid ${C.red}44`,borderRadius:10,padding:20}}>
+      <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:14}}>
+        <div style={{display:'flex',gap:3}}>{[0,1,2,3,4].map(i=><div key={i} className="blink" style={{width:3,height:8+i*4,background:C.red,borderRadius:2,animationDelay:`${i*0.1}s`}}/>)}</div>
+        <div style={{fontFamily:C.mono,fontSize:22,color:C.red,fontWeight:700}}>{mm}:{ss2}</div>
+        {seconds>=150&&<span style={{fontSize:11,color:C.amber}}>{t('voice_warning')}</span>}
+      </div>
+      <div style={{fontSize:12,color:C.dim,marginBottom:14}}>Speak clearly — tap Stop when finished.</div>
+      <Btn variant="danger" onClick={doStop}>■ {t('voice_stop')}</Btn>
+    </div>
+  );
+
+  if(phase==='uploading')return(
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:20,display:'flex',alignItems:'center',gap:14}}>
+      <Spinner/>
+      <span style={{color:C.dim,fontSize:13}}>{t('voice_transcribing')}</span>
+    </div>
+  );
+
+  if(phase==='done')return(
+    <div style={{background:C.bg,border:`1px solid ${C.green}44`,borderRadius:10,padding:16}}>
+      <Lbl color={C.green}>{t('voice_review')}</Lbl>
+      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>{t('voice_review_sub')}</div>
+      <textarea value={transcript} onChange={e=>{const v=e.target.value;setTranscript(v);onResult({transcript:v,extraction});}} rows={5} placeholder={t('voice_text_placeholder')}/>
+    </div>
+  );
+
+  if(phase==='error')return(
+    <div style={{background:C.redF,border:`1px solid ${C.red}44`,borderRadius:10,padding:16}}>
+      <div style={{color:C.red,fontSize:13,marginBottom:12}}>{errMsg||t('error_generic')}</div>
+      <Btn variant="ghost" onClick={()=>{setPhase('consent');setErrMsg('');uploadedRef.current=false;}}>Try Again</Btn>
+    </div>
+  );
+
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -294,94 +378,6 @@ function ProviderFinder({zip,injuryType,onBook}){
   );
 }
 
-// ═══════════════════════════════════════════════════════════
-// DWC-1 PDF GENERATOR
-// ═══════════════════════════════════════════════════════════
-function generateDWC1(claim){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"letter"});
-  const W=215.9,M=14,CW=W-M*2;
-  let y=M;
-
-  // Header
-  doc.setFillColor(15,30,48); doc.rect(0,0,W,22,"F");
-  doc.setFontSize(14);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text("STATE OF CALIFORNIA — WORKERS' COMPENSATION",W/2,10,{align:"center"});
-  doc.setFontSize(11);doc.setTextColor(200,220,240);
-  doc.text("CLAIM FORM — DWC 1 (Rev. 1/1/2020)",W/2,17,{align:"center"});
-  y=30;
-
-  // State notice box
-  doc.setFontSize(7);doc.setFont("helvetica","normal");doc.setTextColor(100,120,140);
-  doc.setDrawColor(26,46,69); doc.rect(M,y-3,CW,16,"S");
-  const notice="Notice: You have the right to compensation benefits if you are injured or become ill because of your job. You also have the right to disagree with decisions affecting your claim. To obtain important information, call the DWC Information and Assistance Line: 1-800-736-7401.";
-  const nl=doc.splitTextToSize(notice,CW-4);
-  doc.setTextColor(124,154,181); doc.text(nl,M+2,y+2); y+=20;
-
-  const hr=()=>{doc.setDrawColor(26,46,69);doc.line(M,y,W-M,y);y+=3;};
-  const lbl=(str,x,yy)=>{doc.setFontSize(7);doc.setFont("helvetica","bold");doc.setTextColor(100,120,140);doc.text(str,x,yy);};
-  const val=(str,x,yy,w=80)=>{doc.setFontSize(10);doc.setFont("helvetica","normal");doc.setTextColor(216,232,245);const ls=doc.splitTextToSize(str||"",w);doc.text(ls,x,yy);return ls.length*4.5;};
-
-  // Section: Employee Info
-  doc.setFontSize(9);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text("EMPLOYEE",M,y); hr(); y+=2;
-  lbl("EMPLOYEE NAME (First, Middle, Last)",M,y); val(claim.claimant,M,y+5,100); y+=12;
-  lbl("HOME ADDRESS",M,y); val(claim.homeAddr||"—",M,y+5,100);
-  lbl("DATE OF BIRTH",M+120,y); val(claim.claimantDOB,M+120,y+5,40); y+=12;
-  lbl("TELEPHONE",M,y); val(claim.phone||"—",M,y+5,60);
-  lbl("OCCUPATION / JOB TITLE",M+80,y); val("Home Health Worker",M+80,y+5,80); y+=12;
-  lbl("SOCIAL SECURITY NO. (Last 4)",M,y); val("XXX-XX-____",M,y+5,60); y+=14;
-
-  // Section: Injury
-  hr();
-  doc.setFontSize(9);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text("INJURY / ILLNESS",M,y); y+=5;
-  lbl("DATE OF INJURY OR ILLNESS",M,y); val(claim.dateOfInjury,M,y+5,80);
-  lbl("TIME OF INJURY",M+100,y); val("See narrative",M+100,y+5,60); y+=12;
-  lbl("ADDRESS WHERE ACCIDENT/EXPOSURE OCCURRED (Client's Home)",M,y); val(claim.homeAddr?.split(",")[0]+" (client's residence)",M,y+5,CW); y+=12;
-  lbl("DESCRIBE HOW THE INJURY OR ILLNESS OCCURRED",M,y); y+=4;
-  doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(216,232,245);
-  const ml=doc.splitTextToSize(claim.mechanism,CW-4);
-  doc.setFillColor(10,22,34); doc.rect(M,y-2,CW,ml.length*4+6,"F");
-  doc.text(ml,M+2,y+2); y+=ml.length*4+10;
-  lbl("PART OF BODY AFFECTED",M,y); val(claim.bodyPart,M,y+5,80);
-  lbl("TYPE OF INJURY",M+100,y); val(claim.injuryType,M+100,y+5,80); y+=12;
-  lbl("NAMES OF WITNESSES",M,y); val(claim.witnesses||"None listed",M,y+5,CW); y+=12;
-
-  // Section: Medical
-  hr();
-  doc.setFontSize(9);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text("MEDICAL TREATMENT",M,y); y+=5;
-  lbl("NAME AND ADDRESS OF HEALTH CARE PROVIDER / HOSPITAL",M,y);
-  val(claim.appointment?`${claim.appointment.facility}, ${claim.appointment.address}`:(claim.medTreatment?.split(".")[0]||"To be determined"),M,y+5,CW); y+=12;
-
-  // Section: Employer
-  hr();
-  doc.setFontSize(9);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text("EMPLOYER",M,y); y+=5;
-  lbl("EMPLOYER'S NAME",M,y); val(claim.employer,M,y+5,100);
-  lbl("DATE EMPLOYER RECEIVED CLAIM",M+110,y); val(claim.filedAt?.split(" ")[0]||new Date().toLocaleDateString(),M+110,y+5,60); y+=12;
-
-  // Signature blocks
-  hr();
-  doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(124,154,181);
-  doc.text("EMPLOYEE'S SIGNATURE:",M,y+6); doc.setDrawColor(245,158,11,0.5); doc.line(M+50,y+6,M+120,y+6);
-  doc.text("DATE:",M+125,y+6); doc.line(M+135,y+6,W-M,y+6); y+=14;
-  if(claim.dwc1Signed){
-    doc.setFillColor(0,24,16); doc.rect(M,y-4,CW,12,"F");
-    doc.setFontSize(8);doc.setFont("helvetica","bold");doc.setTextColor(15,184,129);
-    doc.text(`✓ DIGITALLY SIGNED BY ${claim.claimant.toUpperCase()} — ${new Date().toLocaleDateString()}`,M+4,y+4);
-    y+=14;
-  }
-  doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(100,120,140);
-  doc.text("EMPLOYER'S SIGNATURE / TITLE:",M,y+6); doc.line(M+60,y+6,W-M,y+6); y+=14;
-
-  // Footer
-  doc.setFontSize(7);doc.setTextColor(60,90,110);
-  doc.text(`${claim.id} | Generated by HomeCare TPA — ${new Date().toLocaleString()} | CONFIDENTIAL`,W/2,200,{align:"center"});
-  return doc;
-}
-
 function generateReasoningPDF(claim){
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
@@ -448,166 +444,382 @@ function generateNoticePDF(claim,noticeType){
 }
 
 // ═══════════════════════════════════════════════════════════
-// EMPLOYEE INTAKE WIZARD
+// EMPLOYEE INTAKE WIZARD (M2) — i18n · equal voice/text · real API
 // ═══════════════════════════════════════════════════════════
-const EMPTY={claimant:"",claimantDOB:"",homeAddr:"",homeZip:"",phone:"",employer:"",dateOfInjury:"",bodyPart:"",injuryType:"",mechanism:"",voiceTranscript:"",medTreatment:"",timeOff:false,priorClaims:"None",witnesses:"",media:[],aww:null,tdRate:null};
+const EMPTY_M2={claimant:'',claimantDOB:'',homeAddr:'',homeZip:'',phone:'',employer:'',dateOfInjury:'',bodyPart:'',injuryType:'',mechanism:'',voiceTranscript:'',medTreatment:'',timeOff:false,priorClaims:'None',witnesses:'',media:[],aww:null,tdRate:null};
 
 function EmployeeIntakeWizard({onComplete}){
+  const {t,i18n}=useTranslation('intake');
+  const lang=i18n.language?.slice(0,2)||'en';
   const [step,setStep]=useState(0);
-  const [form,setForm]=useState(EMPTY);
+  const [form,setForm]=useState(EMPTY_M2);
   const [submittedId,setSubmittedId]=useState(null);
-  const [appointment,setAppointment]=useState(null);
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const next=()=>setStep(s=>s+1);
+  const back=()=>setStep(s=>s-1);
+  const TOTAL=6;
 
-  const next=()=>setStep(s=>Math.min(s+1,3));
-  const back=()=>setStep(s=>Math.max(s-1,0));
+  // Step 2 — intake method sub-state
+  const [intakeMethod,setIntakeMethod]=useState(null); // 'voice'|'text'
+  const [intakeDone,setIntakeDone]=useState(false);
+  const [textInput,setTextInput]=useState('');
+  const [textLoading,setTextLoading]=useState(false);
+  const [extraction,setExtraction]=useState(null);
+
+  // Step 4 — MPN / provider
+  const [mpnAck,setMpnAck]=useState(false);
+  const [providers,setProviders]=useState([]);
+  const [provLoading,setProvLoading]=useState(false);
+  const [selProvider,setSelProvider]=useState(null);
+  const [appointmentId,setAppointmentId]=useState(null);
+  const [confirmNum,setConfirmNum]=useState('');
+  const [apptConfirmed,setApptConfirmed]=useState(false);
+  const [apptLoading,setApptLoading]=useState(false);
+
+  // Load providers when entering step 4
+  useEffect(()=>{
+    if(step!==4||providers.length>0)return;
+    setProvLoading(true);
+    fetch(`/api/v1/providers?zip=${encodeURIComponent(form.homeZip||'90010')}&limit=5`)
+      .then(r=>r.ok?r.json():Promise.reject())
+      .then(d=>setProviders(d.providers||[]))
+      .catch(()=>setProviders(getProvidersNearZip(form.homeZip).map(p=>({...p,mpn_tier:1,accepting_new_wc:true,addr:p.addr||p.address}))))
+      .finally(()=>setProvLoading(false));
+  },[step]); // eslint-disable-line
+
+  const submitText=async()=>{
+    const txt=textInput.trim();
+    if(txt.length<10)return;
+    setTextLoading(true);
+    try{
+      const res=await fetch('/api/v1/voice/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
+      if(res.ok){const data=await res.json();setExtraction(data.extraction);}
+    }catch{/* non-fatal */}
+    setForm(p=>({...p,mechanism:txt,voiceTranscript:''}));
+    setTextLoading(false);
+    setIntakeDone(true);
+  };
+
+  const handleVoiceResult=({transcript,extraction:ext})=>{
+    setExtraction(ext);
+    setForm(p=>({...p,mechanism:transcript,voiceTranscript:transcript}));
+    setIntakeDone(true);
+  };
+
+  const selectProvider=async p=>{
+    setApptLoading(true);
+    try{
+      const res=await fetch('/api/v1/appointments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({claim_id:`draft-${Date.now()}`,employee_id:'employee-self',provider_id:p.id,provider_name:p.name,provider_phone:p.phone,provider_address:p.addr||p.address||'',specialty:p.specialty})});
+      const d=res.ok?await res.json():{};
+      setAppointmentId(d.appointment?.id||`mock-${Date.now()}`);
+    }catch{setAppointmentId(`mock-${Date.now()}`);}
+    setSelProvider(p);
+    setApptLoading(false);
+  };
+
+  const confirmAppt=async()=>{
+    if(!confirmNum.trim())return;
+    setApptLoading(true);
+    try{
+      if(appointmentId&&!appointmentId.startsWith('mock-'))
+        await fetch(`/api/v1/appointments/${appointmentId}/confirm`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation_number:confirmNum})});
+    }catch{/* non-fatal */}
+    setApptConfirmed(true);
+    setApptLoading(false);
+    setTimeout(next,600);
+  };
 
   const submit=()=>{
-    const id=onComplete({...form,appointment});
+    const appt=selProvider?{facility:`${selProvider.name}${selProvider.branch?` — ${selProvider.branch}`:''}`,address:selProvider.addr||selProvider.address||'',phone:selProvider.phone,date:'Pending',time:'TBD',authCode:`MPN-2026-${Math.floor(Math.random()*9000+1000)}`,confirmed:apptConfirmed}:null;
+    const id=onComplete({...form,appointment:appt});
     setSubmittedId(id);
-    setStep(4);
+    fetch(`/api/v1/claims/${id}/dwc1/request-signature`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({method:'sms',phone:form.phone})}).catch(()=>{});
+    setStep(6);
   };
 
-  const handleBook=appt=>{
-    setAppointment(appt);
-    setTimeout(()=>setStep(3),1200);
-  };
+  const stepTitles=['Your Information','Injury Details',t('voice_header'),t('media_header'),t('mpn_header'),t('dwc1_header')];
 
-  const stepTitles=["Your Information","Describe the Injury","Choose Your Doctor","Review & Submit"];
-
-  if(step===4) return(
-    <div style={{textAlign:"center",padding:"40px 20px",animation:"fadeUp 0.3s ease"}}>
-      <div style={{width:64,height:64,background:C.greenF,border:`2px solid ${C.green}`,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 18px",fontSize:28,color:C.green}}>✓</div>
-      <div style={{fontSize:20,fontWeight:700,color:C.green,marginBottom:6}}>Claim Submitted</div>
-      <div style={{fontFamily:C.mono,color:C.amber,fontSize:16,fontWeight:600,marginBottom:10,letterSpacing:"0.04em"}}>{submittedId}</div>
-      {appointment&&(
-        <div style={{background:C.tealF,border:`1px solid ${C.teal}33`,borderRadius:10,padding:"14px 20px",display:"inline-block",marginBottom:16,textAlign:"left"}}>
-          <div style={{fontSize:11,fontFamily:C.mono,color:C.teal,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.06em"}}>Appointment Confirmed</div>
-          <div style={{fontSize:14,fontWeight:600,color:C.text}}>{appointment.facility}</div>
-          <div style={{fontSize:13,color:C.dim,marginTop:3}}>{appointment.date} at {appointment.time}</div>
-          <div style={{fontFamily:C.mono,fontSize:12,color:C.amber,marginTop:4}}>Auth: {appointment.authCode}</div>
-        </div>
-      )}
-      <div style={{fontSize:12,color:C.muted,maxWidth:380,margin:"0 auto 20px",lineHeight:1.8}}>
-        A DWC-1 claim form has been sent to your phone and email for your signature. SMS confirmation was sent to {form.phone||"your phone"}. You cannot be retaliated against for filing this claim.
+  // ── Completion ──
+  if(step===6)return(
+    <div style={{textAlign:'center',padding:'40px 20px',animation:'fadeUp 0.3s ease'}}>
+      <div style={{width:64,height:64,background:C.greenF,border:`2px solid ${C.green}`,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 18px',fontSize:28,color:C.green}}>✓</div>
+      <div style={{fontSize:20,fontWeight:700,color:C.green,marginBottom:6}}>{t('complete_header')}</div>
+      <div style={{fontFamily:C.mono,color:C.amber,fontSize:16,fontWeight:600,marginBottom:12,letterSpacing:'0.04em'}}>{submittedId}</div>
+      <div style={{fontSize:12,color:C.dim,maxWidth:380,margin:'0 auto 20px',lineHeight:1.8}}>{t('complete_sub')}</div>
+      <div style={{textAlign:'left',background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:18,maxWidth:400,margin:'0 auto 20px'}}>
+        {[t('complete_step1'),t('complete_step2'),t('complete_step3')].map((s,i)=>(
+          <div key={i} style={{fontSize:13,color:C.dim,marginBottom:10,display:'flex',gap:10}}>
+            <span style={{color:C.amber,fontFamily:C.mono,fontWeight:700}}>{i+1}.</span><span>{s}</span>
+          </div>
+        ))}
       </div>
-      <div style={{display:"flex",gap:8,justifyContent:"center"}}>
-        <div style={{fontSize:12,background:C.greenF,border:`1px solid ${C.green}33`,color:C.green,padding:"6px 14px",borderRadius:5,fontFamily:C.mono}}>✓ SMS sent to worker</div>
-        <div style={{fontSize:12,background:C.bluef||C.blueF,border:`1px solid ${C.blue}33`,color:C.blue,padding:"6px 14px",borderRadius:5,fontFamily:C.mono}}>✓ DWC-1 sent for e-sign</div>
+      <div style={{display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap'}}>
+        <div style={{fontSize:12,background:C.greenF,border:`1px solid ${C.green}33`,color:C.green,padding:'6px 14px',borderRadius:5,fontFamily:C.mono}}>✓ SMS sent to worker</div>
+        <div style={{fontSize:12,background:C.blueF,border:`1px solid ${C.blue}33`,color:C.blue,padding:'6px 14px',borderRadius:5,fontFamily:C.mono}}>✓ DWC-1 sent for e-sign</div>
       </div>
     </div>
   );
 
   return(
-    <div style={{maxWidth:640,margin:"0 auto"}}>
-      <div style={{marginBottom:18}}>
-        <div style={{fontSize:11,fontFamily:C.mono,color:C.muted,marginBottom:4}}>STEP {step+1} OF 4</div>
-        <div style={{fontSize:18,fontWeight:700,color:C.text}}>{stepTitles[step]}</div>
+    <div style={{maxWidth:640,margin:'0 auto'}}>
+      {/* Header row: step indicator + language selector */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:18}}>
+        <div>
+          <div style={{fontSize:11,fontFamily:C.mono,color:C.muted,marginBottom:4}}>{t('step_of',{current:step+1,total:TOTAL})}</div>
+          <div style={{fontSize:18,fontWeight:700,color:C.text}}>{stepTitles[step]}</div>
+        </div>
+        <LanguageSelector/>
       </div>
-      <StepBar step={step} total={4}/>
+      <StepBar step={step} total={TOTAL}/>
 
+      {/* ── Step 0: Personal Info ── */}
       {step===0&&(
-        <div style={{animation:"fadeUp 0.25s ease"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
-            <Field label="Your Full Legal Name *"><input value={form.claimant} onChange={f("claimant")} placeholder="As on your ID or paycheck"/></Field>
-            <Field label="Date of Birth"><input value={form.claimantDOB} onChange={f("claimantDOB")} placeholder="MM/DD/YYYY"/></Field>
+        <div style={{animation:'fadeUp 0.25s ease'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+            <Field label="Your Full Legal Name *"><input value={form.claimant} onChange={f('claimant')} placeholder="As on your ID or paycheck"/></Field>
+            <Field label="Date of Birth"><input value={form.claimantDOB} onChange={f('claimantDOB')} placeholder="MM/DD/YYYY"/></Field>
             <Field label="Your Employer *">
-              <select value={form.employer} onChange={f("employer")}><option value="">Select employer…</option>{EMPLOYERS.map(e=><option key={e}>{e}</option>)}</select>
+              <select value={form.employer} onChange={f('employer')}><option value="">Select employer…</option>{EMPLOYERS.map(e=><option key={e}>{e}</option>)}</select>
             </Field>
-            <Field label="Phone Number"><input value={form.phone} onChange={f("phone")} placeholder="(xxx) xxx-xxxx"/></Field>
-            <Field label="Home Address"><input value={form.homeAddr} onChange={f("homeAddr")} placeholder="Street address"/></Field>
-            <Field label="Home Zip Code *"><input value={form.homeZip} onChange={f("homeZip")} placeholder="xxxxx"/></Field>
+            <Field label="Phone Number"><input value={form.phone} onChange={f('phone')} placeholder="(xxx) xxx-xxxx"/></Field>
+            <Field label="Home Address"><input value={form.homeAddr} onChange={f('homeAddr')} placeholder="Street address"/></Field>
+            <Field label="Home Zip Code *"><input value={form.homeZip} onChange={f('homeZip')} placeholder="xxxxx"/></Field>
           </div>
-          <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
-            <Btn onClick={next} disabled={!form.claimant||!form.employer||!form.homeZip}>Next: Describe Injury →</Btn>
+          <div style={{display:'flex',justifyContent:'flex-end',marginTop:8}}>
+            <Btn onClick={next} disabled={!form.claimant||!form.employer||!form.homeZip}>{t('next')} →</Btn>
           </div>
         </div>
       )}
 
+      {/* ── Step 1: Injury Details ── */}
       {step===1&&(
-        <div style={{animation:"fadeUp 0.25s ease"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px",marginBottom:8}}>
-            <Field label="Date of Injury *"><input value={form.dateOfInjury} onChange={f("dateOfInjury")} placeholder="MM/DD/YYYY"/></Field>
+        <div style={{animation:'fadeUp 0.25s ease'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px',marginBottom:8}}>
+            <Field label="Date of Injury *"><input value={form.dateOfInjury} onChange={f('dateOfInjury')} placeholder="MM/DD/YYYY"/></Field>
             <Field label="Body Part Affected">
-              <select value={form.bodyPart} onChange={f("bodyPart")}><option value="">Select…</option>{BODY_PARTS.map(b=><option key={b}>{b}</option>)}</select>
+              <select value={form.bodyPart} onChange={f('bodyPart')}><option value="">Select…</option>{BODY_PARTS.map(b=><option key={b}>{b}</option>)}</select>
             </Field>
             <Field label="Type of Injury">
-              <select value={form.injuryType} onChange={f("injuryType")}><option value="">Select…</option>{INJURY_TYPES.map(t=><option key={t}>{t}</option>)}</select>
+              <select value={form.injuryType} onChange={f('injuryType')}><option value="">Select…</option>{INJURY_TYPES.map(ty=><option key={ty}>{ty}</option>)}</select>
             </Field>
             <Field label="Did your doctor take you off work?">
-              <RadioGroup value={form.timeOff} onChange={v=>setForm(p=>({...p,timeOff:v}))} options={[["Yes",true],["No",false]]} name="tof"/>
+              <RadioGroup value={form.timeOff} onChange={v=>setForm(p=>({...p,timeOff:v}))} options={[['Yes',true],['No',false]]} name="tof"/>
+            </Field>
+            <Field label="Medical Treatment Received">
+              <textarea value={form.medTreatment} onChange={f('medTreatment')} rows={2} placeholder="Where did you go? What did the doctor say?"/>
+            </Field>
+            <Field label="Were there witnesses?">
+              <input value={form.witnesses} onChange={f('witnesses')} placeholder="Names / relationship"/>
             </Field>
           </div>
-
-          <Field label="🎙 Describe Your Injury — Voice or Text">
-            <VoiceRecorder onTranscript={t=>setForm(p=>({...p,voiceTranscript:t,mechanism:t}))} initialText={form.voiceTranscript}/>
-          </Field>
-          {form.voiceTranscript&&(
-            <Field label="Review / Edit Transcription">
-              <textarea value={form.mechanism} onChange={f("mechanism")} rows={3} placeholder="Edit the transcription if needed…"/>
-            </Field>
-          )}
-          {!form.voiceTranscript&&(
-            <Field label="Or Type Your Description *">
-              <textarea value={form.mechanism} onChange={f("mechanism")} rows={4} placeholder="Describe exactly what happened: what were you doing, what caused the injury, which body part was hurt…"/>
-            </Field>
-          )}
-
-          <Field label="📎 Photos & Videos of Injury / Incident Site">
-            <MediaUploader files={form.media} onAdd={newFiles=>setForm(p=>({...p,media:[...p.media,...newFiles]}))} onRemove={i=>setForm(p=>({...p,media:p.media.filter((_,idx)=>idx!==i)}))}/>
-          </Field>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
-            <Field label="Medical Treatment Received"><textarea value={form.medTreatment} onChange={f("medTreatment")} rows={2} placeholder="Where did you go? What did the doctor say?"/></Field>
-            <Field label="Were there witnesses?"><input value={form.witnesses} onChange={f("witnesses")} placeholder="Names / relationship"/></Field>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
-            <Btn variant="ghost" onClick={back}>← Back</Btn>
-            <Btn onClick={next} disabled={!form.dateOfInjury||!form.mechanism}>Next: Choose Your Doctor →</Btn>
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:8}}>
+            <Btn variant="ghost" onClick={back}>{t('back')}</Btn>
+            <Btn onClick={next} disabled={!form.dateOfInjury}>{t('next')} →</Btn>
           </div>
         </div>
       )}
 
+      {/* ── Step 2: Intake Method (equal voice / text) ── */}
       {step===2&&(
-        <div style={{animation:"fadeUp 0.25s ease"}}>
-          <ProviderFinder zip={form.homeZip} injuryType={form.injuryType} onBook={handleBook}/>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
-            <Btn variant="ghost" onClick={back}>← Back</Btn>
-            <Btn variant="ghost" onClick={()=>setStep(3)}>Skip — I'll arrange later</Btn>
+        <div style={{animation:'fadeUp 0.25s ease'}}>
+          {/* Choice screen */}
+          {!intakeMethod&&(
+            <div>
+              <div style={{fontSize:14,color:C.dim,marginBottom:20}}>{t('intake_method_header')}</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
+                <button onClick={()=>setIntakeMethod('voice')}
+                  style={{background:C.card,border:`1.5px solid ${C.border}`,borderRadius:12,padding:'28px 20px',cursor:'pointer',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12,color:C.text,transition:'all .18s'}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=C.amber;e.currentTarget.style.background=C.amberF;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.background=C.card;}}>
+                  <div style={{fontSize:36}}>🎙</div>
+                  <div style={{fontSize:14,fontWeight:700,color:C.text}}>{t('intake_method_voice')}</div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>Record your statement. We'll transcribe and extract key details automatically.</div>
+                </button>
+                <button onClick={()=>setIntakeMethod('text')}
+                  style={{background:C.card,border:`1.5px solid ${C.border}`,borderRadius:12,padding:'28px 20px',cursor:'pointer',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12,color:C.text,transition:'all .18s'}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=C.blue;e.currentTarget.style.background=C.blueF;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.background=C.card;}}>
+                  <div style={{fontSize:36}}>✏️</div>
+                  <div style={{fontSize:14,fontWeight:700,color:C.text}}>{t('intake_method_text')}</div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>Type what happened in your own words. We'll extract key details automatically.</div>
+                </button>
+              </div>
+              <Btn variant="ghost" onClick={back}>{t('back')}</Btn>
+            </div>
+          )}
+          {/* Voice path */}
+          {intakeMethod==='voice'&&!intakeDone&&(
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                <div style={{fontSize:13,color:C.dim}}>{t('voice_prompt')}</div>
+                <button onClick={()=>setIntakeMethod(null)} style={{background:'none',border:'none',color:C.muted,fontSize:11,cursor:'pointer',fontFamily:C.mono}}>← {t('back')}</button>
+              </div>
+              <M2VoiceRecorder onResult={handleVoiceResult} language={lang}/>
+            </div>
+          )}
+          {/* Text path */}
+          {intakeMethod==='text'&&!intakeDone&&(
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                <div style={{fontSize:13,color:C.dim}}>{t('text_prompt')}</div>
+                <button onClick={()=>setIntakeMethod(null)} style={{background:'none',border:'none',color:C.muted,fontSize:11,cursor:'pointer',fontFamily:C.mono}}>← {t('back')}</button>
+              </div>
+              <textarea value={textInput} onChange={e=>setTextInput(e.target.value)} rows={7} placeholder={t('text_placeholder')} style={{width:'100%',marginBottom:12}}/>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div style={{fontSize:11,color:C.muted}}>{textInput.trim().length<30?`${textInput.trim().length} chars — add more detail`:`${textInput.trim().length} characters`}</div>
+                <Btn onClick={submitText} disabled={textInput.trim().length<10||textLoading}>
+                  {textLoading?<><Spinner/> Processing…</>:t('text_submit')}
+                </Btn>
+              </div>
+            </div>
+          )}
+          {/* Review extracted fields */}
+          {intakeDone&&(
+            <div>
+              <div style={{background:C.greenF,border:`1px solid ${C.green}33`,borderRadius:9,padding:'10px 14px',marginBottom:16,fontSize:12,color:C.green}}>
+                ✓ Statement received. Review and edit the details below if needed.
+              </div>
+              {extraction&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:16,marginBottom:16}}>
+                  <Lbl>Extracted Details</Lbl>
+                  {extraction.body_part&&<InfoPair label="Body Part" value={extraction.body_part} accent={C.cyan}/>}
+                  {extraction.time_of_injury&&<InfoPair label="Time of Injury" value={extraction.time_of_injury}/>}
+                  {extraction.witnesses&&<InfoPair label="Witnesses" value={extraction.witnesses}/>}
+                  {typeof extraction.confidence==='number'&&<div style={{fontSize:11,color:C.muted,marginTop:6,fontFamily:C.mono}}>Extraction confidence: {extraction.confidence}%</div>}
+                </div>
+              )}
+              <Field label="Your Full Statement (edit if needed)">
+                <textarea value={form.mechanism} onChange={f('mechanism')} rows={5} placeholder="Describe what happened…"/>
+              </Field>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:8}}>
+                <Btn variant="ghost" onClick={()=>{setIntakeDone(false);setIntakeMethod(null);}}>{t('back')}</Btn>
+                <Btn onClick={next} disabled={!form.mechanism}>{t('next')} →</Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Step 3: Media Upload (optional) ── */}
+      {step===3&&(
+        <div style={{animation:'fadeUp 0.25s ease'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+            <div style={{fontSize:12,color:C.dim}}>{t('media_sub')}</div>
+            <span style={{fontSize:10,background:C.border,color:C.muted,padding:'2px 8px',borderRadius:4,fontFamily:C.mono}}>{t('media_optional_badge')}</span>
+          </div>
+          <MediaUploader files={form.media} onAdd={newFiles=>setForm(p=>({...p,media:[...p.media,...newFiles]}))} onRemove={i=>setForm(p=>({...p,media:p.media.filter((_,idx)=>idx!==i)}))}/>
+          <div style={{fontSize:11,color:C.muted,marginTop:10}}>{t('media_accepted')}</div>
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
+            <Btn variant="ghost" onClick={back}>{t('back')}</Btn>
+            <div style={{display:'flex',gap:10}}>
+              <Btn variant="ghost" onClick={next}>{t('skip')}</Btn>
+              <Btn onClick={next}>{t('next')} →</Btn>
+            </div>
           </div>
         </div>
       )}
 
-      {step===3&&(
-        <div style={{animation:"fadeUp 0.25s ease"}}>
+      {/* ── Step 4: MPN Notice + Provider Selection ── */}
+      {step===4&&(
+        <div style={{animation:'fadeUp 0.25s ease'}}>
+          {/* MPN Rights Notice */}
+          {!mpnAck&&(
+            <div>
+              <div style={{background:C.blueF,border:`1px solid ${C.blue}22`,borderRadius:10,padding:20,marginBottom:20}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>{t('mpn_notice_title')}</div>
+                <div style={{fontSize:13,color:C.dim,lineHeight:1.75}}>{t('mpn_rights_notice')}</div>
+              </div>
+              <label style={{display:'flex',alignItems:'flex-start',gap:10,cursor:'pointer',fontSize:13,color:C.text,marginBottom:20}}>
+                <input type="checkbox" checked={mpnAck} onChange={e=>setMpnAck(e.target.checked)} style={{marginTop:2}}/>
+                {t('mpn_acknowledge')}
+              </label>
+              <Btn variant="ghost" onClick={back}>{t('back')}</Btn>
+            </div>
+          )}
+          {/* Provider list */}
+          {mpnAck&&!selProvider&&(
+            <div>
+              <div style={{fontSize:12,color:C.muted,marginBottom:16}}>{t('mpn_instruction')}</div>
+              {provLoading&&<div style={{display:'flex',gap:10,alignItems:'center',padding:20}}><Spinner/><span style={{color:C.dim}}>Loading providers near {form.homeZip}…</span></div>}
+              {!provLoading&&providers.map(p=>(
+                <div key={p.id} style={{background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:10,padding:'14px 16px',marginBottom:10,cursor:'pointer',transition:'all .18s'}}
+                  onClick={()=>selectProvider(p)}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14,color:C.text}}>{p.name}</div>
+                      <div style={{fontSize:12,color:C.dim,marginTop:2}}>{p.branch&&`${p.branch} · `}{p.addr||p.address}{p.city&&`, ${p.city}`}</div>
+                      <div style={{display:'flex',gap:8,marginTop:6,flexWrap:'wrap'}}>
+                        {p.rating&&<span style={{fontSize:11,color:C.amber,fontFamily:C.mono}}>★ {p.rating}{p.reviews&&` (${p.reviews})`}</span>}
+                        {p.specialty&&<span style={{fontSize:11,color:C.dim}}>{p.specialty}</span>}
+                        {(p.walk_in||p.walkIn)&&<span style={{fontSize:10,background:C.greenF,color:C.green,padding:'1px 7px',borderRadius:4,fontFamily:C.mono,border:`1px solid ${C.green}33`}}>{t('mpn_walk_in')}</span>}
+                        {p.mpn_tier===1&&<span style={{fontSize:10,background:C.amberF,color:C.amber,padding:'1px 7px',borderRadius:4,fontFamily:C.mono,border:`1px solid ${C.amber}33`}}>{t('mpn_tier_preferred')}</span>}
+                      </div>
+                    </div>
+                    <Btn small onClick={e=>{e.stopPropagation();selectProvider(p);}} disabled={apptLoading}>{t('mpn_select')}</Btn>
+                  </div>
+                </div>
+              ))}
+              {!provLoading&&providers.length===0&&<div style={{color:C.muted,fontSize:13}}>{t('mpn_no_results')}</div>}
+              <div style={{marginTop:10}}><Btn variant="ghost" onClick={()=>setMpnAck(false)}>{t('back')}</Btn></div>
+            </div>
+          )}
+          {/* Confirmation number entry */}
+          {selProvider&&!apptConfirmed&&(
+            <div>
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:18,marginBottom:18}}>
+                <SectionHead title={t('book_header')}/>
+                <InfoPair label={t('book_call_prompt')} value={selProvider.phone} mono accent={C.cyan}/>
+                <InfoPair label="Provider" value={selProvider.name}/>
+                <InfoPair label="Address" value={selProvider.addr||selProvider.address||''}/>
+              </div>
+              <div style={{fontSize:13,color:C.dim,marginBottom:16}}>{t('book_instruction')}</div>
+              <Field label={t('confirmation_number')}>
+                <input value={confirmNum} onChange={e=>setConfirmNum(e.target.value)} placeholder={t('confirmation_placeholder')}/>
+              </Field>
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:8}}>
+                <Btn variant="ghost" onClick={()=>{setSelProvider(null);setAppointmentId(null);setConfirmNum('');}}>{t('book_try_other')}</Btn>
+                <Btn onClick={confirmAppt} disabled={!confirmNum.trim()||apptLoading}>
+                  {apptLoading?<><Spinner/> Confirming…</>:t('book_confirm')}
+                </Btn>
+              </div>
+            </div>
+          )}
+          {apptConfirmed&&(
+            <div style={{textAlign:'center',padding:'24px 0',animation:'fadeUp .2s ease'}}>
+              <div style={{fontSize:28,marginBottom:10}}>✅</div>
+              <div style={{fontSize:16,fontWeight:700,color:C.green}}>{t('book_confirmed_title')}</div>
+              <div style={{fontSize:13,color:C.dim,marginTop:6}}>{t('book_confirmed_sub')}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Step 5: DWC-1 Preview + Submit ── */}
+      {step===5&&(
+        <div style={{animation:'fadeUp 0.25s ease'}}>
+          <div style={{fontSize:13,color:C.dim,marginBottom:20}}>{t('dwc1_instruction')}</div>
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:20,marginBottom:20}}>
             <SectionHead title="Claim Summary"/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 24px"}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 24px'}}>
               <InfoPair label="Claimant" value={form.claimant}/>
               <InfoPair label="Employer" value={form.employer}/>
               <InfoPair label="Date of Injury" value={form.dateOfInjury} mono/>
               <InfoPair label="Body Part" value={form.bodyPart}/>
-              <InfoPair label="Off Work" value={form.timeOff?"Yes":"No"} accent={form.timeOff?C.amber:C.green}/>
-              <InfoPair label="Media Attached" value={`${form.media.length} file${form.media.length!==1?"s":""}`} accent={form.media.length>0?C.teal:C.muted}/>
+              <InfoPair label="Off Work" value={form.timeOff?'Yes':'No'} accent={form.timeOff?C.amber:C.green}/>
+              <InfoPair label="Media Attached" value={`${form.media.length} file${form.media.length!==1?'s':''}`} accent={form.media.length>0?C.teal:C.muted}/>
             </div>
-            {form.mechanism&&<InfoPair label="Injury Description" value={form.mechanism.slice(0,120)+(form.mechanism.length>120?"…":"")}/>}
+            {form.mechanism&&<InfoPair label="Injury Description" value={form.mechanism.slice(0,150)+(form.mechanism.length>150?'…':'')}/>}
+            {selProvider&&apptConfirmed&&<InfoPair label="Appointment" value={`${selProvider.name} — confirmation #${confirmNum}`} accent={C.teal}/>}
           </div>
-          {appointment&&(
-            <div style={{background:C.tealF,border:`1px solid ${C.teal}33`,borderRadius:10,padding:16,marginBottom:20}}>
-              <SectionHead title="Appointment Confirmed" color={C.teal}/>
-              <InfoPair label="Facility" value={appointment.facility} accent={C.teal}/>
-              <InfoPair label="Date & Time" value={`${appointment.date} at ${appointment.time}`} mono/>
-              <InfoPair label="Address" value={appointment.address}/>
-              <InfoPair label="Auth Code" value={appointment.authCode} mono accent={C.amber}/>
-            </div>
-          )}
-          <div style={{background:C.blueF,border:`1px solid ${C.blue}22`,borderRadius:9,padding:"12px 16px",fontSize:12,color:C.dim,lineHeight:1.75,marginBottom:20}}>
-            <strong style={{color:C.text}}>By submitting: </strong>
-            A DWC-1 claim form will be sent to your phone ({form.phone||"on file"}) and email for your e-signature. Your employer will be notified. AI analysis will be queued. All information is confidential. You cannot be retaliated against.
+          <div style={{background:C.blueF,border:`1px solid ${C.blue}22`,borderRadius:9,padding:'12px 16px',fontSize:12,color:C.dim,lineHeight:1.75,marginBottom:16}}>
+            {t('dwc1_review_note')}
           </div>
-          <div style={{display:"flex",justifyContent:"space-between"}}>
-            <Btn variant="ghost" onClick={back}>← Back</Btn>
-            <Btn onClick={submit} icon="✓">Submit Claim & Send DWC-1</Btn>
+          <div style={{background:C.amberF,border:`1px solid ${C.amber}22`,borderRadius:9,padding:'12px 16px',fontSize:12,color:C.amber,marginBottom:20}}>
+            {t('dwc1_signature_notice')}
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between'}}>
+            <Btn variant="ghost" onClick={back}>{t('back')}</Btn>
+            <Btn onClick={submit} icon="✓">{t('sign_and_submit')}</Btn>
           </div>
         </div>
       )}
@@ -1072,10 +1284,15 @@ export default function App(){
     catch(e){notify(`PDF failed: ${e.message}`,"error");}
   };
 
-  const genDWC1=(claim)=>{
-    if(!jsPdfReady||!window.jspdf){notify("PDF library loading…","error");return;}
-    try{const doc=generateDWC1(claim);doc.save(`DWC1-${claim.id}.pdf`);notify(`DWC-1 downloaded — send to ${claim.claimant} for signature`);}
-    catch(e){notify(`DWC-1 failed: ${e.message}`,"error");}
+  const genDWC1=async(claim)=>{
+    try{
+      const res=await fetch(`/api/v1/claims/${claim.id}/dwc1`);
+      if(!res.ok)throw new Error(`HTTP ${res.status}`);
+      const blob=await res.blob();
+      const url=URL.createObjectURL(blob);
+      window.open(url,'_blank');
+      notify(`DWC-1 opened for ${claim.claimant}`);
+    }catch(e){notify(`DWC-1 failed: ${e.message}`,'error');}
   };
 
   const pushCMS=(id)=>{

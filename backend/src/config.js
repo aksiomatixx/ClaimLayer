@@ -40,6 +40,38 @@ const config = {
     baseUrl: 'https://api.lob.com/v1',
   },
 
+  sendgrid: {
+    apiKey:                    process.env.SENDGRID_API_KEY,
+    templateIntakeComplete:    process.env.SENDGRID_TEMPLATE_INTAKE_COMPLETE,
+    fromEmail:                 'claims@homecaretpa.com',
+  },
+
+  twilio: {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    authToken:  process.env.TWILIO_AUTH_TOKEN,
+    apiKey:     process.env.TWILIO_API_KEY,
+    apiSecret:  process.env.TWILIO_API_SECRET,
+  },
+
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY,
+  },
+
+  adjuster: {
+    name:  process.env.ADJUSTER_NAME  || 'Akash Kumar',
+    phone: process.env.ADJUSTER_PHONE || '(800) XXX-XXXX',
+    email: process.env.ADJUSTER_EMAIL || 'akash.kumar@homecaretpa.com',
+  },
+
+  magicLink: {
+    secret:  process.env.MAGIC_LINK_SECRET || process.env.JWT_SECRET,
+    ttlHours: 72,
+  },
+
+  frontend: {
+    url: process.env.FRONTEND_URL || 'http://localhost:5173',
+  },
+
   webhooks: {
     dxfSecret:    process.env.DXF_WEBHOOK_SECRET,
     enlyteSecret: process.env.ENLYTE_WEBHOOK_SECRET,
