@@ -1,0 +1,82 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths: ["backend/**", ".github/workflows/ci.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["backend/**"]
+
+jobs:
+  test:
+    name: Unit + Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── Python (mock servers) ────────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install mock server dependencies
+        run: pip install fastapi uvicorn pydantic
+
+      # ── Start mock ADP (port 8001) ───────────────────────────────────────────
+      - name: Start mock ADP
+        run: |
+          python backend/mocks/mock_adp.py &
+          echo "ADP_PID=$!" >> $GITHUB_ENV
+          # Wait until the health endpoint responds
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:8001/health && break
+            sleep 1
+          done
+
+      # ── Start mock FileHandler (port 8002) ───────────────────────────────────
+      - name: Start mock FileHandler
+        run: |
+          python backend/mocks/mock_filehandler.py &
+          echo "FH_PID=$!" >> $GITHUB_ENV
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:8002/health && break
+            sleep 1
+          done
+
+      # ── Node.js ──────────────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      # ── Run tests ────────────────────────────────────────────────────────────
+      - name: Run tests
+        working-directory: backend
+        env:
+          NODE_ENV: test
+          # JWT — static value for tests only, not used in production
+          JWT_SECRET: ci-test-jwt-secret-not-for-production
+          # Mock servers
+          FILEHANDLER_API_KEY: mock-fh-key
+          FILEHANDLER_BASE_URL: http://localhost:8002
+          ADP_CLIENT_ID: mock
+          ADP_CLIENT_SECRET: mock
+          ADP_AUTH_URL: http://localhost:8001/auth/oauth/v2/token
+          ADP_BASE_URL: http://localhost:8001
+          # Real Claude API — injected from repository secret
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm test -- --forceExit --testTimeout=30000
+
+      # ── Stop mocks ───────────────────────────────────────────────────────────
+      - name: Stop mock servers
+        if: always()
+        run: |
+          kill $ADP_PID $FH_PID 2>/dev/null || true
