@@ -1,0 +1,219 @@
+'use strict';
+
+/**
+ * FileHandler Enterprise client.
+ *
+ * All base-URL and auth config comes from environment variables so this client
+ * works unchanged against both the real JW Software API and a local mock server:
+ *
+ *   FILEHANDLER_BASE_URL=http://localhost:4001/filehandler/v1
+ *   FILEHANDLER_API_KEY=mock-key
+ *
+ * Retry policy (from integrations.md): exponential back-off on 429 / 5xx.
+ *   Attempt 1 → immediate
+ *   Attempt 2 → wait 1 s
+ *   Attempt 3 → wait 2 s
+ *   Attempt 4 → wait 4 s
+ */
+
+const axios  = require('axios');
+const FormData = require('form-data');
+const config = require('../config');
+const logger = require('../logger');
+
+const MAX_ATTEMPTS = 4;
+
+// ── Retry helper ──────────────────────────────────────────────────────────────
+async function withRetry(fn) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status     = err.response?.status;
+      const retryable  = status === 429 || (status >= 500 && status <= 599);
+
+      if (!retryable || attempt === MAX_ATTEMPTS) throw err;
+
+      const delayMs = Math.pow(2, attempt - 1) * 1000; // 1 s, 2 s, 4 s
+      logger.warn({
+        msg:     'FileHandler retry',
+        attempt,
+        status,
+        delayMs,
+        url:     err.config?.url,
+      });
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
+// ── Axios instance ────────────────────────────────────────────────────────────
+function makeClient() {
+  return axios.create({
+    baseURL:  config.filehandler.baseUrl,
+    timeout:  15_000,
+    headers: {
+      Authorization:  `Bearer ${config.filehandler.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+// ── Audit every call ──────────────────────────────────────────────────────────
+function logCall({ endpoint, status, latencyMs, claimId }) {
+  logger.info({ integration: 'filehandler', endpoint, status, latencyMs, claimId });
+}
+
+async function request(method, path, data, claimId) {
+  const start = Date.now();
+  try {
+    const res = await withRetry(() => makeClient()[method](path, data));
+    logCall({ endpoint: path, status: res.status, latencyMs: Date.now() - start, claimId });
+    return res.data;
+  } catch (err) {
+    logCall({
+      endpoint:  path,
+      status:    err.response?.status ?? 0,
+      latencyMs: Date.now() - start,
+      claimId,
+    });
+    throw err;
+  }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Create a new claim in FileHandler.
+ * Returns: { claimId, claimNumber, status }
+ */
+async function createClaim(data) {
+  return request('post', '/claims', {
+    claimNumber:       data.claimNumber,
+    claimantFirstName: data.firstName,
+    claimantLastName:  data.lastName,
+    claimantDOB:       data.dob,
+    employerName:      data.employerName,
+    dateOfInjury:      data.dateOfInjury,
+    bodyPart:          data.bodyPart,
+    injuryType:        data.injuryType,
+    stateOfJurisdiction: 'CA',
+    lineOfBusiness:    'WC',
+  });
+}
+
+/**
+ * Set / update reserves on an existing FileHandler claim.
+ * setBy:      'AI_ENGINE' | 'ADJUSTER' | 'SYSTEM'
+ * approvedBy: adjuster email, or null when set by AI_ENGINE pending approval
+ */
+async function setReserves(fhClaimId, { medical, indemnity, expense, reason }, setBy, approvedBy) {
+  return request('post', `/claims/${fhClaimId}/reserves`, {
+    medicalReserve:   medical,
+    indemnityReserve: indemnity,
+    expenseReserve:   expense,
+    reason,
+    setBy,
+    approvedBy: approvedBy ?? null,
+  }, fhClaimId);
+}
+
+/**
+ * Attach a PDF document to a FileHandler claim.
+ * docType: 'AI_REASONING_PDF' | 'DWC1' | 'PR2' | 'RFA' | 'AUTHORIZATION' | 'NOTICE'
+ * fileBuffer: Buffer containing the PDF bytes
+ */
+async function attachDocument(fhClaimId, fileBuffer, docType, description, receivedDate) {
+  const form = new FormData();
+  form.append('file', fileBuffer, {
+    filename:    `${docType}.pdf`,
+    contentType: 'application/pdf',
+  });
+  form.append('docType',      docType);
+  form.append('description',  description);
+  form.append('receivedDate', receivedDate);
+
+  const start = Date.now();
+  try {
+    const res = await withRetry(() =>
+      axios.post(
+        `${config.filehandler.baseUrl}/claims/${fhClaimId}/documents`,
+        form,
+        {
+          timeout: 30_000,
+          headers: {
+            Authorization: `Bearer ${config.filehandler.apiKey}`,
+            ...form.getHeaders(),
+          },
+        }
+      )
+    );
+    logCall({ endpoint: `/claims/${fhClaimId}/documents`, status: res.status, latencyMs: Date.now() - start, claimId: fhClaimId });
+    return res.data;
+  } catch (err) {
+    logCall({ endpoint: `/claims/${fhClaimId}/documents`, status: err.response?.status ?? 0, latencyMs: Date.now() - start, claimId: fhClaimId });
+    throw err;
+  }
+}
+
+/**
+ * Create a diary entry on a FileHandler claim.
+ * diary: { type, dueDate, assignedTo, priority, notes }
+ * Returns: { diaryId, status }
+ */
+async function createDiary(fhClaimId, diary) {
+  return request('post', `/claims/${fhClaimId}/diaries`, {
+    diaryType:       diary.type,
+    dueDate:         diary.dueDate,
+    assignedTo:      diary.assignedTo,
+    priority:        diary.priority,
+    notes:           diary.notes,
+    autoGeneratedBy: 'DIARY_ENGINE',
+  }, fhClaimId);
+}
+
+/**
+ * Mark a diary entry as completed.
+ */
+async function completeDiary(fhClaimId, diaryId, resolutionNotes, completedBy = 'SYSTEM') {
+  return request('patch', `/claims/${fhClaimId}/diaries/${diaryId}`, {
+    status:          'completed',
+    completedDate:   new Date().toISOString().split('T')[0],
+    completedBy,
+    resolutionNotes,
+  }, fhClaimId);
+}
+
+/**
+ * Record a benefit payment on a FileHandler claim.
+ * payment: { type, amount, payee, taxId, periodFrom, periodTo, checkDate, memo }
+ */
+async function recordPayment(fhClaimId, payment) {
+  return request('post', `/claims/${fhClaimId}/payments`, {
+    paymentType: payment.type,   // 'TD' | 'Med' | 'Expense'
+    amount:      payment.amount,
+    payee:       payment.payee,
+    payeeTaxId:  payment.taxId,
+    periodFrom:  payment.periodFrom,
+    periodTo:    payment.periodTo,
+    checkDate:   payment.checkDate,
+    memo:        payment.memo,
+  }, fhClaimId);
+}
+
+/**
+ * Retrieve the full financial audit ledger for a claim.
+ */
+async function getLedger(fhClaimId) {
+  return request('get', `/claims/${fhClaimId}/ledger`, undefined, fhClaimId);
+}
+
+module.exports = {
+  createClaim,
+  setReserves,
+  attachDocument,
+  createDiary,
+  completeDiary,
+  recordPayment,
+  getLedger,
+};
