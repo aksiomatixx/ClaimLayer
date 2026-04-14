@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchClaims, fetchClaim, triggerAnalysis, approveReserves, updateClaimStatus, fetchDiaries, ensureDevSession } from './services/claims.js';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -68,11 +70,7 @@ const NOTICE_TYPES=[
   {id:"dwc9",label:"DWC-9 — Notice of Payments",trigger:"Each payment",urgency:"With each payment"},
 ];
 
-const INIT_CLAIMS=[
-  {id:"HHW-2026-041",claimant:"Maria Santos",claimantDOB:"03/15/1981",employer:"BrightCare Home Health",dateOfInjury:"04/01/2026",bodyPart:"Lumbar Spine / Lower Back",injuryType:"Lifting Injury",mechanism:"Lifted 180lb non-ambulatory patient without mechanical lift assist during morning transfer. Immediate sharp pop with left leg radiculopathy.",medTreatment:"ED 4/1 — L4-L5 disc herniation. MRI authorized. Off work.",timeOff:true,priorClaims:"1 prior low back 2023 — C&R $18,500",witnesses:"Client's daughter",aww:750.75,tdRate:500.50,homeZip:"90057",homeAddr:"1842 W 7th St, Los Angeles CA 90057",phone:"(213) 555-0142",media:[],voiceTranscript:"",status:"pending",aiAnalysis:null,adminDecision:null,pdfGenerated:false,cmsPushed:false,appointment:null,dwc1Signed:false,noticeLog:[],filedAt:"04/02/2026 9:15 AM",filedBy:"employer"},
-  {id:"HHW-2026-038",claimant:"James Okonkwo",claimantDOB:"07/22/1975",employer:"ComfortFirst Healthcare",dateOfInjury:"03/28/2026",bodyPart:"Right Hand / Wrist",injuryType:"Needlestick / Sharps",mechanism:"Needlestick recapping IV catheter. Client Hep-C positive with elevated viral load.",medTreatment:"Urgent care same day. Prophylactic antiviral initiated.",timeOff:false,priorClaims:"None",witnesses:"None",aww:1120.00,tdRate:746.67,homeZip:"90008",homeAddr:"4320 Crenshaw Blvd Apt 8, Los Angeles CA 90008",phone:"(323) 555-0198",media:[],voiceTranscript:"",status:"pending",aiAnalysis:null,adminDecision:null,pdfGenerated:false,cmsPushed:false,appointment:null,dwc1Signed:false,noticeLog:[],filedAt:"04/01/2026 2:30 PM",filedBy:"employee"},
-  {id:"HHW-2026-035",claimant:"Lupe Hernandez",claimantDOB:"11/08/1990",employer:"SunRise Home Care",dateOfInjury:"03/20/2026",bodyPart:"Left Knee",injuryType:"Slip & Fall",mechanism:"Slipped on wet bathroom tile assisting patient. Left knee struck tile. Immediate swelling.",medTreatment:"Orthopedic consult 3/22. MRI: medial meniscus tear grade II. Surgical consult scheduled.",timeOff:true,priorClaims:"None",witnesses:"Patient present",aww:621.00,tdRate:414.00,homeZip:"91405",homeAddr:"7715 Sepulveda Blvd, Van Nuys CA 91405",phone:"(818) 555-0077",media:[],voiceTranscript:"",status:"ai_complete",aiAnalysis:{compensability:"Likely Compensable",compensabilityScore:94,suggestedMedicalReserve:35000,suggestedIndemnityReserve:22000,suggestedExpenseReserve:3200,priority:"High",redFlags:["Surgical case — medial meniscus tear on MRI","Extended TTD if arthroscopic surgery"],nextActions:["Issue DWC-1","Pre-authorize surgical consult","Initiate UR when RFA received","Set TD indemnity"],analysisNotes:"Slip on wet tile during ADL assistance — clearly AOE/COE. Meniscus tear in 35-year-old typically requires arthroscopic repair. Reserve at surgical threshold.",medicalAppointment:{providerType:"Orthopedic Surgery",urgency:"Within 24 hours",recommendedFacility:"SoCal Ortho & Sports — Koreatown",facilityAddress:"3650 W 6th St Ste 400, Los Angeles CA 90020",schedulingAction:"Auth code MPN-2026-9241 issued. Call (213) 383-9898 to schedule."}},adminDecision:null,pdfGenerated:false,cmsPushed:false,appointment:{facility:"SoCal Ortho & Sports — Koreatown",date:"Apr 22, 2026",time:"10:30 AM",authCode:"MPN-2026-9241",confirmed:true},dwc1Signed:true,noticeLog:[{type:"dwc7",sentAt:"03/21/2026 9:00 AM",method:"lob",lobId:"ltr_4kX9m2"}],filedAt:"03/21/2026 8:00 AM",filedBy:"employer"},
-];
+// INIT_CLAIMS removed in M3 — admin dashboard uses live backend data via React Query
 
 // ═══════════════════════════════════════════════════════════
 // UTILITIES
@@ -378,33 +376,7 @@ function ProviderFinder({zip,injuryType,onBook}){
   );
 }
 
-function generateReasoningPDF(claim){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
-  const W=210,M=18,CW=W-M*2; let y=M;
-  doc.setFillColor(10,22,34); doc.rect(0,0,W,26,"F");
-  doc.setFillColor(245,158,11); doc.rect(0,0,4,26,"F");
-  doc.setFontSize(15);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text("HomeCare TPA — AI Reasoning Document",10,12);
-  doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(100,130,160);
-  doc.text(`${claim.id} | ${claim.claimant} | ${claim.employer}`,10,19);
-  doc.text(`Generated: ${new Date().toLocaleString()}`,W-M,19,{align:"right"}); y=34;
-  const a=claim.aiAnalysis;
-  if(!a){doc.setFontSize(10);doc.setTextColor(200,200,200);doc.text("No AI analysis on file.",M,y);return doc;}
-  doc.setFontSize(10);doc.setFont("helvetica","bold");doc.setTextColor(245,158,11);
-  doc.text(`Compensability: ${a.compensability} (${a.compensabilityScore}%)  |  Priority: ${a.priority}`,M,y); y+=8;
-  doc.setFontSize(10);doc.setFont("helvetica","bold");doc.setTextColor(34,211,238);
-  doc.text(`Suggested Reserves: Medical ${fmt$(a.suggestedMedicalReserve)}  Indemnity ${fmt$(a.suggestedIndemnityReserve)}  Expense ${fmt$(a.suggestedExpenseReserve)}`,M,y); y+=8;
-  doc.setDrawColor(26,46,69);doc.line(M,y,W-M,y);y+=5;
-  if(a.redFlags?.length){doc.setFontSize(8);doc.setFont("helvetica","bold");doc.setTextColor(240,79,79);doc.text("RED FLAGS:",M,y);y+=4;a.redFlags.forEach(f=>{doc.setFont("helvetica","normal");doc.setTextColor(248,113,113);const ls=doc.splitTextToSize("⚠ "+f,CW);doc.text(ls,M,y);y+=ls.length*4+2;});}
-  y+=2;doc.setFontSize(8);doc.setFont("helvetica","bold");doc.setTextColor(74,141,240);doc.text("ACTIONS:",M,y);y+=4;
-  a.nextActions?.forEach((act,i)=>{doc.setFont("helvetica","normal");doc.setTextColor(216,232,245);const ls=doc.splitTextToSize(`${i+1}. ${act}`,CW);doc.text(ls,M,y);y+=ls.length*4+2;});
-  y+=4;doc.setFontSize(8);doc.setFont("helvetica","normal");doc.setTextColor(124,154,181);
-  const nl=doc.splitTextToSize(a.analysisNotes,CW);doc.text(nl,M,y);
-  doc.setFontSize(7);doc.setTextColor(60,90,110);
-  doc.text("AI analysis is advisory. Final authority rests with the supervising adjuster.",W/2,285,{align:"center"});
-  return doc;
-}
+// generateReasoningPDF moved to backend in M3 — see GET /api/v1/claims/:id/reasoning-pdf
 
 function generateNoticePDF(claim,noticeType){
   const {jsPDF}=window.jspdf;
@@ -965,36 +937,118 @@ function NoticeCenter({claims,jsPdfReady,notify}){
 }
 
 // ═══════════════════════════════════════════════════════════
-// ADMIN DASHBOARD
+// ACTION QUEUE (M3) — claims needing immediate attention
 // ═══════════════════════════════════════════════════════════
-async function runAIAnalysis(claim){
-  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:"You are a senior CA workers' compensation adjuster for home health workers. Respond ONLY with valid JSON, no markdown.",messages:[{role:"user",content:`Analyze this CA WC claim:
-ID:${claim.id} Claimant:${claim.claimant} DOI:${claim.dateOfInjury} Body:${claim.bodyPart} Mechanism:${claim.mechanism} Medical:${claim.medTreatment} OffWork:${claim.timeOff} AWW:${claim.aww} PriorClaims:${claim.priorClaims}
+const ACTION_STATUSES=new Set(["new_claim","intake_complete","under_investigation"]);
+const AGE_MS=d=>Date.now()-new Date(d).getTime();
+const DAYS=ms=>Math.floor(ms/(86400*1000));
+const PRI_ORDER={Critical:0,High:1,Medium:2,Low:3};
 
-Return ONLY JSON: {"compensability":"Likely Compensable|Questionable|Likely Non-Compensable","compensabilityScore":0-100,"suggestedMedicalReserve":int,"suggestedIndemnityReserve":int,"suggestedExpenseReserve":int,"priority":"Critical|High|Medium|Low","redFlags":["str"],"nextActions":["str"],"analysisNotes":"str","medicalAppointment":{"providerType":"str","urgency":"Immediate|Within 24 hours|Within 72 hours|Routine","recommendedFacility":"str","facilityAddress":"str","schedulingAction":"str"}}`}]})});
-  if(!res.ok) throw new Error(`API ${res.status}`);
-  const d=await res.json();
-  return JSON.parse((d.content?.find(b=>b.type==="text")?.text||"{}").replace(/```json|```/g,"").trim());
+function ActionQueue({claims,onSelect}){
+  const today=new Date().toISOString().split('T')[0];
+  const actionable=claims.filter(c=>{
+    if(ACTION_STATUSES.has(c.status)) return true;
+    // Any overdue diary
+    return (c.diaries||[]).some(d=>d.status==='open'&&d.dueDate<today);
+  }).sort((a,b)=>{
+    const pa=PRI_ORDER[a.aiAnalysis?.priority]??4;
+    const pb=PRI_ORDER[b.aiAnalysis?.priority]??4;
+    if(pa!==pb) return pa-pb;
+    return new Date(a.createdAt)-new Date(b.createdAt);
+  });
+
+  const STATUS_CFG_LIVE={
+    new_claim:{label:"New Claim",color:"#f59e0b",bg:"#1a1100",bd:"#f59e0b33"},
+    intake_complete:{label:"Intake Done",color:"#4a8df0",bg:"#06122a",bd:"#4a8df033"},
+    under_investigation:{label:"Investigation",color:"#a78bfa",bg:"#0e0920",bd:"#a78bfa33"},
+  };
+  function LiveBadge({status}){
+    const c=STATUS_CFG_LIVE[status]||{label:status,color:C.muted,bg:C.card,bd:C.border};
+    return <span style={{display:"inline-block",background:c.bg,color:c.color,border:`1px solid ${c.bd}`,padding:"3px 9px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c.label}</span>;
+  }
+
+  if(actionable.length===0){
+    return(
+      <div style={{textAlign:"center",padding:"56px 20px",color:C.muted,animation:"fadeUp .3s ease"}}>
+        <div style={{fontSize:28,marginBottom:12}}>✓</div>
+        <div style={{fontSize:14,fontWeight:600,color:C.dim}}>No claims require immediate action</div>
+        <div style={{fontSize:12,marginTop:6}}>All active claims are on track</div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+      <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>
+        ACTION QUEUE — {actionable.length} CLAIM{actionable.length!==1?"S":""} NEED ATTENTION
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead>
+            <tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+              {["Claim #","Employee","DOI","Status","AI Priority","Age",""].map(h=>(
+                <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {actionable.map((c,i)=>{
+              const overdueDiaries=(c.diaries||[]).filter(d=>d.status==='open'&&d.dueDate<today);
+              const emp=c.employee||{};
+              const empName=`${emp.firstName||c.claimant||''} ${emp.lastName||''}`.trim()||c.claimant||c.id;
+              return(
+                <tr key={c.id} className="rh" onClick={()=>onSelect(c.id||c.claimNumber)}
+                    style={{borderBottom:i<actionable.length-1?`1px solid ${C.border}`:"none",animation:`fadeUp .3s ease ${i*.04}s both`}}>
+                  <td style={{padding:"12px 13px"}}><span style={{fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{c.claimNumber||c.id}</span></td>
+                  <td style={{padding:"12px 13px",fontSize:13,fontWeight:500}}>{empName}</td>
+                  <td style={{padding:"12px 13px",fontSize:12,fontFamily:C.mono,color:C.dim}}>{c.dateOfInjury}</td>
+                  <td style={{padding:"12px 13px"}}><LiveBadge status={c.status}/></td>
+                  <td style={{padding:"12px 13px"}}>
+                    {c.aiAnalysis
+                      ?<span style={{fontFamily:C.mono,fontSize:12,fontWeight:700,color:PRI_COLOR[c.aiAnalysis.priority]}}>{c.aiAnalysis.priority}</span>
+                      :<span style={{color:C.muted,fontSize:11}}>Pending</span>
+                    }
+                  </td>
+                  <td style={{padding:"12px 13px"}}>
+                    <span style={{fontFamily:C.mono,fontSize:12,color:DAYS(AGE_MS(c.createdAt))>7?C.amber:C.dim}}>
+                      {c.createdAt?`${DAYS(AGE_MS(c.createdAt))}d`:"—"}
+                    </span>
+                    {overdueDiaries.length>0&&<span style={{marginLeft:6,fontSize:10,background:C.redF,color:C.red,border:`1px solid ${C.red}33`,padding:"1px 6px",borderRadius:4,fontFamily:C.mono}}>⚠ {overdueDiaries.length} overdue</span>}
+                  </td>
+                  <td style={{padding:"12px 13px"}}><Btn small variant="ghost" onClick={()=>onSelect(c.id||c.claimNumber)}>Review →</Btn></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
+// ═══════════════════════════════════════════════════════════
+// ADMIN DASHBOARD
+// ═══════════════════════════════════════════════════════════
 function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,jsPdfReady}){
-  const pending=claims.filter(c=>c.status==="pending").length;
-  const aiReady=claims.filter(c=>c.status==="ai_complete").length;
-  const res=claims.reduce((s,c)=>c.aiAnalysis?s+(c.aiAnalysis.suggestedMedicalReserve||0)+(c.aiAnalysis.suggestedIndemnityReserve||0)+(c.aiAnalysis.suggestedExpenseReserve||0):s,0);
-  const appts=claims.filter(c=>c.appointment?.confirmed).length;
+  const [tab,setTab]=useState("queue");
+  const today=new Date().toISOString().split('T')[0];
+  const actionCount=claims.filter(c=>["new_claim","intake_complete","under_investigation"].includes(c.status)||(c.diaries||[]).some(d=>d.status==='open'&&d.dueDate<today)).length;
+  const totalReserves=claims.reduce((s,c)=>c.aiAnalysis?s+(c.aiAnalysis.suggestedMedicalReserve||0)+(c.aiAnalysis.suggestedIndemnityReserve||0)+(c.aiAnalysis.suggestedExpenseReserve||0):s,0);
+  const withAI=claims.filter(c=>c.aiAnalysis).length;
 
   return(
     <div style={{paddingTop:32,animation:"fadeUp .3s ease"}}>
-      <div style={{marginBottom:26}}><h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Claims Console</h1><p style={{color:C.muted,fontSize:13}}>Review AI decisions · Generate PDFs · Push to FileHandler · Send notices via Lob.com</p></div>
-      <div style={{display:"flex",gap:14,marginBottom:30}}>
+      <div style={{marginBottom:26}}><h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Claims Console</h1><p style={{color:C.muted,fontSize:13}}>Action Queue · AI Analysis · Reserve Approval · FileHandler Sync</p></div>
+      <div style={{display:"flex",gap:14,marginBottom:24}}>
         <StatCard label="Total Claims" value={claims.length} delay={0}/>
-        <StatCard label="Awaiting AI" value={pending} accent={pending>0?C.amber:C.green} sub="Need analysis" delay={.05}/>
-        <StatCard label="AI Ready" value={aiReady} accent={aiReady>0?C.blue:C.green} sub="Pending decision" delay={.1}/>
-        <StatCard label="AI Reserves" value={res>0?fmt$(res):"—"} accent={C.purple} sub="Total suggested" delay={.15}/>
-        <StatCard label="Appointments" value={appts} accent={C.teal} sub="Confirmed" delay={.2}/>
+        <StatCard label="Need Action" value={actionCount} accent={actionCount>0?C.amber:C.green} sub="In queue" delay={.05}/>
+        <StatCard label="AI Analyzed" value={withAI} accent={withAI>0?C.blue:C.muted} sub="Of total claims" delay={.1}/>
+        <StatCard label="AI Reserves" value={totalReserves>0?fmt$(totalReserves):"—"} accent={C.purple} sub="Total suggested" delay={.15}/>
       </div>
-      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
-        <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>AI DECISION QUEUE — {claims.length} CLAIMS</div>
+      <Tabs tabs={[{key:"queue",label:`Action Queue (${actionCount})`},{key:"all",label:`All Claims (${claims.length})`}]} active={tab} onChange={setTab}/>
+      {tab==="queue"&&<ActionQueue claims={claims} onSelect={onSelect}/>}
+      {tab==="all"&&<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>ALL CLAIMS — {claims.length}</div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>{["Claim ID","Claimant","Employer","DOI","Injury","Status","Priority","Reserve","Appt","Media","Actions"].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
@@ -1014,10 +1068,8 @@ function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,
                   <td style={{padding:"12px 13px"}}>{c.media?.length>0?<span style={{fontSize:10,background:C.blueF,color:C.blue,padding:"2px 8px",borderRadius:4,fontFamily:C.mono}}>📎 {c.media.length}</span>:c.voiceTranscript?<span style={{fontSize:10,color:C.rose}}>🎙</span>:<span style={{color:C.muted}}>—</span>}</td>
                   <td style={{padding:"12px 13px"}} onClick={e=>e.stopPropagation()}>
                     <div style={{display:"flex",gap:5}}>
-                      {c.status==="pending"&&<Btn small variant="outline" onClick={()=>onAnalyze(c)} disabled={aiLoading===c.id}>{aiLoading===c.id?<Spinner/>:"Run AI"}</Btn>}
-                      {c.aiAnalysis&&!c.pdfGenerated&&jsPdfReady&&<Btn small variant="teal" onClick={()=>onGenPDF(c)}>PDF</Btn>}
-                      {c.pdfGenerated&&!c.cmsPushed&&<Btn small variant="ghost" onClick={()=>onPushCMS(c.id)}>CMS</Btn>}
-                      <Btn small variant="ghost" onClick={()=>onSelect(c.id)}>Review</Btn>
+                      {c.aiAnalysis&&<Btn small variant="teal" onClick={()=>onGenPDF(c)}>PDF</Btn>}
+                      <Btn small variant="ghost" onClick={()=>onSelect(c.id||c.claimNumber)}>Review</Btn>
                     </div>
                   </td>
                 </tr>
@@ -1025,114 +1077,253 @@ function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,
             })}</tbody>
           </table>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════
-// CLAIM DRAWER (Admin)
+// CLAIM DRAWER (Admin) — M3: live data, reserve approval, diaries, status
 // ═══════════════════════════════════════════════════════════
-function ClaimDrawer({claim,onClose,onDecision,onAnalyze,onGenPDF,onPushCMS,aiLoading,jsPdfReady,onGenDWC1}){
-  const [note,setNote]=useState(claim.adminDecision?.note||"");
+const VALID_NEXT={
+  new_claim:["intake_complete","denied"],
+  intake_complete:["under_investigation","accepted"],
+  under_investigation:["accepted","denied"],
+  accepted:["active_medical"],
+  active_medical:["p_and_s","litigated"],
+  p_and_s:["pd_evaluation","litigated"],
+  pd_evaluation:["settlement_discussions","litigated"],
+  settlement_discussions:["closed"],
+  litigated:["settlement_discussions","closed"],
+  denied:[],closed:[],
+};
+const STATUS_LABEL={
+  new_claim:"New Claim",intake_complete:"Intake Done",under_investigation:"Investigation",
+  accepted:"Accepted",active_medical:"Active Medical",p_and_s:"P&S",pd_evaluation:"PD Eval",
+  settlement_discussions:"Settlement",litigated:"Litigated",denied:"Denied",closed:"Closed",
+};
+const PRI_DIARY={CRITICAL:C.red,HIGH:C.amber,MEDIUM:C.blue,LOW:C.dim};
+
+function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
+  const qc=useQueryClient();
+  const {data:claim,isLoading:claimLoading}=useQuery({
+    queryKey:['claim',claimId],
+    queryFn:()=>fetchClaim(claimId),
+    enabled:!!claimId,
+  });
+  const {data:diariesData}=useQuery({
+    queryKey:['claim-diaries',claimId],
+    queryFn:()=>fetchDiaries(claimId),
+    enabled:!!claimId,
+  });
+  const diaries=diariesData||[];
+
+  const analyzeMut=useMutation({
+    mutationFn:()=>triggerAnalysis(claimId),
+    onSuccess:()=>{qc.invalidateQueries({queryKey:['claim',claimId]});qc.invalidateQueries({queryKey:['claims']});notify('AI analysis complete');},
+    onError:(e)=>notify(`Analysis failed: ${e.message}`,'error'),
+  });
+  const statusMut=useMutation({
+    mutationFn:(s)=>updateClaimStatus(claimId,s),
+    onSuccess:()=>{qc.invalidateQueries({queryKey:['claim',claimId]});qc.invalidateQueries({queryKey:['claims']});notify('Status updated');},
+    onError:(e)=>notify(`Status update failed: ${e.message}`,'error'),
+  });
+  const reserveMut=useMutation({
+    mutationFn:(r)=>approveReserves(claimId,r),
+    onSuccess:()=>{qc.invalidateQueries({queryKey:['claim',claimId]});qc.invalidateQueries({queryKey:['claims']});notify('Reserves approved');},
+    onError:(e)=>notify(`Reserve approval failed: ${e.message}`,'error'),
+  });
+
+  const [resForm,setResForm]=useState({medical:'',indemnity:'',expense:'',reason:''});
+  const [resEditing,setResEditing]=useState(false);
+
+  const today=new Date().toISOString().split('T')[0];
+
+  if(claimLoading||!claim){
+    return(
+      <>
+        <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(2,8,18,.75)",zIndex:200,backdropFilter:"blur(3px)"}}/>
+        <div style={{position:"fixed",top:0,right:0,bottom:0,width:600,background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <Spinner/>
+        </div>
+      </>
+    );
+  }
+
   const a=claim.aiAnalysis;
-  const decided=["approved","denied","modified"].includes(claim.status);
-  const res=a?a.suggestedMedicalReserve+a.suggestedIndemnityReserve+a.suggestedExpenseReserve:null;
+  const emp=claim.employee||{};
+  const empName=`${emp.firstName||''} ${emp.lastName||''}`.trim()||claim.claimant||claim.id;
+  const totalRes=a?(a.suggestedMedicalReserve||0)+(a.suggestedIndemnityReserve||0)+(a.suggestedExpenseReserve||0):null;
+  const nextStatuses=VALID_NEXT[claim.status]||[];
+
+  const startReserveApproval=()=>{
+    setResForm({
+      medical:a?.suggestedMedicalReserve||'',
+      indemnity:a?.suggestedIndemnityReserve||'',
+      expense:a?.suggestedExpenseReserve||'',
+      reason:'Adjuster reserve approval',
+    });
+    setResEditing(true);
+  };
+
+  const downloadReasoningPDF=async()=>{
+    try{
+      const res=await fetch(`/api/v1/claims/${claimId}/reasoning-pdf`,{credentials:'include'});
+      if(!res.ok)throw new Error(`HTTP ${res.status}`);
+      const blob=await res.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;a.download=`reasoning_${claim.claimNumber||claimId}.pdf`;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      notify('AI Reasoning PDF downloaded');
+    }catch(e){notify(`PDF failed: ${e.message}`,'error');}
+  };
 
   return(
     <>
       <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(2,8,18,.75)",zIndex:200,backdropFilter:"blur(3px)"}}/>
-      <div style={{position:"fixed",top:0,right:0,bottom:0,width:600,background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,overflowY:"auto",animation:"slideR .22s ease"}}>
+      <div style={{position:"fixed",top:0,right:0,bottom:0,width:640,background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,overflowY:"auto",animation:"slideR .22s ease"}}>
+        {/* Header */}
         <div style={{padding:"18px 26px",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,background:C.surface,zIndex:1,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontFamily:C.mono,color:C.amber,fontSize:12,fontWeight:600,marginBottom:4}}>{claim.id}</div>
-            <div style={{fontSize:19,fontWeight:700}}>{claim.claimant}</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>{claim.employer} · {claim.filedAt}</div>
+            <div style={{fontFamily:C.mono,color:C.amber,fontSize:12,fontWeight:600,marginBottom:4}}>{claim.claimNumber||claim.id}</div>
+            <div style={{fontSize:19,fontWeight:700}}>{empName}</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:2}}>{claim.employerName||claim.employer||'—'} · {claim.dateOfInjury}</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",paddingTop:4}}>
-            <Badge status={claim.status}/>
+            <span style={{display:"inline-block",background:C.card,color:C.amber,border:`1px solid ${C.amber}33`,padding:"3px 9px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase"}}>{STATUS_LABEL[claim.status]||claim.status}</span>
             <button onClick={onClose} style={{background:C.card,border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",width:28,height:28,borderRadius:6,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           </div>
         </div>
+
         <div style={{padding:"22px 26px"}}>
+          {/* Claim Facts */}
           <SectionHead title="Claim Facts"/>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 22px",marginBottom:12}}>
             <InfoPair label="DOI" value={claim.dateOfInjury} mono/>
-            <InfoPair label="DOB" value={claim.claimantDOB} mono/>
+            <InfoPair label="Employee ID" value={emp.adpEmployeeId} mono/>
             <InfoPair label="Body Part" value={claim.bodyPart}/>
             <InfoPair label="Injury Type" value={claim.injuryType}/>
-            <InfoPair label="Off Work" value={claim.timeOff?"Yes":"No"} accent={claim.timeOff?C.amber:C.green}/>
-            {claim.aww&&<InfoPair label="AWW / TD Rate" value={`${fmt$(claim.aww)} / ${fmt$(claim.tdRate)}/wk`} mono accent={C.cyan}/>}
-            {claim.homeAddr&&<InfoPair label="Home Address" value={claim.homeAddr}/>}
+            {claim.aww&&<InfoPair label="AWW" value={fmt$(claim.aww)} mono accent={C.cyan}/>}
+            {claim.tdRate&&<InfoPair label="TD Rate/wk" value={fmt$(claim.tdRate)} mono accent={C.cyan}/>}
           </div>
-          <InfoPair label="Mechanism" value={claim.mechanism}/>
-          {claim.voiceTranscript&&<div style={{background:C.roseF,border:`1px solid ${C.rose}22`,borderRadius:8,padding:"10px 13px",marginBottom:10}}><div style={{fontSize:10,fontFamily:C.mono,color:C.rose,marginBottom:5,textTransform:"uppercase",letterSpacing:"0.06em"}}>🎙 Voice Transcript</div><div style={{fontSize:12,color:C.dim,lineHeight:1.7}}>{claim.voiceTranscript}</div></div>}
-          {claim.media?.length>0&&<div style={{marginBottom:14}}><Lbl color={C.blue}>Attached Media ({claim.media.length})</Lbl><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{claim.media.map((f,i)=><div key={i} style={{width:60,height:60,borderRadius:6,overflow:"hidden",border:`1px solid ${C.border}`,background:C.bg}}>{f.type?.startsWith("image/")?<img src={f.preview} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎬</div>}</div>)}</div></div>}
-          {claim.appointment?.confirmed&&(
-            <div style={{background:C.tealF,border:`1px solid ${C.teal}33`,borderRadius:9,padding:"12px 15px",marginBottom:16}}>
-              <Lbl color={C.teal} mb={6}>Appointment Confirmed</Lbl>
-              <div style={{fontSize:13,fontWeight:600}}>{claim.appointment.facility}</div>
-              <div style={{fontSize:12,color:C.dim,marginTop:3}}>{claim.appointment.date} at {claim.appointment.time}</div>
-              <div style={{fontFamily:C.mono,fontSize:11,color:C.amber,marginTop:4}}>Auth: {claim.appointment.authCode}</div>
+          {claim.injuryDescription&&<InfoPair label="Description" value={claim.injuryDescription}/>}
+
+          {/* Status Transitions */}
+          {nextStatuses.length>0&&(
+            <div style={{marginTop:16,marginBottom:16}}>
+              <SectionHead title="Status Transition"/>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {nextStatuses.map(s=>(
+                  <Btn key={s} small variant={s==="denied"?"danger":s==="accepted"?"success":"ghost"}
+                       disabled={statusMut.isPending}
+                       onClick={()=>statusMut.mutate(s)}>
+                    {statusMut.isPending?<Spinner/>:STATUS_LABEL[s]||s}
+                  </Btn>
+                ))}
+              </div>
             </div>
           )}
-          {a?(
+
+          {/* Diaries */}
+          {diaries.length>0&&(
             <>
               <div style={{height:1,background:C.border,margin:"18px 0"}}/>
-              <SectionHead title="AI Analysis"/>
+              <SectionHead title={`Diaries (${diaries.length})`}/>
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+                {diaries.map((d,i)=>{
+                  const overdue=d.status==='open'&&d.dueDate<today;
+                  return(
+                    <div key={d.diaryId||i} style={{background:overdue?C.redF:C.bg,border:`1px solid ${overdue?C.red+'33':C.border}`,borderRadius:8,padding:"10px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <span style={{fontFamily:C.mono,fontSize:11,fontWeight:600,color:overdue?C.red:C.text}}>{d.type}</span>
+                        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                          {d.priority&&<span style={{fontSize:10,fontFamily:C.mono,color:PRI_DIARY[d.priority]||C.muted,background:`${PRI_DIARY[d.priority]||C.border}22`,border:`1px solid ${PRI_DIARY[d.priority]||C.border}33`,padding:"1px 7px",borderRadius:3}}>{d.priority}</span>}
+                          <span style={{fontSize:11,fontFamily:C.mono,color:overdue?C.red:C.dim}}>Due {d.dueDate}{overdue?' ⚠ OVERDUE':''}</span>
+                        </div>
+                      </div>
+                      {d.notes&&<div style={{fontSize:11,color:C.dim,lineHeight:1.5}}>{d.notes}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* AI Analysis */}
+          <div style={{height:1,background:C.border,margin:"18px 0"}}/>
+          <SectionHead title="AI Analysis"/>
+          {a?(
+            <>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
-                {[["Compensability",a.compensability.replace("Likely ",""),COMP_COLOR[a.compensability]],["Confidence",`${a.compensabilityScore}%`,a.compensabilityScore>=80?C.green:C.amber],["Priority",a.priority,PRI_COLOR[a.priority]]].map(([l,v,c])=>(
+                {[["Compensability",(a.compensability||"").replace("Likely ",""),COMP_COLOR[a.compensability]],["Score",`${a.compensabilityScore}%`,a.compensabilityScore>=80?C.green:C.amber],["Priority",a.priority,PRI_COLOR[a.priority]]].map(([l,v,c])=>(
                   <div key={l} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 14px"}}>
                     <div style={{fontSize:10,fontFamily:C.mono,color:C.muted,letterSpacing:"0.07em",textTransform:"uppercase",marginBottom:6}}>{l}</div>
-                    <div style={{fontSize:13,fontWeight:700,color:c}}>{v}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:c}}>{v||"—"}</div>
                   </div>
                 ))}
               </div>
-              <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"14px 18px",marginBottom:14}}>
-                <Lbl>Suggested Reserves</Lbl>
-                <div style={{display:"flex",gap:0}}>
-                  {[["Medical",a.suggestedMedicalReserve],["Indemnity",a.suggestedIndemnityReserve],["Expense",a.suggestedExpenseReserve]].map(([l,v],i,arr)=>(
-                    <div key={l} style={{flex:1,borderRight:i<arr.length-1?`1px solid ${C.border}`:"none",paddingRight:i<arr.length-1?16:0,marginRight:i<arr.length-1?16:0}}>
-                      <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div>
-                      <div style={{fontFamily:C.mono,fontSize:16,fontWeight:600}}>{fmt$(v)}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontSize:11,color:C.muted}}>Total</span>
-                  <span style={{fontFamily:C.mono,fontWeight:700,color:C.cyan,fontSize:17}}>{fmt$(res)}</span>
-                </div>
-              </div>
               {a.redFlags?.length>0&&<div style={{marginBottom:14}}><Lbl color={C.red}>⚠ Red Flags</Lbl>{a.redFlags.map((f,i)=><div key={i} style={{background:C.redF,border:`1px solid ${C.red}22`,borderRadius:6,padding:"8px 12px",marginBottom:6,fontSize:12,color:"#f87171"}}>{f}</div>)}</div>}
-              <div style={{marginBottom:14}}><Lbl color={C.blue}>Recommended Actions</Lbl>{a.nextActions?.map((act,i)=><div key={i} style={{display:"flex",gap:9,marginBottom:8,alignItems:"flex-start"}}><div style={{width:19,height:19,borderRadius:"50%",background:C.blueF,border:`1px solid ${C.blue}33`,color:C.blue,fontSize:10,fontFamily:C.mono,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>{i+1}</div><div style={{fontSize:12,color:C.dim,lineHeight:1.65}}>{act}</div></div>)}</div>
-              <div style={{background:C.blueF,border:`1px solid ${C.blue}22`,borderRadius:9,padding:"12px 15px",marginBottom:18}}><Lbl color={C.blue}>AI Analysis Notes</Lbl><div style={{fontSize:12,color:C.dim,lineHeight:1.75}}>{a.analysisNotes}</div></div>
-              {/* Action buttons */}
+              {a.nextActions?.length>0&&<div style={{marginBottom:14}}><Lbl color={C.blue}>Actions</Lbl>{a.nextActions.map((act,i)=><div key={i} style={{display:"flex",gap:9,marginBottom:8,alignItems:"flex-start"}}><div style={{width:18,height:18,borderRadius:"50%",background:C.blueF,border:`1px solid ${C.blue}33`,color:C.blue,fontSize:9,fontFamily:C.mono,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</div><div style={{fontSize:12,color:C.dim,lineHeight:1.6}}>{act}</div></div>)}</div>}
+              {(a.analysisNotes||a.rationale)&&<div style={{background:C.blueF,border:`1px solid ${C.blue}22`,borderRadius:9,padding:"12px 15px",marginBottom:14}}><Lbl color={C.blue}>Rationale</Lbl><div style={{fontSize:12,color:C.dim,lineHeight:1.75}}>{a.analysisNotes||a.rationale}</div></div>}
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
-                {!claim.pdfGenerated&&jsPdfReady&&<Btn small variant="teal" onClick={()=>onGenPDF(claim)}>📄 AI Reasoning PDF</Btn>}
-                {jsPdfReady&&<Btn small variant="ghost" onClick={()=>onGenDWC1(claim)}>📋 DWC-1 Form</Btn>}
-                {claim.pdfGenerated&&!claim.cmsPushed&&<Btn small variant="purple" onClick={()=>onPushCMS(claim.id)}>⬆ Push to FileHandler</Btn>}
-                {claim.pdfGenerated&&<span style={{fontSize:11,color:C.teal,display:"flex",alignItems:"center"}}>✓ PDF ready</span>}
-                {claim.cmsPushed&&<span style={{fontSize:11,color:C.purple,display:"flex",alignItems:"center"}}>✓ In FileHandler</span>}
+                <Btn small variant="teal" onClick={downloadReasoningPDF}>📄 AI Reasoning PDF</Btn>
+                <Btn small variant="ghost" onClick={()=>onGenDWC1(claim)}>📋 DWC-1 Form</Btn>
               </div>
-              {!decided?(
-                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
-                  <Lbl>Supervisor Note</Lbl>
-                  <textarea value={note} onChange={e=>setNote(e.target.value)} rows={2} placeholder="Optional note before deciding…" style={{marginBottom:12,resize:"vertical"}}/>
-                  <div style={{display:"flex",gap:8}}>
-                    <Btn onClick={()=>onDecision(claim.id,"approved",note)}>✓ Approve</Btn>
-                    <Btn variant="ghost" onClick={()=>onDecision(claim.id,"modified",note)}>✎ Approve w/ Mods</Btn>
-                    <Btn variant="danger" onClick={()=>onDecision(claim.id,"denied",note)}>✕ Deny</Btn>
-                  </div>
-                </div>
-              ):(
-                <div style={{background:C.greenF,border:`1px solid ${C.green}33`,borderRadius:9,padding:"13px 16px"}}><Lbl color={C.green}>Decision Recorded</Lbl><div style={{fontSize:12,color:C.dim}}>{claim.adminDecision?.action?.toUpperCase()} — {claim.adminDecision?.at}</div>{claim.adminDecision?.note&&<div style={{fontSize:12,color:C.muted,marginTop:4,fontStyle:"italic"}}>{claim.adminDecision.note}</div>}</div>
-              )}
             </>
           ):(
-            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"28px 22px",textAlign:"center",marginTop:16}}>
-              <div style={{fontSize:22,marginBottom:10}}>🤖</div>
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"24px 22px",textAlign:"center"}}>
+              <div style={{fontSize:20,marginBottom:10}}>🤖</div>
               <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>No AI analysis yet</div>
-              <Btn onClick={()=>onAnalyze(claim)} disabled={aiLoading}>{aiLoading?<span style={{display:"flex",alignItems:"center",gap:8}}><Spinner/>Analyzing…</span>:"Run AI Analysis"}</Btn>
+              <Btn onClick={()=>analyzeMut.mutate()} disabled={analyzeMut.isPending}>
+                {analyzeMut.isPending?<span style={{display:"flex",alignItems:"center",gap:8}}><Spinner/>Analyzing…</span>:"Run AI Analysis"}
+              </Btn>
+            </div>
+          )}
+
+          {/* Reserve Approval */}
+          <div style={{height:1,background:C.border,margin:"18px 0"}}/>
+          <SectionHead title="Reserves"/>
+          {!resEditing?(
+            <div>
+              {a&&totalRes!=null&&(
+                <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"14px 18px",marginBottom:12}}>
+                  <Lbl>AI Suggested</Lbl>
+                  <div style={{display:"flex",gap:0}}>
+                    {[["Medical",a.suggestedMedicalReserve],["Indemnity",a.suggestedIndemnityReserve],["Expense",a.suggestedExpenseReserve]].map(([l,v],i,arr)=>(
+                      <div key={l} style={{flex:1,borderRight:i<arr.length-1?`1px solid ${C.border}`:"none",paddingRight:i<arr.length-1?14:0,marginRight:i<arr.length-1?14:0}}>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:3}}>{l}</div>
+                        <div style={{fontFamily:C.mono,fontSize:15,fontWeight:600}}>{fmt$(v)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{marginTop:10,paddingTop:9,borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:11,color:C.muted}}>Total</span>
+                    <span style={{fontFamily:C.mono,fontWeight:700,color:C.cyan,fontSize:16}}>{fmt$(totalRes)}</span>
+                  </div>
+                </div>
+              )}
+              <Btn small variant="outline" onClick={startReserveApproval} disabled={!a}>
+                {a?"Approve / Adjust Reserves":"Run AI Analysis First"}
+              </Btn>
+            </div>
+          ):(
+            <div style={{background:C.card,border:`1px solid ${C.amber}33`,borderRadius:10,padding:"18px 20px"}}>
+              <Lbl color={C.amber}>Adjuster Reserve Approval</Lbl>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12}}>
+                {[["Medical","medical"],["Indemnity","indemnity"],["Expense","expense"]].map(([l,k])=>(
+                  <Field key={k} label={l}><input type="number" min="0" value={resForm[k]} onChange={e=>setResForm(p=>({...p,[k]:e.target.value}))}/></Field>
+                ))}
+              </div>
+              <Field label="Reason"><input value={resForm.reason} onChange={e=>setResForm(p=>({...p,reason:e.target.value}))}/></Field>
+              <div style={{display:"flex",gap:8,marginTop:8}}>
+                <Btn disabled={reserveMut.isPending} onClick={()=>reserveMut.mutate({medical:parseFloat(resForm.medical)||0,indemnity:parseFloat(resForm.indemnity)||0,expense:parseFloat(resForm.expense)||0,reason:resForm.reason})}>
+                  {reserveMut.isPending?<Spinner/>:"Approve Reserves"}
+                </Btn>
+                <Btn variant="ghost" onClick={()=>setResEditing(false)}>Cancel</Btn>
+              </div>
+              {reserveMut.isSuccess&&<div style={{marginTop:8,fontSize:12,color:C.green}}>✓ Reserves approved and sent to FileHandler</div>}
             </div>
           )}
         </div>
@@ -1214,7 +1405,8 @@ function EmployerPortal({claims,onSubmit,onSelect}){
 // TOP NAV
 // ═══════════════════════════════════════════════════════════
 function TopNav({role,setRole,claims,adminView,setAdminView}){
-  const att=claims.filter(c=>["pending","ai_complete"].includes(c.status)).length;
+  const today=new Date().toISOString().split('T')[0];
+  const att=claims.filter(c=>["new_claim","intake_complete","under_investigation"].includes(c.status)||(c.diaries||[]).some(d=>d.status==='open'&&d.dueDate<today)).length;
   return(
     <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:22,height:60,padding:"0 26px",position:"sticky",top:0,zIndex:100}}>
       <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
@@ -1247,16 +1439,14 @@ function TopNav({role,setRole,claims,adminView,setAdminView}){
 export default function App(){
   const [role,setRole]=useState("employee");
   const [adminView,setAdminView]=useState("claims");
-  const [claims,setClaims]=useState(INIT_CLAIMS);
   const [selectedId,setSelectedId]=useState(null);
-  const [aiLoading,setAiLoading]=useState(null);
   const [toast,setToast]=useState(null);
-  const [cmsModal,setCmsModal]=useState(null);
   const [jsPdfReady,setJsPdfReady]=useState(false);
 
-  const selected=claims.find(c=>c.id===selectedId);
-  const notify=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3800);};
+  // ── Dev session auto-login (replaced by Supabase Auth in M4) ─────────────────
+  useEffect(()=>{ensureDevSession();},[]);
 
+  // ── jsPDF (kept for NoticeCenter generateNoticePDF) ───────────────────────────
   useEffect(()=>{
     if(window.jspdf){setJsPdfReady(true);return;}
     const s=document.createElement("script");
@@ -1266,47 +1456,31 @@ export default function App(){
     document.head.appendChild(s);
   },[]);
 
-  const analyzeWithAI=async(claim)=>{
-    setAiLoading(claim.id);
-    try{const a=await runAIAnalysis(claim);setClaims(p=>p.map(c=>c.id===claim.id?{...c,aiAnalysis:a,status:"ai_complete"}:c));notify(`AI analysis complete for ${claim.id}`);}
-    catch(e){notify(`AI failed: ${e.message}`,"error");}
-    finally{setAiLoading(null);}
-  };
+  // ── Live claims via React Query ───────────────────────────────────────────────
+  const {data:claims=[],isLoading:claimsLoading,error:claimsError}=useQuery({
+    queryKey:['claims'],
+    queryFn:fetchClaims,
+    refetchInterval:30_000,
+  });
 
-  const makeDecision=(id,action,note="")=>{
-    setClaims(p=>p.map(c=>c.id===id?{...c,status:action,adminDecision:{action,note,at:new Date().toLocaleString()}}:c));
-    setSelectedId(null);notify(`${id} marked: ${action}`);
-  };
-
-  const genPDF=(claim)=>{
-    if(!jsPdfReady||!window.jspdf){notify("PDF library loading…","error");return;}
-    try{const doc=generateReasoningPDF(claim);doc.save(`AI-Reasoning-${claim.id}.pdf`);setClaims(p=>p.map(c=>c.id===claim.id?{...c,pdfGenerated:true}:c));notify(`AI Reasoning PDF downloaded`);}
-    catch(e){notify(`PDF failed: ${e.message}`,"error");}
-  };
+  const notify=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3800);};
 
   const genDWC1=async(claim)=>{
+    const claimId=claim.id||claim.claimNumber||selectedId;
     try{
-      const res=await fetch(`/api/v1/claims/${claim.id}/dwc1`);
+      const res=await fetch(`/api/v1/claims/${claimId}/dwc1`,{credentials:'include'});
       if(!res.ok)throw new Error(`HTTP ${res.status}`);
       const blob=await res.blob();
       const url=URL.createObjectURL(blob);
       window.open(url,'_blank');
-      notify(`DWC-1 opened for ${claim.claimant}`);
+      notify(`DWC-1 opened`);
     }catch(e){notify(`DWC-1 failed: ${e.message}`,'error');}
   };
 
-  const pushCMS=(id)=>{
-    const c=claims.find(x=>x.id===id);
-    if(!c?.pdfGenerated){notify("Generate PDF before pushing to CMS","error");return;}
-    setClaims(p=>p.map(c=>c.id===id?{...c,cmsPushed:true}:c));
-    notify(`${id} pushed to FileHandler CMS — reserves set, PDF attached`);
-    setSelectedId(null);
-  };
-
+  // For employer / employee portals — local submit that queues to backend
   const submitClaim=(data,source)=>{
-    const id=`HHW-2026-${String(claims.length+42).padStart(3,"0")}`;
-    const claim={id,...data,status:"pending",aiAnalysis:null,adminDecision:null,pdfGenerated:false,cmsPushed:false,noticeLog:[],filedAt:new Date().toLocaleString(),filedBy:source};
-    setClaims(p=>[claim,...p]);
+    const id=`DRAFT-${Date.now()}`;
+    notify(`Claim submitted — reference ${id}`,'success');
     return id;
   };
 
@@ -1316,7 +1490,13 @@ export default function App(){
       {toast&&<Toast {...toast}/>}
       <TopNav role={role} setRole={setRole} claims={claims} adminView={adminView} setAdminView={setAdminView}/>
       <div style={{maxWidth:1400,margin:"0 auto",padding:"0 26px 80px"}}>
-        {role==="admin"&&adminView==="claims"&&<AdminDashboard claims={claims} onSelect={setSelectedId} onAnalyze={analyzeWithAI} aiLoading={aiLoading} onGenPDF={genPDF} onPushCMS={pushCMS} jsPdfReady={jsPdfReady}/>}
+        {role==="admin"&&adminView==="claims"&&(
+          claimsLoading
+            ?<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>
+            :claimsError
+              ?<div style={{paddingTop:32,color:C.red,fontSize:13}}>Failed to load claims: {claimsError.message}</div>
+              :<AdminDashboard claims={claims} onSelect={setSelectedId} onGenPDF={()=>{}} onPushCMS={()=>{}} jsPdfReady={jsPdfReady}/>
+        )}
         {role==="admin"&&adminView==="notices"&&<NoticeCenter claims={claims} jsPdfReady={jsPdfReady} notify={notify}/>}
         {role==="employer"&&<EmployerPortal claims={claims} onSubmit={submitClaim} onSelect={setSelectedId}/>}
         {role==="employee"&&(
@@ -1328,7 +1508,7 @@ export default function App(){
           </div>
         )}
       </div>
-      {selected&&<ClaimDrawer claim={selected} onClose={()=>setSelectedId(null)} onDecision={makeDecision} onAnalyze={analyzeWithAI} onGenPDF={genPDF} onPushCMS={pushCMS} onGenDWC1={genDWC1} aiLoading={aiLoading===selected.id} jsPdfReady={jsPdfReady}/>}
+      {selectedId&&<ClaimDrawer claimId={selectedId} onClose={()=>setSelectedId(null)} notify={notify} jsPdfReady={jsPdfReady} onGenDWC1={genDWC1}/>}
     </div>
   );
 }

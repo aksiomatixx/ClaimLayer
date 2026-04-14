@@ -3,6 +3,7 @@
 const express           = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const claimService      = require('../services/claimService');
+const pdfService        = require('../services/pdfService');
 const db                = require('../services/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
@@ -173,6 +174,65 @@ router.patch(
       res.json(claim);
     } catch (err) {
       const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/analyze — trigger / return AI analysis ────────────
+router.post(
+  '/:id/analyze',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.triggerAnalysis(req.params.id);
+      res.json({ claimId: claim.id, aiAnalysis: claim.aiAnalysis, priority: claim.priority });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 500;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/reasoning-pdf — download AI reasoning PDF ──────────
+router.get(
+  '/:id/reasoning-pdf',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.getClaim(req.params.id);
+      if (!claim) return res.status(404).json({ error: 'Claim not found' });
+      if (!claim.aiAnalysis) return res.status(400).json({ error: 'AI analysis not yet available for this claim' });
+
+      const pdfBuffer = await pdfService.generateReasoningPDF(claim);
+      res.set('Content-Type', 'application/pdf');
+      res.set('Content-Disposition', `attachment; filename="reasoning_${claim.claimNumber || claim.id}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/diaries — list diaries for a claim ────────────────
+router.get(
+  '/:id/diaries',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const diaries = await claimService.getDiaries(req.params.id);
+      res.json({ diaries });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 500;
       res.status(status).json({ error: err.message });
     }
   }

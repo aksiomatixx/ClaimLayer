@@ -145,4 +145,40 @@ router.post(
   }
 );
 
+// ── GET /api/v1/auth/dev-session — dev-only auto-login ────────────────────────
+// Issues an admin cookie for local development and demo environments.
+// BLOCKED in production (NODE_ENV === 'production').
+router.get('/dev-session', (req, res) => {
+  if (!['development', 'test'].includes(process.env.NODE_ENV)) {
+    return res.status(403).json({ error: 'Not available in production' });
+  }
+
+  const { generateAdminToken } = require('../middleware/auth');
+  const token = generateAdminToken({
+    sub:   'dev-admin',
+    email: 'admin@homecaretpa.com',
+    name:  'Dev Admin',
+  });
+
+  res.cookie('token', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge:   8 * 60 * 60 * 1000, // 8 hours
+  });
+
+  res.json({ ok: true, role: 'admin', expiresIn: '8h' });
+});
+
+// ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M4) ─────────────
+router.post('/mfa/enroll', requireAuth, (req, res) => {
+  // Placeholder — wire to Supabase Auth MFA API in M4
+  res.status(501).json({ error: 'MFA enrollment not yet implemented — coming in M4' });
+});
+
+// ── POST /api/v1/auth/mfa/verify — Supabase MFA verify stub (M4) ─────────────
+router.post('/mfa/verify', requireAuth, (req, res) => {
+  // Placeholder — wire to Supabase Auth MFA API in M4
+  res.status(501).json({ error: 'MFA verification not yet implemented — coming in M4' });
+});
+
 module.exports = router;
