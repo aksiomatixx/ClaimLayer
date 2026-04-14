@@ -14,10 +14,11 @@
  *       Replace every `claimsStore.*` call with the Supabase client in M2.
  */
 
-const filehandler  = require('./filehandler');
-const adp          = require('./adp');
-const aiService    = require('./aiService');
-const logger       = require('../logger');
+const filehandler      = require('./filehandler');
+const adp              = require('./adp');
+const aiService        = require('./aiService');
+const logger           = require('../logger');
+const { addBusinessDays } = require('../utils/businessDays');
 
 // ── In-memory store (replace with Supabase in M2) ────────────────────────────
 const claimsStore = new Map();
@@ -25,20 +26,6 @@ let _claimSeq = 42; // start above the mock data in App.jsx
 
 function _nextClaimNumber() {
   return `HHW-${new Date().getFullYear()}-${String(_claimSeq++).padStart(3, '0')}`;
-}
-
-// ── Business-day helper ───────────────────────────────────────────────────────
-// Adds N business days (Mon–Fri). Does not account for California holidays —
-// add a holiday calendar in production.
-function addBusinessDays(isoDate, days) {
-  const d = new Date(isoDate);
-  let added = 0;
-  while (added < days) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) added++;
-  }
-  return d.toISOString().split('T')[0];
 }
 
 // ── Create claim ──────────────────────────────────────────────────────────────
@@ -175,28 +162,28 @@ async function _seedInitialDiaries(claim) {
   const diaries = [
     {
       type:       'DWC1_ISSUE',
-      dueDate:    addBusinessDays(doi, 1),
+      dueDate:    addBusinessDays(doi, 1).toISOString().split('T')[0],
       assignedTo: 'system@homecaretpa.com',
       priority:   'HIGH',
       notes:      `DWC-1 must be issued — date of injury ${doi}`,
     },
     {
       type:       'TD_PAYMENT_SETUP',
-      dueDate:    addBusinessDays(doi, 14),
+      dueDate:    addBusinessDays(doi, 14).toISOString().split('T')[0],
       assignedTo: 'system@homecaretpa.com',
       priority:   'HIGH',
       notes:      `First TD payment due within 14 days of disability onset — LC §4650. AWW: $${claim.aww}, TD rate: $${claim.tdRate}/wk`,
     },
     {
       type:       'PR2_FOLLOW_UP',
-      dueDate:    addBusinessDays(doi, 7),
+      dueDate:    addBusinessDays(doi, 7).toISOString().split('T')[0],
       assignedTo: 'system@homecaretpa.com',
       priority:   'MEDIUM',
       notes:      `PR-2 expected from treating physician within 5 business days of first visit`,
     },
     {
       type:       'DWC7_NOTICE',
-      dueDate:    addBusinessDays(doi, 1),
+      dueDate:    addBusinessDays(doi, 1).toISOString().split('T')[0],
       assignedTo: 'system@homecaretpa.com',
       priority:   'HIGH',
       notes:      `DWC-7 notice of rights must be mailed within 1 business day of claim creation`,
