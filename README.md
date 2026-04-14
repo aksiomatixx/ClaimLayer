@@ -19,8 +19,14 @@ homecare-tpa/
 ├── README.md
 ├── frontend/                         ← React application (Vite)
 │   └── src/
-│       ├── App.jsx                   ← Main platform UI (v3, fully mocked)
-│       └── Wireframes.jsx            ← Interactive user stories
+│       ├── App.jsx                   ← Main platform UI (admin + employer + employee portals)
+│       ├── Wireframes.jsx            ← Interactive user stories
+│       ├── main.jsx                  ← React root with QueryClientProvider
+│       ├── i18n.js                   ← i18next config (EN/ES)
+│       ├── locales/                  ← en.json, es.json translation files
+│       └── services/
+│           ├── claims.js             ← fetch wrappers: fetchClaims, triggerAnalysis, etc.
+│           └── providers.js          ← fetchProviders(zipCode, limit)
 ├── backend/                          ← Express (Node.js) API
 │   ├── src/
 │   │   ├── index.js                  ← Express app entry point (port 3001)
@@ -29,13 +35,23 @@ homecare-tpa/
 │   │   ├── services/
 │   │   │   ├── filehandler.js        ← FileHandler Enterprise client
 │   │   │   ├── adp.js                ← ADP OAuth2 client + AWW/TD calculation
-│   │   │   ├── claimService.js       ← Claim lifecycle orchestration
-│   │   │   └── aiService.js          ← Claude API integration
+│   │   │   ├── claimService.js       ← Claim lifecycle orchestration + diaries
+│   │   │   ├── aiService.js          ← Claude API integration
+│   │   │   ├── pdfService.js         ← DWC-1, AI reasoning, auth letter (pdf-lib)
+│   │   │   ├── appointmentService.js ← MPN appointment booking
+│   │   │   ├── providerService.js    ← Provider search by zip + specialty
+│   │   │   ├── db.js                 ← In-memory DB helpers (M2, replace with Supabase in M4)
+│   │   │   └── voiceService.js       ← OpenAI Whisper transcription + Claude extraction
 │   │   ├── routes/
-│   │   │   ├── claims.js             ← /api/v1/claims
+│   │   │   ├── claims.js             ← /api/v1/claims (CRUD + analyze + pdf + diaries)
+│   │   │   ├── providers.js          ← /api/v1/providers
+│   │   │   ├── appointments.js       ← /api/v1/appointments
+│   │   │   ├── voice.js              ← /api/v1/voice (Whisper + text extraction)
+│   │   │   ├── documents.js          ← /api/v1/documents
+│   │   │   ├── auth.js               ← /api/v1/auth (magic link + dev-session)
 │   │   │   └── webhooks.js           ← DxF ADT, Enlyte, Lob receivers
 │   │   └── middleware/
-│   │       ├── auth.js               ← JWT validation + role enforcement
+│   │       ├── auth.js               ← JWT validation, role enforcement, requireMFA stub
 │   │       └── audit.js              ← Request audit logging
 │   ├── prompts/
 │   │   ├── compensability_analysis.txt
@@ -47,9 +63,13 @@ homecare-tpa/
 │   │   ├── setup.js
 │   │   ├── unit/
 │   │   │   ├── adp.test.js
-│   │   │   └── filehandler.test.js
+│   │   │   ├── filehandler.test.js
+│   │   │   ├── businessDays.test.js
+│   │   │   └── providers.test.js
 │   │   └── integration/
-│   │       └── claim-flow.test.js    ← Full FROI → ADP → FH → AI flow
+│   │       ├── claim-flow.test.js         ← Full FROI → ADP → FH → AI flow
+│   │       ├── intake-flow.test.js        ← M2: appointments, MPN, intake-progress
+│   │       └── admin-console.test.js      ← M3: analyze, reserves, status, PDF, diaries
 │   ├── package.json
 │   └── .env.example
 ├── docs/
@@ -59,7 +79,7 @@ homecare-tpa/
 │   └── data-model.md                 ← PostgreSQL schema documentation
 └── .github/
     └── workflows/
-        └── ci.yml                    ← GitHub Actions (starts mocks, runs tests, uses repo secret)
+        └── ci.yml                    ← GitHub Actions (Node 24, starts mocks, runs tests)
 ```
 
 ---
@@ -79,7 +99,7 @@ homecare-tpa/
 | Lab Data | Health Gorilla | Lab subscription, FHIR queries |
 | UR | Enlyte UR Services | Physician review for non-MTUS RFAs |
 | Print / Mail | Lob.com | USPS first-class notice delivery |
-| PDF Generation | jsPDF | DWC-1, AI reasoning docs, benefit notices |
+| PDF Generation | pdf-lib (server-side) | DWC-1, AI reasoning docs, auth letters — no CDN scripts |
 | File Storage | Supabase Storage or S3 | Uploaded media, generated PDFs |
 | Email / SMS | SendGrid / Twilio | Magic links, appointment confirmations, notifications |
 
@@ -184,14 +204,44 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | Milestone | Description | Status |
 |---|---|---|
 | M1 | Foundation: Express backend, FileHandler client, ADP client, auth middleware, CI pipeline, mock servers, unit + integration test suite | ✅ Complete |
-| M2 | Employee intake: Voice, media upload, provider finder, appointment booking, DWC-1 | 🔲 Not started |
-| M3 | Admin console: Claim review, AI analysis, reserve approval, FileHandler sync | 🔲 Not started |
-| M4 | Employer portal: FROI, magic link, status dashboard | 🔲 Not started |
+| M2 | Employee intake: Voice (Whisper), media upload, provider finder, appointment booking, DWC-1 (pdf-lib), i18n (EN/ES) | ✅ Complete |
+| M3 | Admin console: Action queue, AI analysis (backend-only), reserve approval, diaries, reasoning PDF, React Query | ✅ Complete |
+| M4 | Supabase Auth + MFA, Employer portal FROI, magic link status dashboard | 🔲 Not started |
 | M5 | DxF / QHIO: Manifest MedEx roster, ADT push, clinical document pull | 🔲 Not started |
 | M6 | RFA engine: MTUS evaluation, auto-approval, Enlyte URO routing | 🔲 Not started |
 | M7 | Diary engine: Auto-generation, event-triggered updates, escalation | 🔲 Not started |
 | M8 | Notice center: Lob.com integration, statutory notice generation | 🔲 Not started |
 | M9 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
+
+### M3 — What was built (current)
+
+- **Security fix (Issue #13)**: Removed `runAIAnalysis()` from the browser — it was calling `api.anthropic.com` directly and exposing `ANTHROPIC_API_KEY` in DevTools network traffic. AI analysis now runs server-side via `POST /api/v1/claims/:id/analyze`.
+- **`backend/src/routes/claims.js`** — Added `POST /:id/analyze` (trigger/cache), `GET /:id/reasoning-pdf` (PDF download), `GET /:id/diaries` (list diaries).
+- **`backend/src/services/claimService.js`** — Added `triggerAnalysis(claimId)` (sync, returns cache if exists), `getDiaries(claimId)`, and `claim.diaries[]` array populated by `_seedInitialDiaries`.
+- **`backend/src/services/pdfService.js`** — Added `generateReasoningPDF(claim)` using `pdf-lib`. Sections: compensability/score/priority, reserves, red flags, next actions, rationale. No CDN dependencies.
+- **`backend/src/middleware/auth.js`** — Added `requireMFA` middleware stub. No-op when `SUPABASE_URL` absent; checks `amr: ['totp']` in production.
+- **`backend/src/routes/auth.js`** — Added `GET /api/v1/auth/dev-session` (auto-login for dev/test; blocked in production), `POST /mfa/enroll` + `/mfa/verify` stubs for M4 Supabase wiring.
+- **`frontend/src/services/claims.js`** — Thin fetch wrappers: `fetchClaims`, `fetchClaim`, `updateClaimStatus`, `approveReserves`, `triggerAnalysis`, `fetchDiaries`, `ensureDevSession`.
+- **`frontend/src/services/providers.js`** — `fetchProviders(zipCode, limit)`.
+- **`frontend/src/main.jsx`** — Wrapped `<App>` in `<QueryClientProvider>` (`@tanstack/react-query`).
+- **`frontend/src/App.jsx`** — Replaced `useState(INIT_CLAIMS)` with `useQuery(['claims'], fetchClaims)`. Added `ActionQueue` component (priority-sorted, overdue-diary aware). Updated `ClaimDrawer` with live data, reserve approval form (`useMutation → PATCH /reserves`), diary section, status transition buttons. PDF download calls `GET /api/v1/claims/:id/reasoning-pdf`.
+- **`backend/tests/integration/admin-console.test.js`** — 25 new integration tests covering all M3 endpoints.
+
+### M2 — What was built
+
+- **`backend/src/services/voiceService.js`** — OpenAI Whisper transcription + Claude structured extraction (body part, mechanism, time-off flag).
+- **`backend/src/routes/voice.js`** — `POST /api/v1/voice` (audio upload → Whisper → Claude extraction), `POST /api/v1/voice/text` (text → Claude extraction).
+- **`backend/src/services/providerService.js`** — MPN provider search by zip code, distance calculation, specialty and walk-in filters.
+- **`backend/src/routes/providers.js`** — `GET /api/v1/providers`, `GET /api/v1/providers/:id`, `GET /api/v1/providers/near`.
+- **`backend/src/services/appointmentService.js`** — Appointment lifecycle: create, confirm, reschedule.
+- **`backend/src/routes/appointments.js`** — Full CRUD + MPN acknowledge endpoint.
+- **`backend/src/routes/documents.js`** — DWC-1 PDF generation and storage.
+- **`backend/src/routes/auth.js`** — Magic link generate + validate with ADP demographic pre-fill.
+- **`backend/src/services/pdfService.js`** — `generateDWC1()` and `generateAuthorizationLetter()` using `pdf-lib` (server-side, no CDN).
+- **`frontend/src/App.jsx`** — `EmployeeIntakeWizard` (6 steps: personal info, injury details, voice/text, media upload, MPN provider selection + appointment booking, DWC-1).
+- **`frontend/src/i18n.js`** + **`locales/`** — Full EN/ES localization for all intake wizard strings.
+- **`backend/tests/integration/intake-flow.test.js`** — 23 integration tests for appointments, MPN flow, intake-progress tracking.
+- **`backend/utils/businessDays.js`** — California holiday calendar (all 15 statutory holidays) for LC compliance date calculations.
 
 ### M1 — What was built
 

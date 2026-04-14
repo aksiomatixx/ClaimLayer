@@ -306,4 +306,174 @@ async function generateAuthorizationLetter(opts) {
   return Buffer.from(pdfBytes);
 }
 
-module.exports = { generateDWC1, generateAuthorizationLetter };
+// ── generateReasoningPDF ──────────────────────────────────────────────────────
+/**
+ * Generates an AI Reasoning PDF for adjuster review.
+ *
+ * @param {object} claim  Claim record including aiAnalysis
+ * @returns {Buffer}      PDF bytes
+ */
+async function generateReasoningPDF(claim) {
+  const start  = Date.now();
+  const pdfDoc = await PDFDocument.create();
+  const page   = pdfDoc.addPage([PAGE_W, PAGE_H]);
+
+  const fonts = {
+    regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
+    bold:    await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+  };
+
+  const a   = claim.aiAnalysis;
+  const emp = claim.employee || {};
+  let y     = PAGE_H - MARGIN;
+
+  // ── Header bar ────────────────────────────────────────────────────────────
+  page.drawRectangle({ x: 0, y: PAGE_H - 36, width: PAGE_W, height: 36,
+    color: rgb(0.039, 0.086, 0.133) });
+  page.drawRectangle({ x: 0, y: PAGE_H - 36, width: 4, height: 36,
+    color: rgb(0.961, 0.620, 0.043) });
+
+  page.drawText('HomeCare TPA — AI Reasoning Document', {
+    x: 12, y: PAGE_H - 22, size: 13, font: fonts.bold, color: rgb(0.961, 0.620, 0.043),
+  });
+  const sub = `${claim.claimNumber || claim.id}  |  ${emp.firstName || ''} ${emp.lastName || ''}  |  ${claim.employerName || ''}`;
+  page.drawText(sub.trim(), {
+    x: 12, y: PAGE_H - 34, size: 7, font: fonts.regular, color: rgb(0.624, 0.706, 0.753),
+  });
+  page.drawText(`Generated: ${new Date().toLocaleString()}`, {
+    x: PAGE_W - MARGIN - 120, y: PAGE_H - 34, size: 7, font: fonts.regular, color: rgb(0.624, 0.706, 0.753),
+  });
+
+  y = PAGE_H - 56;
+
+  if (!a) {
+    page.drawText('No AI analysis on file.', { x: MARGIN, y, size: 11, font: fonts.regular, color: DARK });
+    const pdfBytes = await pdfDoc.save();
+    return Buffer.from(pdfBytes);
+  }
+
+  // ── Compensability / Score / Priority row ─────────────────────────────────
+  const cardW = (PAGE_W - MARGIN * 2 - 16) / 3;
+  const cards = [
+    ['Compensability', a.compensability || '—'],
+    ['Score',          `${a.compensabilityScore ?? '—'}%`],
+    ['Priority',       a.priority || '—'],
+  ];
+  cards.forEach(([label, value], i) => {
+    const cx = MARGIN + i * (cardW + 8);
+    page.drawRectangle({ x: cx, y: y - 32, width: cardW, height: 34,
+      color: FIELD_BG, borderColor: LINE, borderWidth: 0.5 });
+    page.drawText(label.toUpperCase(), { x: cx + 5, y: y + 0, size: 7, font: fonts.regular, color: GRAY });
+    page.drawText(String(value), { x: cx + 5, y: y - 20, size: 11, font: fonts.bold, color: DARK });
+  });
+  y -= 46;
+
+  // ── Reserves ──────────────────────────────────────────────────────────────
+  drawLine(page, MARGIN, y, PAGE_W - MARGIN);
+  y -= 12;
+  page.drawText('SUGGESTED RESERVES', { x: MARGIN, y, size: 8, font: fonts.bold, color: BLUE });
+  y -= 12;
+  const fmt$ = (n) => (n != null ? `$${Number(n).toLocaleString()}` : '—');
+  const resItems = [
+    ['Medical',   fmt$(a.suggestedMedicalReserve)],
+    ['Indemnity', fmt$(a.suggestedIndemnityReserve)],
+    ['Expense',   fmt$(a.suggestedExpenseReserve)],
+    ['Total',     fmt$((a.suggestedMedicalReserve || 0) + (a.suggestedIndemnityReserve || 0) + (a.suggestedExpenseReserve || 0))],
+  ];
+  resItems.forEach(([label, value], i) => {
+    page.drawText(`${label}:`, { x: MARGIN + i * 120, y, size: 9, font: fonts.regular, color: GRAY });
+    page.drawText(value, { x: MARGIN + i * 120 + 52, y, size: 9, font: fonts.bold, color: DARK });
+  });
+  y -= 18;
+
+  // ── Red flags ─────────────────────────────────────────────────────────────
+  if (a.redFlags?.length) {
+    drawLine(page, MARGIN, y, PAGE_W - MARGIN);
+    y -= 12;
+    page.drawText('RED FLAGS', { x: MARGIN, y, size: 8, font: fonts.bold, color: rgb(0.941, 0.251, 0.251) });
+    y -= 10;
+    for (const flag of a.redFlags) {
+      const lines = wrapText(`[!] ${flag}`, PAGE_W - MARGIN * 2 - 10, fonts.regular, 9);
+      for (const ln of lines) {
+        if (y < 80) break;
+        page.drawText(ln, { x: MARGIN + 5, y, size: 9, font: fonts.regular, color: rgb(0.972, 0.443, 0.443) });
+        y -= 12;
+      }
+      y -= 3;
+    }
+  }
+
+  // ── Next actions ──────────────────────────────────────────────────────────
+  if (a.nextActions?.length) {
+    drawLine(page, MARGIN, y, PAGE_W - MARGIN);
+    y -= 12;
+    page.drawText('RECOMMENDED ACTIONS', { x: MARGIN, y, size: 8, font: fonts.bold, color: BLUE });
+    y -= 10;
+    a.nextActions.forEach((act, i) => {
+      const lines = wrapText(`${i + 1}. ${act}`, PAGE_W - MARGIN * 2 - 5, fonts.regular, 9);
+      for (const ln of lines) {
+        if (y < 80) break;
+        page.drawText(ln, { x: MARGIN + 5, y, size: 9, font: fonts.regular, color: DARK });
+        y -= 12;
+      }
+      y -= 3;
+    });
+  }
+
+  // ── Rationale / analysis notes ────────────────────────────────────────────
+  if (a.analysisNotes || a.rationale) {
+    const notes = a.analysisNotes || a.rationale;
+    drawLine(page, MARGIN, y, PAGE_W - MARGIN);
+    y -= 12;
+    page.drawText('AI RATIONALE', { x: MARGIN, y, size: 8, font: fonts.bold, color: GRAY });
+    y -= 10;
+    const lines = wrapText(notes, PAGE_W - MARGIN * 2, fonts.regular, 8.5);
+    for (const ln of lines) {
+      if (y < 80) break;
+      page.drawText(ln, { x: MARGIN, y, size: 8.5, font: fonts.regular, color: GRAY });
+      y -= 11;
+    }
+  }
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  page.drawText(
+    'AI analysis is advisory. Final authority rests with the supervising adjuster per 8 CCR §10101.',
+    { x: MARGIN, y: 24, size: 6.5, font: fonts.regular, color: GRAY }
+  );
+
+  const pdfBytes = await pdfDoc.save();
+  const buffer   = Buffer.from(pdfBytes);
+
+  logger.info({
+    msg:         'pdfService: reasoning PDF generated',
+    claimId:     claim.id,
+    claimNumber: claim.claimNumber,
+    sizeKb:      Math.round(buffer.length / 1024),
+    latencyMs:   Date.now() - start,
+  });
+
+  return buffer;
+}
+
+/**
+ * Simple word-wrap helper for pdf-lib (no built-in wrap support).
+ * Returns an array of strings each fitting within maxWidth (approximate).
+ */
+function wrapText(text, maxWidth, font, size) {
+  const words  = (text || '').split(' ');
+  const lines  = [];
+  let current  = '';
+  const maxCh  = Math.floor(maxWidth / (size * 0.52)); // rough char estimate
+  for (const word of words) {
+    if ((current + ' ' + word).trim().length > maxCh) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + ' ' + word : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+module.exports = { generateDWC1, generateAuthorizationLetter, generateReasoningPDF };

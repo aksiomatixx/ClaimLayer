@@ -63,4 +63,20 @@ function generateAdminToken(payload) {
   );
 }
 
-module.exports = { requireAuth, requireRole, generateMagicToken, generateAdminToken };
+// ── requireMFA ────────────────────────────────────────────────────────────────
+// Checks that the authenticated user has verified TOTP MFA (amr includes 'totp').
+// When SUPABASE_URL is absent (dev/test), this is a no-op pass-through.
+// In production (M4+), wire this to Supabase Auth MFA verification.
+function requireMFA(req, res, next) {
+  if (!process.env.SUPABASE_URL) {
+    // Dev/test: MFA enforcement disabled — pass through
+    return next();
+  }
+  const amr = req.user?.amr || [];
+  if (!amr.includes('totp')) {
+    return res.status(403).json({ error: 'MFA verification required' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireRole, generateMagicToken, generateAdminToken, requireMFA };

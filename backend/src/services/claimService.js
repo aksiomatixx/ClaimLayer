@@ -58,6 +58,7 @@ async function createClaim(froiData, employerId) {
     claimNumber,
     employerId,
     status:      'new_claim',
+    diaries:     [],
 
     employee: {
       adpEmployeeId: froiData.adpEmployeeId,
@@ -201,10 +202,21 @@ async function _seedInitialDiaries(claim) {
   for (const diary of diaries) {
     try {
       const result = await filehandler.createDiary(claim.filehandlerId, diary);
+      const createdAt = new Date().toISOString();
       claim.events.push({
         type:      'diary_created',
-        timestamp: new Date().toISOString(),
+        timestamp: createdAt,
         data:      { diaryType: diary.type, diaryId: result.diaryId, dueDate: diary.dueDate },
+      });
+      claim.diaries.push({
+        diaryId:    result.diaryId,
+        type:       diary.type,
+        dueDate:    diary.dueDate,
+        assignedTo: diary.assignedTo,
+        priority:   diary.priority,
+        notes:      diary.notes,
+        status:     'open',
+        createdAt,
       });
     } catch (err) {
       logger.error({ msg: '_seedInitialDiaries: failed', diaryType: diary.type, err: err.message });
@@ -279,6 +291,31 @@ async function _runAnalysis(claimId) {
     });
     claimsStore.set(claimId, claim);
   }
+}
+
+// ── Trigger AI analysis (synchronous, for the POST /:id/analyze route) ───────
+
+/**
+ * Run AI analysis on a claim synchronously.
+ * Returns cached result immediately if analysis already exists.
+ */
+async function triggerAnalysis(claimId) {
+  const claim = claimsStore.get(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  if (claim.aiAnalysis) {
+    logger.info({ msg: 'triggerAnalysis: returning cached result', claimId });
+    return claimsStore.get(claimId);
+  }
+  await _runAnalysis(claimId);
+  return claimsStore.get(claimId);
+}
+
+// ── Get diaries for a claim ───────────────────────────────────────────────────
+
+async function getDiaries(claimId) {
+  const claim = claimsStore.get(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  return claim.diaries || [];
 }
 
 // ── Read operations ───────────────────────────────────────────────────────────
@@ -393,6 +430,8 @@ module.exports = {
   listClaims,
   approveReserves,
   updateStatus,
+  triggerAnalysis,
+  getDiaries,
   // exported for tests
   _runAnalysis,
   _nextClaimNumber,
