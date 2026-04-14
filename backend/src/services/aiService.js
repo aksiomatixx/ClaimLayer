@@ -160,4 +160,5 @@ async function evaluateRFA(rfa, claim) {
 module.exports = {
   analyzeCompensability,
   evaluateRFA,
+  _callClaude: callClaude, // exported for voiceService structured extraction
 };

@@ -367,6 +367,26 @@ async function updateStatus(claimId, newStatus, changedBy) {
   return claim;
 }
 
+// ── Test helpers (not for production use) ─────────────────────────────────────
+
+/**
+ * Directly insert a claim into the in-memory store.
+ * Use in tests to bypass the ADP + FileHandler dependencies.
+ */
+function _seedClaim(claim) {
+  claimsStore.set(claim.id, claim);
+  return claim;
+}
+
+/**
+ * Clear all claims from the in-memory store and reset the sequence counter.
+ * Call in afterEach alongside db._reset().
+ */
+function _resetClaims() {
+  claimsStore.clear();
+  _claimSeq = 42;
+}
+
 module.exports = {
   createClaim,
   getClaim,
@@ -376,4 +396,6 @@ module.exports = {
   // exported for tests
   _runAnalysis,
   _nextClaimNumber,
+  _seedClaim,
+  _resetClaims,
 };

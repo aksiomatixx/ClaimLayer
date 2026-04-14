@@ -8,8 +8,13 @@ const config      = require('./config');
 const logger      = require('./logger');
 const { auditLog } = require('./middleware/audit');
 
-const claimsRouter   = require('./routes/claims');
-const webhooksRouter = require('./routes/webhooks');
+const claimsRouter       = require('./routes/claims');
+const webhooksRouter     = require('./routes/webhooks');
+const providersRouter    = require('./routes/providers');
+const appointmentsRouter = require('./routes/appointments');
+const voiceRouter        = require('./routes/voice');
+const documentsRouter    = require('./routes/documents');
+const authRouter         = require('./routes/auth');
 
 const app = express();
 
@@ -24,8 +29,13 @@ app.get('/health', (_req, res) =>
 );
 
 // ── API routes ───────────────────────────────────────────────────────────────
-app.use('/api/v1/claims',  claimsRouter);
-app.use('/webhooks',       webhooksRouter);
+app.use('/api/v1/claims',        claimsRouter);
+app.use('/api/v1/providers',     providersRouter);
+app.use('/api/v1/appointments',  appointmentsRouter);
+app.use('/api/v1/voice',         voiceRouter);
+app.use('/api/v1/documents',     documentsRouter);
+app.use('/api/v1/auth',          authRouter);
+app.use('/webhooks',             webhooksRouter);
 
 // ── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) =>
