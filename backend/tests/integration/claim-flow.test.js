@@ -3,16 +3,68 @@
 /**
  * Integration test — full FROI → claim creation flow.
  *
- * Requires both mock servers running:
- *   python backend/mocks/mock_adp.py         (port 8001)
- *   python backend/mocks/mock_filehandler.py  (port 8002)
- *
- * ANTHROPIC_API_KEY must be set for the AI analysis assertions.
- * If unset, the AI step is skipped with a warning.
+ * ADP and FileHandler are mocked at the module level so no external servers
+ * are required.  ANTHROPIC_API_KEY must be set for AI analysis assertions;
+ * if unset, that step is skipped with a warning.
  *
  * Run:
  *   npm test -- tests/integration/claim-flow.test.js
  */
+
+// ── Mock external services ────────────────────────────────────────────────────
+jest.mock('../../src/services/aiService');
+
+jest.mock('../../src/services/adp', () => ({
+  getEmployeeWithFinancials: jest.fn().mockImplementation(async (id) => {
+    const EMPLOYEES = {
+      'BC-001': {
+        firstName: 'Maria',      lastName: 'Santos',
+        dob: '1981-03-15',       associateOID: 'aoid-bc-001',
+        address: { line1: '1234 Main St', city: 'Los Angeles', state: 'CA', zip: '90057' },
+        phone: '(213) 555-1001', jobTitle: 'Home Health Aide II',
+        hireDate: '2019-06-01',  aww: 750.75, tdRate: 500.50,
+        weeksCalculated: 26,     payStatements: [],
+      },
+      'CW-007': {
+        firstName: 'Thanh',      lastName: 'Nguyen',
+        dob: '1990-06-15',       associateOID: 'aoid-cw-007',
+        address: { state: 'CA', zip: '90802' },
+        phone: null,             jobTitle: 'Home Health Aide I',
+        hireDate: '2021-09-01',  aww: 304, tdRate: 252.03,
+        weeksCalculated: 26,     payStatements: [],
+      },
+      'BC-099': {
+        firstName: 'Priya',      lastName: 'Krishnamurthy',
+        dob: '1975-05-20',       associateOID: 'aoid-bc-099',
+        address: { state: 'CA', zip: '90024' },
+        phone: null,             jobTitle: 'Registered Nurse',
+        hireDate: '2015-03-01',  aww: 2600, tdRate: 1680.29,
+        weeksCalculated: 26,     payStatements: [],
+      },
+      'SR-022': {
+        firstName: 'James',      lastName: 'Miller',
+        dob: '1985-07-10',       associateOID: 'aoid-sr-022',
+        address: { state: 'CA', zip: '95814' },
+        phone: null,             jobTitle: 'Home Health Aide III',
+        hireDate: '2020-01-15',  aww: 800, tdRate: 533.33,
+        weeksCalculated: 26,     payStatements: [],
+      },
+    };
+    const emp = EMPLOYEES[id];
+    if (!emp) throw new Error(`Employee not found: ${id}`);
+    return emp;
+  }),
+}));
+
+jest.mock('../../src/services/filehandler', () => ({
+  setReserves:    jest.fn().mockResolvedValue({ status: 'ok' }),
+  createClaim:    jest.fn().mockResolvedValue({ claimId: 'fh_mock', status: 'created' }),
+  createDiary:    jest.fn().mockResolvedValue({ diaryId: 'diy_mock', status: 'created' }),
+  completeDiary:  jest.fn().mockResolvedValue({ status: 'completed' }),
+  attachDocument: jest.fn().mockResolvedValue({ documentId: 'doc_mock' }),
+  getLedger:      jest.fn().mockResolvedValue({ entries: [] }),
+  recordPayment:  jest.fn().mockResolvedValue({ paymentId: 'pay_mock' }),
+}));
 
 const request = require('supertest');
 const app     = require('../../src/index');

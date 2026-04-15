@@ -2,19 +2,156 @@
 
 /**
  * Unit tests for services/filehandler.js
- * Points at the mock FileHandler server (port 8002).
  *
- * Each describe block resets the mock DB via DELETE /mock/reset
- * so tests don't bleed state into each other.
+ * Uses jest.mock('axios') with in-memory state — no external server required.
+ * Call axios._resetState() between tests to clear the fake claim database.
  */
 
+// ── Axios mock with in-memory FileHandler state ───────────────────────────────
+jest.mock('axios', () => {
+  // Shared mutable state — reset via _resetState()
+  const state = { claims: {}, _id: 0 };
+
+  function nextId(prefix) {
+    return `${prefix}_${++state._id}`;
+  }
+
+  function resetState() {
+    state.claims = {};
+    state._id    = 0;
+  }
+
+  // Fake axios client returned by axios.create(...)
+  const client = {
+    // ── POST ───────────────────────────────────────────────────────────────────
+    post: async (path, data) => {
+      // POST /claims
+      if (path === '/claims') {
+        const { claimNumber } = data;
+        const dup = Object.values(state.claims).find(c => c.claimNumber === claimNumber);
+        if (dup) {
+          const err = new Error('Duplicate claim number');
+          err.response = { status: 409, data: { error: 'duplicate_claim_number' } };
+          return Promise.reject(err);
+        }
+        const claimId = nextId('fh');
+        state.claims[claimId] = {
+          claimId,
+          claimNumber,
+          status:    'open',
+          createdAt: new Date().toISOString(),
+          events:    [{ event_type: 'CLAIM_CREATED', timestamp: new Date().toISOString() }],
+          reserves:  [],
+          diaries:   {},
+          payments:  [],
+        };
+        return { data: state.claims[claimId] };
+      }
+
+      // POST /claims/:id/reserves
+      const mRes = path.match(/^\/claims\/([^/]+)\/reserves$/);
+      if (mRes) {
+        const claimId  = mRes[1];
+        const c        = state.claims[claimId];
+        if (!c) { const e = new Error('Not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        const prevTotal = c.reserves.length ? c.reserves[c.reserves.length - 1].newTotal : 0;
+        const newTotal  = (data.medicalReserve || 0) + (data.indemnityReserve || 0) + (data.expenseReserve || 0);
+        const reserveId = nextId('res');
+        c.reserves.push({ reserveId, newTotal, previousTotal: prevTotal, change: newTotal - prevTotal });
+        c.events.push({ event_type: 'RESERVE_SET', timestamp: new Date().toISOString() });
+        return { data: { reserveId, newTotal, previousTotal: prevTotal, change: newTotal - prevTotal } };
+      }
+
+      // POST /claims/:id/documents
+      const mDoc = path.match(/^\/claims\/([^/]+)\/documents$/);
+      if (mDoc) {
+        const claimId    = mDoc[1];
+        const c          = state.claims[claimId];
+        if (!c) { const e = new Error('Not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        const documentId    = nextId('doc');
+        const fileSizeBytes = data.file ? Buffer.from(data.file, 'base64').length : 0;
+        c.events.push({ event_type: 'DOCUMENT_ATTACHED', documentId });
+        return { data: { documentId, docType: data.docType, fileSizeBytes } };
+      }
+
+      // POST /claims/:id/diaries
+      const mDiary = path.match(/^\/claims\/([^/]+)\/diaries$/);
+      if (mDiary) {
+        const claimId = mDiary[1];
+        const c       = state.claims[claimId];
+        if (!c) { const e = new Error('Not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        const diaryId = nextId('diy');
+        c.diaries[diaryId] = { diaryId, status: 'open', dueDate: data.dueDate };
+        c.events.push({ event_type: 'DIARY_CREATED', diaryId });
+        return { data: { diaryId, status: 'open', dueDate: data.dueDate } };
+      }
+
+      // POST /claims/:id/payments
+      const mPay = path.match(/^\/claims\/([^/]+)\/payments$/);
+      if (mPay) {
+        const claimId    = mPay[1];
+        const c          = state.claims[claimId];
+        if (!c) { const e = new Error('Not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        const paymentId   = nextId('pay');
+        const checkNumber = `CHK-${String(state._id).padStart(6, '0')}`;
+        c.payments.push({ paymentId, amount: data.amount });
+        c.events.push({ event_type: 'PAYMENT_RECORDED', paymentId, amount: data.amount });
+        return { data: { paymentId, checkNumber, amount: data.amount, status: 'issued' } };
+      }
+
+      return Promise.reject(new Error(`FH mock: unexpected POST ${path}`));
+    },
+
+    // ── GET ────────────────────────────────────────────────────────────────────
+    get: async (path) => {
+      // GET /claims/:id/ledger
+      const mLedger = path.match(/^\/claims\/([^/]+)\/ledger$/);
+      if (mLedger) {
+        const claimId    = mLedger[1];
+        const c          = state.claims[claimId];
+        if (!c) { const e = new Error('Not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        const totalPaid    = c.payments.reduce((s, p) => s + p.amount, 0);
+        const lastReserve  = c.reserves[c.reserves.length - 1];
+        const totalReserve = lastReserve ? lastReserve.newTotal : 0;
+        return { data: { claimId, events: c.events, totalPaid, totalReserve } };
+      }
+
+      return Promise.reject(new Error(`FH mock: unexpected GET ${path}`));
+    },
+
+    // ── PATCH ──────────────────────────────────────────────────────────────────
+    patch: async (path, data) => {
+      // PATCH /claims/:id/diaries/:diaryId
+      const mPatch = path.match(/^\/claims\/([^/]+)\/diaries\/([^/]+)$/);
+      if (mPatch) {
+        const claimId  = mPatch[1];
+        const diaryId  = mPatch[2];
+        const c        = state.claims[claimId];
+        if (!c) { const e = new Error('Not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        const diary = c.diaries[diaryId];
+        if (!diary) { const e = new Error('Diary not found'); e.response = { status: 404 }; return Promise.reject(e); }
+        diary.status = data.status;
+        return { data: { diaryId, status: data.status } };
+      }
+
+      return Promise.reject(new Error(`FH mock: unexpected PATCH ${path}`));
+    },
+  };
+
+  return {
+    create:       jest.fn(() => client),
+    delete:       jest.fn(() => Promise.resolve({ data: {} })),
+    _resetState:  resetState,
+  };
+});
+
+// ── Modules under test ────────────────────────────────────────────────────────
 const axios = require('axios');
 const fh    = require('../../src/services/filehandler');
 
-const FH_BASE = process.env.FILEHANDLER_BASE_URL || 'http://localhost:8002';
-
-async function resetMock() {
-  await axios.delete(`${FH_BASE}/mock/reset`).catch(() => {});
+// Replace the Python-server reset with the in-memory state reset
+function resetMock() {
+  axios._resetState();
 }
 
 const SAMPLE_CLAIM = {
@@ -28,6 +165,7 @@ const SAMPLE_CLAIM = {
   injuryType:   'Lifting Injury',
 };
 
+// ═════════════════════════════════════════════════════════════════════════════
 describe('createClaim', () => {
   beforeEach(resetMock);
 
@@ -47,11 +185,12 @@ describe('createClaim', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
 describe('setReserves', () => {
   let fhClaimId;
 
   beforeEach(async () => {
-    await resetMock();
+    resetMock();
     const c = await fh.createClaim({ ...SAMPLE_CLAIM, claimNumber: 'HHW-TEST-002' });
     fhClaimId = c.claimId;
   });
@@ -79,11 +218,12 @@ describe('setReserves', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
 describe('attachDocument', () => {
   let fhClaimId;
 
   beforeEach(async () => {
-    await resetMock();
+    resetMock();
     const c = await fh.createClaim({ ...SAMPLE_CLAIM, claimNumber: 'HHW-TEST-003' });
     fhClaimId = c.claimId;
   });
@@ -103,11 +243,12 @@ describe('attachDocument', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
 describe('createDiary / completeDiary', () => {
   let fhClaimId;
 
   beforeEach(async () => {
-    await resetMock();
+    resetMock();
     const c = await fh.createClaim({ ...SAMPLE_CLAIM, claimNumber: 'HHW-TEST-004' });
     fhClaimId = c.claimId;
   });
@@ -144,11 +285,12 @@ describe('createDiary / completeDiary', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
 describe('recordPayment', () => {
   let fhClaimId;
 
   beforeEach(async () => {
-    await resetMock();
+    resetMock();
     const c = await fh.createClaim({ ...SAMPLE_CLAIM, claimNumber: 'HHW-TEST-005' });
     fhClaimId = c.claimId;
   });
@@ -171,11 +313,12 @@ describe('recordPayment', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
 describe('getLedger', () => {
   let fhClaimId;
 
   beforeEach(async () => {
-    await resetMock();
+    resetMock();
     const c = await fh.createClaim({ ...SAMPLE_CLAIM, claimNumber: 'HHW-TEST-006' });
     fhClaimId = c.claimId;
   });
