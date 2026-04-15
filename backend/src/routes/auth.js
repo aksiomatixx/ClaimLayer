@@ -36,6 +36,8 @@ function validate(req, res, next) {
 }
 
 // ── POST /api/v1/auth/magic-link/validate ─────────────────────────────────────
+// Employee opens their magic link → frontend POSTs the JWT here for validation.
+// Returns: { claim, employee, intake_progress } or 401/410.
 router.post(
   '/magic-link/validate',
   [body('token').notEmpty().withMessage('token is required')],
@@ -43,6 +45,7 @@ router.post(
   async (req, res) => {
     const { token } = req.body;
 
+    // 1. Decode and verify JWT
     let payload;
     try {
       payload = jwt.verify(token, config.jwtSecret);
@@ -54,7 +57,7 @@ router.post(
       return res.status(401).json({ error: 'invalid_token', message: 'Token is missing required claim context.' });
     }
 
-    // Check single-use (jti required for production; optional in dev)
+    // 2. Check single-use (jti required for production; optional in dev)
     if (payload.jti) {
       const tokenRecord = await db.magicLinkTokens.findByJti(payload.jti);
       if (!tokenRecord) {
@@ -63,10 +66,11 @@ router.post(
       if (tokenRecord.used_at) {
         return res.status(410).json({ error: 'link_already_used', message: 'This link has already been used. Please contact your employer for a new link.' });
       }
+      // Mark used atomically
       await db.magicLinkTokens.markUsed(payload.jti);
     }
 
-    // Pull employee from ADP (or use cached record)
+    // 3. Pull employee from ADP (or use cached record)
     let employee = await db.employees.findByAdpId(payload.adpEmployeeId);
     if (!employee && payload.adpEmployeeId) {
       try {
@@ -74,16 +78,19 @@ router.post(
         employee = await db.employees.upsert(payload.adpEmployeeId, adpData);
       } catch (err) {
         logger.warn({ msg: 'magic-link: ADP pull failed (non-fatal)', err: err.message });
+        // Use payload data as fallback
         employee = { adpEmployeeId: payload.adpEmployeeId };
       }
     }
 
+    // 4. Fetch claim
     const claimService = require('../services/claimService');
     const claim = await claimService.getClaim(payload.claimId);
     if (!claim) {
       return res.status(404).json({ error: 'Claim not found for this link.' });
     }
 
+    // 5. Initialize intake progress if first visit
     if (!claim.intakeProgress) {
       claim.intakeProgress = {
         voice_complete:       false,
@@ -95,6 +102,7 @@ router.post(
       };
     }
 
+    // 6. Issue a session JWT for the employee (valid for 24h from link validation)
     const sessionToken = jwt.sign(
       { sub: payload.adpEmployeeId, role: 'employee', claimId: payload.claimId, employerId: claim.employerId },
       config.jwtSecret,
@@ -112,7 +120,7 @@ router.post(
   }
 );
 
-// ── POST /api/v1/auth/magic-link/generate ─────────────────────────────────────
+// ── POST /api/v1/auth/magic-link/generate — admin generates link for employee ─
 router.post(
   '/magic-link/generate',
   requireAuth,
@@ -191,7 +199,9 @@ router.post(
   }
 );
 
-// ── GET /api/v1/auth/dev-session ──────────────────────────────────────────────
+// ── GET /api/v1/auth/dev-session — dev-only admin auto-login ──────────────────
+// Issues an admin cookie for local development and demo environments.
+// BLOCKED in production and when NODE_ENV is unset.
 router.get('/dev-session', (req, res) => {
   if (!['development', 'test'].includes(process.env.NODE_ENV)) {
     return res.status(403).json({ error: 'Not available in production' });
@@ -208,7 +218,9 @@ router.get('/dev-session', (req, res) => {
   res.json({ ok: true, role: 'admin', expiresIn: '8h' });
 });
 
-// ── GET /api/v1/auth/dev-employer-session ─────────────────────────────────────
+// ── GET /api/v1/auth/dev-employer-session — dev-only employer auto-login ──────
+// Issues an employer cookie for local development and demo environments.
+// BLOCKED in production and when NODE_ENV is unset.
 router.get('/dev-employer-session', (req, res) => {
   if (!['development', 'test'].includes(process.env.NODE_ENV)) {
     return res.status(403).json({ error: 'Not available in production' });
@@ -225,13 +237,15 @@ router.get('/dev-employer-session', (req, res) => {
   res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare-001', employerName: 'BrightCare Home Health' });
 });
 
-// ── POST /api/v1/auth/mfa/enroll ──────────────────────────────────────────────
+// ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M5) ─────────────
 router.post('/mfa/enroll', requireAuth, (req, res) => {
+  // Placeholder — wire to Supabase Auth MFA API in M5
   res.status(501).json({ error: 'MFA enrollment not yet implemented — coming in M5' });
 });
 
-// ── POST /api/v1/auth/mfa/verify ──────────────────────────────────────────────
+// ── POST /api/v1/auth/mfa/verify — Supabase MFA verify stub (M5) ─────────────
 router.post('/mfa/verify', requireAuth, (req, res) => {
+  // Placeholder — wire to Supabase Auth MFA API in M5
   res.status(501).json({ error: 'MFA verification not yet implemented — coming in M5' });
 });
 

@@ -31,9 +31,9 @@ router.post(
     body('dateOfInjury')
       .isISO8601().withMessage('dateOfInjury must be a valid date (YYYY-MM-DD)'),
     body('bodyPart')
-      .notEmpty().withMessage('bodyPart is required'),
+      .optional().isLength({ max: 100 }).withMessage('bodyPart must be 100 characters or fewer'),
     body('injuryType')
-      .notEmpty().withMessage('injuryType is required'),
+      .optional().isLength({ max: 100 }).withMessage('injuryType must be 100 characters or fewer'),
     body('injuryDescription')
       .isLength({ min: 10 }).withMessage('injuryDescription must be at least 10 characters'),
   ],

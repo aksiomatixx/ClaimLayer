@@ -64,8 +64,7 @@ function generateAdminToken(payload) {
 }
 
 // ── generateEmployerToken ─────────────────────────────────────────────────────
-// Issues an 8-hour JWT for the employer portal session.
-// Payload should include: { sub, email, employerId, employerName }
+// Issues an 8-hour JWT for employer portal sessions.
 function generateEmployerToken(payload) {
   return jwt.sign(
     { ...payload, role: 'employer' },

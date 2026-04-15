@@ -14,6 +14,7 @@
 // ── Mock Supabase (must be first, before any service imports) ─────────────────
 jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
 
+
 // ── Mock external services ────────────────────────────────────────────────────
 jest.mock('../../src/services/adp', () => ({
   getEmployeeWithFinancials: jest.fn().mockImplementation(async (id) => {

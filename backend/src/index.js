@@ -15,6 +15,7 @@ const appointmentsRouter = require('./routes/appointments');
 const voiceRouter        = require('./routes/voice');
 const documentsRouter    = require('./routes/documents');
 const authRouter         = require('./routes/auth');
+const employerRouter     = require('./routes/employer');
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/api/v1/appointments',  appointmentsRouter);
 app.use('/api/v1/voice',         voiceRouter);
 app.use('/api/v1/documents',     documentsRouter);
 app.use('/api/v1/auth',          authRouter);
+app.use('/api/v1/employer',      employerRouter);
 app.use('/webhooks',             webhooksRouter);
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────
