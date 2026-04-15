@@ -33,6 +33,7 @@ ai_decisions       → Every Claude analysis
 
 -- Auth / Admin
 users              → System users (employers, admins)
+magic_link_tokens  → Single-use FROI intake tokens (72h TTL, jti-based)
 audit_log          → Every admin action
 ```
 
@@ -162,9 +163,20 @@ CREATE TABLE claims (
     dxf_roster_enrolled BOOLEAN DEFAULT FALSE,
     dxf_enrolled_at     TIMESTAMPTZ,
     
+    -- Employer portal / magic link (M4)
+    magic_link_sent_at  TIMESTAMPTZ,                   -- When the intake magic link was first emailed
+    intake_progress     JSONB DEFAULT '{              -- Employee intake wizard step completion
+                          "voice_complete":false,
+                          "media_complete":false,
+                          "mpn_acknowledged":false,
+                          "provider_selected":false,
+                          "appointment_confirmed":false,
+                          "dwc1_generated":false
+                        }',
+
     -- Admin
     filed_by            VARCHAR(20),                   -- 'employer' | 'employee'
-    filed_at            TIMESTAMPTZ DEFAULT NOW(),
+    filed_at            TIMESTAMPTZ DEFAULT NOW(),     -- FROI receipt timestamp (LC §5400)
     adjuster_id         UUID REFERENCES users(id),
     
     created_at          TIMESTAMPTZ DEFAULT NOW(),
@@ -537,6 +549,35 @@ CREATE TABLE users (
 );
 ```
 
+### magic_link_tokens
+```sql
+-- Single-use JWT tokens for the employee intake flow.
+-- jti is stored here so the validate endpoint can enforce one-time use.
+-- Clean up expired unused tokens periodically (cron or pg_cron).
+CREATE TABLE magic_link_tokens (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    jti                 VARCHAR(200) UNIQUE NOT NULL,    -- JWT ID claim — one row per issued link
+    claim_id            VARCHAR(20) REFERENCES claims(id),
+    adp_employee_id     VARCHAR(50) NOT NULL,
+
+    -- Validity window
+    expires_at          TIMESTAMPTZ NOT NULL,            -- 72 hours after generation
+    used_at             TIMESTAMPTZ,                     -- Set atomically on first use; NULL = still valid
+
+    -- Provenance
+    generated_by        UUID REFERENCES users(id),       -- Employer or admin who triggered FROI
+    sent_to_email       VARCHAR(200),                    -- Destination address (store encrypted in prod)
+
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- jti lookup is the hot path on every magic-link validation
+CREATE UNIQUE INDEX idx_magic_link_tokens_jti ON magic_link_tokens(jti);
+CREATE INDEX idx_magic_link_tokens_claim ON magic_link_tokens(claim_id);
+-- Find expired-but-unused tokens for cleanup job
+CREATE INDEX idx_magic_link_tokens_cleanup ON magic_link_tokens(expires_at) WHERE used_at IS NULL;
+```
+
 ### audit_log
 ```sql
 -- Every admin action. Never delete. 7-year retention per CA WC regulations.
@@ -621,5 +662,6 @@ CREATE INDEX idx_docs_unread ON documents(received_at) WHERE ai_read = FALSE;
 
 ---
 
-*Schema version 1.0 — April 2026*  
+*Schema version 1.1 — April 2026*  
+*M4 additions: `magic_link_tokens` table; `claims.magic_link_sent_at` and `claims.intake_progress` columns.*  
 *Changes to this schema must be made via numbered migrations. Never alter production tables directly.*
