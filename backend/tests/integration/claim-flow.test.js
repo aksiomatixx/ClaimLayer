@@ -12,8 +12,6 @@
  */
 
 // ── Mock external services ────────────────────────────────────────────────────
-jest.mock('../../src/services/aiService');
-
 jest.mock('../../src/services/adp', () => ({
   getEmployeeWithFinancials: jest.fn().mockImplementation(async (id) => {
     const EMPLOYEES = {
