@@ -1,10 +1,15 @@
 'use strict';
 
 /**
- * auth.js — Authentication routes for M2 magic link intake flow.
+ * auth.js — Authentication routes.
  *
- * POST /api/v1/auth/magic-link/validate  — validates single-use token, returns intake state
- * POST /api/v1/auth/magic-link/generate  — generates a new magic link (admin only)
+ * POST /api/v1/auth/magic-link/validate      — validates single-use token, returns intake state
+ * POST /api/v1/auth/magic-link/generate      — generates a new magic link (admin only)
+ * POST /api/v1/auth/employer/login           — email/password login for employer portal
+ * GET  /api/v1/auth/dev-session              — dev-only admin auto-login
+ * GET  /api/v1/auth/dev-employer-session     — dev-only employer auto-login
+ * POST /api/v1/auth/mfa/enroll              — MFA enroll stub (M5)
+ * POST /api/v1/auth/mfa/verify              — MFA verify stub (M5)
  */
 
 const express = require('express');
@@ -14,7 +19,7 @@ const db      = require('../services/db');
 const adp     = require('../services/adp');
 const logger  = require('../logger');
 const config  = require('../config');
-const { requireAuth, requireRole, generateMagicToken } = require('../middleware/auth');
+const { requireAuth, requireRole, generateMagicToken, generateEmployerToken } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -145,9 +150,50 @@ router.post(
   }
 );
 
-// ── GET /api/v1/auth/dev-session — dev-only auto-login ────────────────────────
+// ── POST /api/v1/auth/employer/login ─────────────────────────────────────────
+// Email + password login for employer portal.
+// Production replacement: swap mock lookup for supabase.auth.signInWithPassword()
+router.post(
+  '/employer/login',
+  [
+    body('email').isEmail().withMessage('email must be a valid email address'),
+    body('password').notEmpty().withMessage('password is required'),
+  ],
+  validate,
+  (req, res) => {
+    const { email, password } = req.body;
+
+    const user = db.users.findByEmail(email);
+    if (!user || user.role !== 'employer') {
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
+
+    // Mock password check — replace with Supabase Auth in M5
+    if (!db.users.checkPassword(email, password)) {
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
+
+    const token = generateEmployerToken({
+      sub:          user.id,
+      email:        user.email,
+      employerId:   user.employer_id,
+      employerName: user.employer_name,
+    });
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge:   8 * 60 * 60 * 1000, // 8 hours
+    });
+
+    logger.info({ msg: 'employer/login: success', email, employerId: user.employer_id });
+    res.json({ ok: true, employer_id: user.employer_id, employer_name: user.employer_name, email: user.email });
+  }
+);
+
+// ── GET /api/v1/auth/dev-session — dev-only admin auto-login ──────────────────
 // Issues an admin cookie for local development and demo environments.
-// BLOCKED in production (NODE_ENV === 'production').
+// BLOCKED in production and when NODE_ENV is unset.
 router.get('/dev-session', (req, res) => {
   if (!['development', 'test'].includes(process.env.NODE_ENV)) {
     return res.status(403).json({ error: 'Not available in production' });
@@ -169,16 +215,40 @@ router.get('/dev-session', (req, res) => {
   res.json({ ok: true, role: 'admin', expiresIn: '8h' });
 });
 
-// ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M4) ─────────────
-router.post('/mfa/enroll', requireAuth, (req, res) => {
-  // Placeholder — wire to Supabase Auth MFA API in M4
-  res.status(501).json({ error: 'MFA enrollment not yet implemented — coming in M4' });
+// ── GET /api/v1/auth/dev-employer-session — dev-only employer auto-login ──────
+// Issues an employer cookie for local development and demo environments.
+// BLOCKED in production and when NODE_ENV is unset.
+router.get('/dev-employer-session', (req, res) => {
+  if (!['development', 'test'].includes(process.env.NODE_ENV)) {
+    return res.status(403).json({ error: 'Not available in production' });
+  }
+
+  const token = generateEmployerToken({
+    sub:          'dev-employer',
+    email:        'hr@brightcarehh.com',
+    employerId:   'employer-brightcare',
+    employerName: 'BrightCare Home Health',
+  });
+
+  res.cookie('token', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge:   8 * 60 * 60 * 1000, // 8 hours
+  });
+
+  res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare', employerName: 'BrightCare Home Health' });
 });
 
-// ── POST /api/v1/auth/mfa/verify — Supabase MFA verify stub (M4) ─────────────
+// ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M5) ─────────────
+router.post('/mfa/enroll', requireAuth, (req, res) => {
+  // Placeholder — wire to Supabase Auth MFA API in M5
+  res.status(501).json({ error: 'MFA enrollment not yet implemented — coming in M5' });
+});
+
+// ── POST /api/v1/auth/mfa/verify — Supabase MFA verify stub (M5) ─────────────
 router.post('/mfa/verify', requireAuth, (req, res) => {
-  // Placeholder — wire to Supabase Auth MFA API in M4
-  res.status(501).json({ error: 'MFA verification not yet implemented — coming in M4' });
+  // Placeholder — wire to Supabase Auth MFA API in M5
+  res.status(501).json({ error: 'MFA verification not yet implemented — coming in M5' });
 });
 
 module.exports = router;

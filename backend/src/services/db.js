@@ -429,6 +429,37 @@ const employers = {
   },
 };
 
+// ── users (mock — replace with Supabase Auth in M5) ──────────────────────────
+const MOCK_USERS = [
+  {
+    id:            'user-employer-1',
+    email:         'hr@brightcarehh.com',
+    // plaintext mock password — Supabase handles real hashing in M5
+    _password:     'test1234',
+    role:          'employer',
+    employer_id:   'employer-brightcare',
+    employer_name: 'BrightCare Home Health',
+  },
+  {
+    id:            'user-employer-2',
+    email:         'hr@carewellservices.com',
+    _password:     'test1234',
+    role:          'employer',
+    employer_id:   'employer-carewell-001',
+    employer_name: 'CareWell Services',
+  },
+];
+
+const users = {
+  findByEmail(email) {
+    return MOCK_USERS.find(u => u.email === email) || null;
+  },
+  checkPassword(email, password) {
+    const user = MOCK_USERS.find(u => u.email === email);
+    return user ? user._password === password : false;
+  },
+};
+
 // ── Test/reset helper ─────────────────────────────────────────────────────────
 function _reset() {
   appointmentsStore.clear();
@@ -444,6 +475,7 @@ module.exports = {
   magicLinkTokens,
   employees,
   employers,
+  users,
   zipDistance,
   _reset,
 };

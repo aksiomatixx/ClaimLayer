@@ -26,6 +26,7 @@ homecare-tpa/
 │       ├── locales/                  ← en.json, es.json translation files
 │       └── services/
 │           ├── claims.js             ← fetch wrappers: fetchClaims, triggerAnalysis, etc.
+│           ├── employer.js           ← loginEmployer, submitFROI, previewEmployee
 │           └── providers.js          ← fetchProviders(zipCode, limit)
 ├── backend/                          ← Express (Node.js) API
 │   ├── src/
@@ -40,15 +41,17 @@ homecare-tpa/
 │   │   │   ├── pdfService.js         ← DWC-1, AI reasoning, auth letter (pdf-lib)
 │   │   │   ├── appointmentService.js ← MPN appointment booking
 │   │   │   ├── providerService.js    ← Provider search by zip + specialty
-│   │   │   ├── db.js                 ← In-memory DB helpers (M2, replace with Supabase in M4)
+│   │   │   ├── db.js                 ← In-memory DB helpers (replace with Supabase in M5)
+│   │   │   ├── notificationService.js ← SendGrid magic-link email (no-op without API key)
 │   │   │   └── voiceService.js       ← OpenAI Whisper transcription + Claude extraction
 │   │   ├── routes/
 │   │   │   ├── claims.js             ← /api/v1/claims (CRUD + analyze + pdf + diaries)
+│   │   │   ├── employer.js           ← /api/v1/employer (FROI submission + employee preview)
 │   │   │   ├── providers.js          ← /api/v1/providers
 │   │   │   ├── appointments.js       ← /api/v1/appointments
 │   │   │   ├── voice.js              ← /api/v1/voice (Whisper + text extraction)
 │   │   │   ├── documents.js          ← /api/v1/documents
-│   │   │   ├── auth.js               ← /api/v1/auth (magic link + dev-session)
+│   │   │   ├── auth.js               ← /api/v1/auth (magic link, employer login, dev-session)
 │   │   │   └── webhooks.js           ← DxF ADT, Enlyte, Lob receivers
 │   │   └── middleware/
 │   │       ├── auth.js               ← JWT validation, role enforcement, requireMFA stub
@@ -69,7 +72,8 @@ homecare-tpa/
 │   │   └── integration/
 │   │       ├── claim-flow.test.js         ← Full FROI → ADP → FH → AI flow
 │   │       ├── intake-flow.test.js        ← M2: appointments, MPN, intake-progress
-│   │       └── admin-console.test.js      ← M3: analyze, reserves, status, PDF, diaries
+│   │       ├── admin-console.test.js      ← M3: analyze, reserves, status, PDF, diaries
+│   │       └── employer-portal.test.js   ← M4: FROI, employer auth, RLS, magic link
 │   ├── package.json
 │   └── .env.example
 ├── docs/
@@ -206,14 +210,29 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M1 | Foundation: Express backend, FileHandler client, ADP client, auth middleware, CI pipeline, mock servers, unit + integration test suite | ✅ Complete |
 | M2 | Employee intake: Voice (Whisper), media upload, provider finder, appointment booking, DWC-1 (pdf-lib), i18n (EN/ES) | ✅ Complete |
 | M3 | Admin console: Action queue, AI analysis (backend-only), reserve approval, diaries, reasoning PDF, React Query | ✅ Complete |
-| M4 | Supabase Auth + MFA, Employer portal FROI, magic link status dashboard | 🔲 Not started |
+| M4 | Employer portal: FROI submission, magic link generation, employer email/password auth, claim RLS per employer, LC §4650/§4652 DELAY_NOTICE_DUE diary | ✅ Complete |
 | M5 | DxF / QHIO: Manifest MedEx roster, ADT push, clinical document pull | 🔲 Not started |
 | M6 | RFA engine: MTUS evaluation, auto-approval, Enlyte URO routing | 🔲 Not started |
 | M7 | Diary engine: Auto-generation, event-triggered updates, escalation | 🔲 Not started |
 | M8 | Notice center: Lob.com integration, statutory notice generation | 🔲 Not started |
 | M9 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
 
-### M3 — What was built (current)
+### M4 — What was built (current)
+
+- **`backend/src/routes/auth.js`** — Added `POST /api/v1/auth/employer/login` (email + password → employer JWT cookie) and `GET /api/v1/auth/dev-employer-session` (dev auto-login, blocked in production). MFA stubs relabelled M5.
+- **`backend/src/routes/employer.js`** (new) — `POST /api/v1/employer/froi`: auth-guarded (employer + admin roles), ADP pull, `claimService.createClaim`, magic token generation + single-use tracking, `notificationService.sendMagicLinkEmail`, 201 response with `magic_link_url`. `GET /api/v1/employer/employee-preview/:adpEmployeeId`: name/title preview before FROI submit, always returns 200.
+- **`backend/src/services/notificationService.js`** (new) — `sendMagicLinkEmail`: no-op when `SENDGRID_API_KEY` absent (dev/test), otherwise sends via `@sendgrid/mail`. PHI constraint: only claim number + employer name in email body, no body part / AWW / diagnosis.
+- **`backend/src/middleware/auth.js`** — Added `generateEmployerToken` (8-hour JWT, role: `employer`). Exported alongside existing helpers.
+- **`backend/src/services/db.js`** — Added `users` store: two mock employer accounts, `findByEmail`, `checkPassword` (plain-text for dev; replace with Supabase Auth in M5). Added `magicLinkTokens` store with `create`, `findByJti`, `markUsed` for single-use token enforcement.
+- **`backend/src/services/claimService.js`** — Added `filed_at: now` (LC §5400 FROI receipt timestamp). Added `DELAY_NOTICE_DUE` diary at `filed_at + 14 calendar days` (LC §4650/§4652 — delay notice required if compensability decision not made within 14 days of FROI receipt).
+- **`backend/src/routes/claims.js`** — Changed `bodyPart` and `injuryType` from required to optional (employers often don't know exact body part at time of FROI).
+- **`backend/src/index.js`** — Wired `employer` router at `/api/v1/employer`.
+- **`frontend/src/services/employer.js`** (new) — Fetch wrappers: `loginEmployer`, `ensureDevEmployerSession`, `previewEmployee`, `submitFROI`.
+- **`frontend/src/App.jsx`** — Added `EmployerLogin` (email/password form), `FROIForm` (ADP preview on blur, DOI date picker, optional body/injury dropdowns, loading states, success with magic link copy, no-email warning), updated `EmployerPortal` (React Query claims table with Link Status + Filed columns, RLS-scoped to employer JWT). Root `App` now handles `employerUser` state and calls `ensureDevEmployerSession` on role switch.
+- **`backend/tests/integration/employer-portal.test.js`** (new) — 18 integration tests: employer login (valid / wrong password / unknown email), dev-employer-session (dev / production guard), FROI (happy path / unknown ADP ID / future DOI / missing fields / no auth / admin token / employee token), employee-preview (found / not found), claims RLS (employer-scoped / admin bypass), optional bodyPart/injuryType.
+- **Jest mocks replace Python mock servers** — `tests/unit/adp.test.js` and `tests/unit/filehandler.test.js` rewritten with `jest.mock('axios')` and in-memory state. `tests/integration/claim-flow.test.js` uses module-level `jest.mock` for ADP and FileHandler. No external processes required to run the full test suite.
+
+### M3 — What was built
 
 - **Security fix (Issue #13)**: Removed `runAIAnalysis()` from the browser — it was calling `api.anthropic.com` directly and exposing `ANTHROPIC_API_KEY` in DevTools network traffic. AI analysis now runs server-side via `POST /api/v1/claims/:id/analyze`.
 - **`backend/src/routes/claims.js`** — Added `POST /:id/analyze` (trigger/cache), `GET /:id/reasoning-pdf` (PDF download), `GET /:id/diaries` (list diaries).
@@ -281,7 +300,11 @@ git clone https://github.com/aksiomatixx/homecare-tpa.git
 cd homecare-tpa
 ```
 
-### Mock servers (required for backend)
+### Mock servers (optional — manual API exploration only)
+
+The Jest test suite uses `jest.mock('axios')` and does not require external processes.
+The Python mock servers are only needed if you want to test raw ADP/FileHandler HTTP calls
+directly (e.g. with Postman or curl against a running backend).
 
 ```bash
 pip install fastapi uvicorn pydantic
@@ -306,7 +329,7 @@ npm run dev                 # starts on port 3001
 
 ```bash
 cd backend
-npm test                    # requires both mock servers running
+npm test                    # no external processes required
 ```
 
 ### Frontend
@@ -330,6 +353,10 @@ ADP_CLIENT_ID=mock
 ADP_CLIENT_SECRET=mock
 ADP_AUTH_URL=http://localhost:8001/auth/oauth/v2/token
 ADP_BASE_URL=http://localhost:8001
+
+# M4 — optional; magic-link emails are no-op without this
+SENDGRID_API_KEY=           # from sendgrid.com
+FRONTEND_URL=http://localhost:5173
 ```
 
 Full variable reference: `backend/.env.example`

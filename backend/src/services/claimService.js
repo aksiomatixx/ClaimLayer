@@ -84,6 +84,9 @@ async function createClaim(froiData, employerId) {
     injuryDescription: froiData.injuryDescription,
     employerName:      froiData.employerName,
 
+    // LC §5400 — filed_at is the FROI receipt timestamp, NOT employee intake completion.
+    filed_at: now,
+
     // Set after FileHandler sync
     filehandlerId: null,
 
@@ -196,6 +199,14 @@ async function _seedInitialDiaries(claim) {
       assignedTo: 'system@homecaretpa.com',
       priority:   'CRITICAL',
       notes:      `LC §5402 — claim presumed compensable by operation of law if not accepted or denied within 90 calendar days. DOI: ${doi}. Missing this deadline is a critical compliance failure.`,
+    },
+    {
+      type:       'DELAY_NOTICE_DUE',
+      dueDate:    new Date(new Date(claim.filed_at).getTime() + 14 * 24 * 60 * 60 * 1000)
+                    .toISOString().split('T')[0],
+      assignedTo: 'system@homecaretpa.com',
+      priority:   'HIGH',
+      notes:      `LC §4650/§4652 — if compensability decision is not made within 14 days of FROI receipt (${claim.filed_at.split('T')[0]}), a delay notice must be sent to the employee. Clock starts at FROI filing, not injury date.`,
     },
   ];
 
