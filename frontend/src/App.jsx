@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchClaims, fetchClaim, triggerAnalysis, approveReserves, updateClaimStatus, fetchDiaries, ensureDevSession } from './services/claims.js';
+import { loginEmployer, ensureDevEmployerSession, previewEmployee, submitFROI } from './services/employer.js';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -1342,66 +1343,239 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
 // ═══════════════════════════════════════════════════════════
 // EMPLOYER PORTAL
 // ═══════════════════════════════════════════════════════════
-function EmployerPortal({claims,onSubmit,onSelect}){
-  const [view,setView]=useState("new");
-  const [linkEmail,setLinkEmail]=useState("");
-  const [linkName,setLinkName]=useState("");
-  const [genLink,setGenLink]=useState(null);
-  const myClaims=claims.filter(c=>c.employer==="BrightCare Home Health");
+// ── Link status derived from claim.events ─────────────────────────────────────
+function linkStatus(claim){
+  const evts=claim.events||[];
+  if(evts.some(e=>e.type==='intake_complete')) return {label:'Completed',color:C.green,bg:C.greenF};
+  if(evts.some(e=>e.type==='magic_link_validated')) return {label:'Opened',color:C.cyan,bg:C.tealF};
+  if(evts.some(e=>e.type==='magic_link_sent')) return {label:'Sent',color:C.amber,bg:C.amberF};
+  return {label:'Not Sent',color:C.muted,bg:'transparent'};
+}
 
-  const makeLink=()=>{if(!linkEmail||!linkName) return;const t=btoa(`${linkName}:${linkEmail}:${Date.now()}`).slice(0,22);setGenLink(`https://homecare-tpa.com/claim?t=${t}&e=BrightCare`);};
+// ═══════════════════════════════════════════════════════════
+// EMPLOYER LOGIN
+// ═══════════════════════════════════════════════════════════
+function EmployerLogin({onLogin}){
+  const [email,setEmail]=useState('hr@brightcarehh.com');
+  const [password,setPassword]=useState('test1234');
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(null);
+
+  const submit=async(e)=>{
+    e.preventDefault();
+    setLoading(true);setError(null);
+    try{
+      const data=await loginEmployer(email,password);
+      onLogin({employerId:data.employer_id,employerName:data.employer_name,email:data.email});
+    }catch(err){
+      setError(err.data?.error==='invalid_credentials'?'Invalid email or password.':err.message||'Login failed.');
+    }finally{setLoading(false);}
+  };
 
   return(
-    <div style={{paddingTop:32,maxWidth:860,animation:"fadeUp .3s ease"}}>
-      <div style={{marginBottom:22}}><h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Employer Portal</h1><p style={{color:C.muted,fontSize:13}}>BrightCare Home Health</p></div>
-      <Tabs tabs={[{key:"new",label:"Report Injury"},{key:"link",label:"Send Employee Link"},{key:"list",label:`Claims (${myClaims.length})`}]} active={view} onChange={setView}/>
-      {view==="new"&&(
-        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:28}}>
-          <div style={{fontSize:14,fontWeight:700,marginBottom:18}}>File First Report of Injury (FROI)</div>
-          <EmployeeIntakeWizard onComplete={d=>onSubmit({...d,employer:"BrightCare Home Health"},"employer")}/>
+    <div style={{paddingTop:64,maxWidth:400,margin:"0 auto",animation:"fadeUp .3s ease"}}>
+      <div style={{marginBottom:28,textAlign:"center"}}>
+        <div style={{fontSize:22,fontWeight:700,marginBottom:6}}>Employer Portal</div>
+        <div style={{fontSize:13,color:C.muted}}>Sign in to manage your workers' compensation claims</div>
+      </div>
+      <form onSubmit={submit} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:28}}>
+        <Field label="Email"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username"/></Field>
+        <Field label="Password"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required autoComplete="current-password"/></Field>
+        {error&&<div style={{marginBottom:14,padding:"10px 14px",background:C.redF,border:`1px solid ${C.red}44`,borderRadius:8,fontSize:12,color:C.red}}>{error}</div>}
+        <Btn type="submit" disabled={loading} style={{width:"100%"}}>{loading?'Signing in…':'Sign In →'}</Btn>
+      </form>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// FROI FORM
+// ═══════════════════════════════════════════════════════════
+function FROIForm(){
+  const today=new Date().toISOString().split('T')[0];
+  const oneYearAgo=new Date(Date.now()-365*24*60*60*1000).toISOString().split('T')[0];
+
+  const [adpId,setAdpId]=useState('');
+  const [doi,setDoi]=useState('');
+  const [bodyPart,setBodyPart]=useState('');
+  const [injuryType,setInjuryType]=useState('');
+  const [preview,setPreview]=useState(null);   // {found,first_name,last_name,job_title,email_masked}
+  const [previewLoading,setPreviewLoading]=useState(false);
+  const [submitState,setSubmitState]=useState('idle'); // idle|loading|success|error
+  const [result,setResult]=useState(null);
+  const [errorMsg,setErrorMsg]=useState(null);
+
+  const handleAdpBlur=async()=>{
+    if(!adpId.trim()){setPreview(null);return;}
+    setPreviewLoading(true);
+    try{setPreview(await previewEmployee(adpId.trim()));}
+    catch{setPreview({found:false});}
+    finally{setPreviewLoading(false);}
+  };
+
+  const handleSubmit=async(e)=>{
+    e.preventDefault();
+    setSubmitState('loading');setErrorMsg(null);
+    try{
+      const data=await submitFROI({adpEmployeeId:adpId.trim(),dateOfInjury:doi,bodyPart:bodyPart||undefined,injuryType:injuryType||undefined});
+      setResult(data);setSubmitState('success');
+    }catch(err){
+      setErrorMsg(err.data?.error||err.message||'Submission failed');
+      setSubmitState('error');
+    }
+  };
+
+  if(submitState==='success'&&result){
+    const ls=linkStatus({events:[{type:'magic_link_sent'}]});
+    return(
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:28,animation:"fadeUp .3s ease"}}>
+        <Lbl color={C.green} style={{fontSize:16,marginBottom:16}}>Claim Created</Lbl>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 24px",marginBottom:20}}>
+          <InfoPair label="Claim Number" value={result.claim_number} mono accent={C.amber}/>
+          <InfoPair label="Employee" value={`${result.employee_name} · ${result.adp_data?.job_title||'—'}`}/>
         </div>
-      )}
-      {view==="link"&&(
-        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:28}}>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>Send Employee Claim Link</div>
-          <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Employee receives a secure magic link. Their ADP data auto-populates — they only describe their injury. Expires in 72 hours.</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
-            <Field label="Employee Name"><input value={linkName} onChange={e=>setLinkName(e.target.value)} placeholder="Employee full name"/></Field>
-            <Field label="Employee Email"><input value={linkEmail} onChange={e=>setLinkEmail(e.target.value)} placeholder="employee@email.com"/></Field>
+        {result.warning==='no_employee_email'?(
+          <div style={{marginBottom:18,padding:"14px 16px",background:C.amberF,border:`1px solid ${C.amber}44`,borderRadius:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:6}}>No email on file</div>
+            <div style={{fontSize:12,color:C.dim,marginBottom:10}}>{result.warning_message}</div>
+            <div style={{fontFamily:C.mono,fontSize:10,color:C.cyan,background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",wordBreak:"break-all",marginBottom:10}}>{result.magic_link_url}</div>
+            <Btn small onClick={()=>navigator.clipboard?.writeText(result.magic_link_url)}>Copy Link</Btn>
           </div>
-          <Btn onClick={makeLink} disabled={!linkEmail||!linkName}>Generate Claim Link →</Btn>
-          {genLink&&(
-            <div style={{marginTop:18,background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:18,animation:"fadeUp .2s ease"}}>
-              <Lbl color={C.green}>✓ Link Generated for {linkName}</Lbl>
-              <div style={{fontFamily:C.mono,fontSize:11,color:C.cyan,background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 13px",wordBreak:"break-all",marginBottom:12}}>{genLink}</div>
-              <div style={{display:"flex",gap:8}}>
-                <Btn small onClick={()=>navigator.clipboard?.writeText(genLink)}>Copy Link</Btn>
-                <Btn small variant="ghost">Send Email to {linkEmail}</Btn>
-              </div>
-              <div style={{marginTop:12,fontSize:11,color:C.muted,lineHeight:1.7}}>When opened: ADP demographics auto-fill · Employee completes injury description · Voice notes and photos supported · DWC-1 auto-generated on submit</div>
+        ):(
+          <div style={{marginBottom:18,padding:"14px 16px",background:C.greenF,border:`1px solid ${C.green}44`,borderRadius:8}}>
+            <div style={{fontSize:12,color:C.dim}}>Magic link sent to <strong style={{color:C.text}}>{result.email_masked}</strong></div>
+            <div style={{fontSize:11,color:C.muted,marginTop:4}}>Expires in 72 hours · {new Date(result.expires_at).toLocaleString()}</div>
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              <Btn small onClick={()=>navigator.clipboard?.writeText(result.magic_link_url)}>Copy Link</Btn>
+              <Btn small variant="ghost" onClick={()=>{setSubmitState('idle');setResult(null);setAdpId('');setDoi('');setBodyPart('');setInjuryType('');setPreview(null);}}>File Another Injury</Btn>
             </div>
-          )}
+          </div>
+        )}
+        <div style={{marginTop:18,borderTop:`1px solid ${C.border}`,paddingTop:16}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:8,fontWeight:600}}>WHAT HAPPENS NEXT</div>
+          {["Employee opens link and describes their injury","System books MPN provider and generates DWC-1","Track progress in the Claims tab"].map((s,i)=>(
+            <div key={i} style={{display:"flex",gap:10,marginBottom:6,alignItems:"flex-start"}}>
+              <span style={{fontFamily:C.mono,fontSize:10,color:C.amber,minWidth:16}}>{i+1}.</span>
+              <span style={{fontSize:12,color:C.dim}}>{s}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const steps=['Pulling ADP data…','Creating claim…','Sending link…'];
+  const loadingStep=submitState==='loading'?1:0;
+
+  return(
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:28}}>
+      <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>File First Report of Injury (FROI)</div>
+      <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Employee receives a secure magic link. ADP data auto-populates — they only describe their injury.</div>
+      {submitState==='loading'&&(
+        <div style={{marginBottom:18,display:"flex",gap:14,alignItems:"center",padding:"12px 16px",background:C.bg,borderRadius:8,border:`1px solid ${C.border}`}}>
+          <Spinner/>
+          <div>{steps.map((s,i)=><div key={i} style={{fontSize:12,color:i===loadingStep?C.text:C.muted}}>{s}</div>)}</div>
         </div>
       )}
+      {submitState==='error'&&<div style={{marginBottom:14,padding:"10px 14px",background:C.redF,border:`1px solid ${C.red}44`,borderRadius:8,fontSize:12,color:C.red}}>{errorMsg}</div>}
+      <form onSubmit={handleSubmit}>
+        <Field label="ADP Employee ID *">
+          <input value={adpId} onChange={e=>setAdpId(e.target.value)} onBlur={handleAdpBlur} placeholder="e.g. BC-001" required/>
+          {previewLoading&&<div style={{fontSize:11,color:C.muted,marginTop:5}}>Looking up in ADP…</div>}
+          {preview&&!previewLoading&&(
+            preview.found
+              ?<div style={{fontSize:11,marginTop:5,color:C.green}}>&#10003; {preview.first_name} {preview.last_name} — {preview.job_title||'—'}{preview.email_masked?` · ${preview.email_masked}`:''}</div>
+              :<div style={{fontSize:11,marginTop:5,color:C.amber}}>&#9888; Employee not found in ADP</div>
+          )}
+        </Field>
+        <Field label="Date of Injury *">
+          <input type="date" value={doi} onChange={e=>setDoi(e.target.value)} max={today} min={oneYearAgo} required/>
+        </Field>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+          <Field label="Body Part Affected">
+            <select value={bodyPart} onChange={e=>setBodyPart(e.target.value)}>
+              <option value="">Select… (optional)</option>
+              {BODY_PARTS.map(b=><option key={b}>{b}</option>)}
+            </select>
+          </Field>
+          <Field label="Injury Type">
+            <select value={injuryType} onChange={e=>setInjuryType(e.target.value)}>
+              <option value="">Select… (optional)</option>
+              {INJURY_TYPES.map(t=><option key={t}>{t}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Btn type="submit" disabled={submitState==='loading'||!adpId.trim()||!doi}>Submit &amp; Send Employee Link →</Btn>
+      </form>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// EMPLOYER PORTAL
+// ═══════════════════════════════════════════════════════════
+function EmployerPortal({employerUser,setEmployerUser,onSelect}){
+  const [view,setView]=useState("new");
+
+  // Auth gate — show login if no employer session
+  if(!employerUser) return <EmployerLogin onLogin={setEmployerUser}/>;
+
+  const {employerName}=employerUser;
+
+  // Claims via React Query — scoped by employer auth on the backend
+  const {data:myClaims=[],isLoading:claimsLoading}=useQuery({
+    queryKey:['employer-claims'],
+    queryFn:fetchClaims,
+    refetchInterval:30_000,
+  });
+
+  return(
+    <div style={{paddingTop:32,maxWidth:960,animation:"fadeUp .3s ease"}}>
+      <div style={{marginBottom:22}}>
+        <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Employer Portal</h1>
+        <p style={{color:C.muted,fontSize:13}}>{employerName}</p>
+      </div>
+      <Tabs tabs={[{key:"new",label:"Report Injury"},{key:"list",label:`All Claims (${myClaims.length})`}]} active={view} onChange={setView}/>
+      {view==="new"&&<FROIForm/>}
       {view==="list"&&(
         <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
-          {myClaims.length===0?<div style={{padding:36,textAlign:"center",color:C.muted}}>No claims on file.</div>:(
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>{["Claim ID","Employee","DOI","Body Part","AWW","Appt","Status",""].map(h=><th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>)}</tr></thead>
-              <tbody>{myClaims.map((c,i)=>(
-                <tr key={c.id} className="rh" style={{borderBottom:i<myClaims.length-1?`1px solid ${C.border}`:"none"}}>
-                  <td style={{padding:"12px 14px",fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{c.id}</td>
-                  <td style={{padding:"12px 14px",fontSize:13,fontWeight:500}}>{c.claimant}</td>
-                  <td style={{padding:"12px 14px",fontSize:12,fontFamily:C.mono,color:C.dim}}>{c.dateOfInjury}</td>
-                  <td style={{padding:"12px 14px",fontSize:12,color:C.dim}}>{c.bodyPart}</td>
-                  <td style={{padding:"12px 14px",fontFamily:C.mono,fontSize:12,color:C.cyan}}>{c.aww?fmt$(c.aww):"—"}</td>
-                  <td style={{padding:"12px 14px"}}>{c.appointment?.confirmed?<span style={{fontSize:10,background:C.tealF,color:C.teal,padding:"2px 7px",borderRadius:4,fontFamily:C.mono,border:`1px solid ${C.teal}33`}}>✓ {c.appointment.date}</span>:<span style={{color:C.muted,fontSize:11}}>—</span>}</td>
-                  <td style={{padding:"12px 14px"}}><Badge status={c.status}/></td>
-                  <td style={{padding:"12px 14px"}}><Btn small variant="ghost" onClick={()=>onSelect(c.id)}>View</Btn></td>
-                </tr>
-              ))}</tbody>
-            </table>
-          )}
+          {claimsLoading
+            ?<div style={{padding:36,textAlign:"center"}}><Spinner/></div>
+            :myClaims.length===0
+              ?<div style={{padding:36,textAlign:"center",color:C.muted}}>No claims on file.</div>
+              :(
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead>
+                    <tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+                      {["Claim ID","Employee","DOI","Injury / Body Part","Status","Link Status","Filed",""].map(h=>(
+                        <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myClaims.map((c,i)=>{
+                      const ls=linkStatus(c);
+                      const empName=c.employee?`${c.employee.firstName||''} ${c.employee.lastName||''}`.trim():c.claimant||'—';
+                      const injLabel=[c.injuryType,c.bodyPart].filter(Boolean).join(' · ')||'—';
+                      return(
+                        <tr key={c.id} className="rh" style={{borderBottom:i<myClaims.length-1?`1px solid ${C.border}`:"none"}}>
+                          <td style={{padding:"12px 14px",fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{c.claimNumber||c.id}</td>
+                          <td style={{padding:"12px 14px",fontSize:13,fontWeight:500}}>{empName}</td>
+                          <td style={{padding:"12px 14px",fontSize:12,fontFamily:C.mono,color:C.dim}}>{c.dateOfInjury||'—'}</td>
+                          <td style={{padding:"12px 14px",fontSize:12,color:C.dim}}>{injLabel}</td>
+                          <td style={{padding:"12px 14px"}}><Badge status={c.status}/></td>
+                          <td style={{padding:"12px 14px"}}>
+                            <span style={{fontSize:10,background:ls.bg,color:ls.color,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,border:`1px solid ${ls.color}33`}}>{ls.label}</span>
+                          </td>
+                          <td style={{padding:"12px 14px",fontSize:11,fontFamily:C.mono,color:C.muted}}>{c.filed_at?new Date(c.filed_at).toLocaleDateString():'—'}</td>
+                          <td style={{padding:"12px 14px"}}><Btn small variant="ghost" onClick={()=>onSelect(c.id)}>View</Btn></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )
+          }
         </div>
       )}
     </div>
@@ -1449,9 +1623,19 @@ export default function App(){
   const [selectedId,setSelectedId]=useState(null);
   const [toast,setToast]=useState(null);
   const [jsPdfReady,setJsPdfReady]=useState(false);
+  const [employerUser,setEmployerUser]=useState(null);
 
-  // ── Dev session auto-login (replaced by Supabase Auth in M4) ─────────────────
+  // ── Dev session auto-login for admin (replaced by Supabase Auth in M5) ────────
   useEffect(()=>{ensureDevSession();},[]);
+
+  // ── Dev employer session when switching to employer portal ────────────────────
+  useEffect(()=>{
+    if(role==='employer'&&!employerUser){
+      ensureDevEmployerSession().then(data=>{
+        if(data?.ok) setEmployerUser({employerId:data.employerId,employerName:data.employerName,email:data.email||'hr@brightcarehh.com'});
+      });
+    }
+  },[role]);
 
   // ── jsPDF (kept for NoticeCenter generateNoticePDF) ───────────────────────────
   useEffect(()=>{
@@ -1505,7 +1689,7 @@ export default function App(){
               :<AdminDashboard claims={claims} onSelect={setSelectedId} onGenPDF={()=>{}} onPushCMS={()=>{}} jsPdfReady={jsPdfReady}/>
         )}
         {role==="admin"&&adminView==="notices"&&<NoticeCenter claims={claims} jsPdfReady={jsPdfReady} notify={notify}/>}
-        {role==="employer"&&<EmployerPortal claims={claims} onSubmit={submitClaim} onSelect={setSelectedId}/>}
+        {role==="employer"&&<EmployerPortal employerUser={employerUser} setEmployerUser={setEmployerUser} onSelect={setSelectedId}/>}
         {role==="employee"&&(
           <div style={{paddingTop:32,maxWidth:660,animation:"fadeUp .3s ease"}}>
             <div style={{marginBottom:24}}><h1 style={{fontSize:22,fontWeight:700,marginBottom:4}}>Employee Portal</h1><p style={{color:C.muted,fontSize:13}}>Report a work injury — voice, photos, and appointment booking included</p></div>

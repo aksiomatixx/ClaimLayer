@@ -63,6 +63,16 @@ function generateAdminToken(payload) {
   );
 }
 
+// ── generateEmployerToken ─────────────────────────────────────────────────────
+// Issues an 8-hour JWT for employer portal sessions.
+function generateEmployerToken(payload) {
+  return jwt.sign(
+    { ...payload, role: 'employer' },
+    config.jwtSecret,
+    { expiresIn: '8h' }
+  );
+}
+
 // ── requireMFA ────────────────────────────────────────────────────────────────
 // Checks that the authenticated user has verified TOTP MFA (amr includes 'totp').
 // When SUPABASE_URL is absent (dev/test), this is a no-op pass-through.
@@ -79,4 +89,4 @@ function requireMFA(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireRole, generateMagicToken, generateAdminToken, requireMFA };
+module.exports = { requireAuth, requireRole, generateMagicToken, generateAdminToken, generateEmployerToken, requireMFA };
