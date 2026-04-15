@@ -43,7 +43,7 @@ async function search({ zip, specialty, walk_in, limit = 8 } = {}) {
  * Throws 404-style error if not found.
  */
 async function getById(providerId) {
-  const provider = db.providers.findById(providerId);
+  const provider = await db.providers.findById(providerId);
   if (!provider) throw new Error(`Provider not found: ${providerId}`);
   return provider;
 }

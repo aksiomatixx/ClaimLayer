@@ -149,7 +149,7 @@ async function processVoiceIntake({ claimId, audioBuffer, language, mimeType }) 
   }
 
   // 2. Create document record for the audio file
-  const audioDoc = db.documents.create({
+  const audioDoc = await db.documents.create({
     claim_id:   claimId,
     doc_type:   'voice_recording',
     source:     'employee_upload',
@@ -159,7 +159,7 @@ async function processVoiceIntake({ claimId, audioBuffer, language, mimeType }) 
   });
 
   // 3. Create document record for the transcript
-  const transcriptDoc = db.documents.create({
+  const transcriptDoc = await db.documents.create({
     claim_id:   claimId,
     doc_type:   'voice_transcript',
     source:     'system_generated',
@@ -204,7 +204,7 @@ async function processTextIntake({ claimId, text }) {
   }
 
   // Create document record for the text statement
-  const transcriptDoc = db.documents.create({
+  const transcriptDoc = await db.documents.create({
     claim_id:   claimId,
     doc_type:   'text_statement',
     source:     'employee_typed',

@@ -1,5 +1,8 @@
 'use strict';
 
+// ── Mock Supabase ─────────────────────────────────────────────────────────────
+jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
+
 /**
  * Integration tests — M3 Admin Console endpoints.
  *

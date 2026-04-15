@@ -3,13 +3,16 @@
 /**
  * Integration test — full FROI → claim creation flow.
  *
- * ADP and FileHandler are mocked at the module level so no external servers
- * are required.  ANTHROPIC_API_KEY must be set for AI analysis assertions;
- * if unset, that step is skipped with a warning.
+ * ADP, FileHandler, and Supabase are mocked at the module level so no
+ * external servers are required.  ANTHROPIC_API_KEY must be set for AI
+ * analysis assertions; if unset, that step is skipped with a warning.
  *
  * Run:
  *   npm test -- tests/integration/claim-flow.test.js
  */
+
+// ── Mock Supabase (must be first, before any service imports) ─────────────────
+jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
 
 // ── Mock external services ────────────────────────────────────────────────────
 jest.mock('../../src/services/adp', () => ({

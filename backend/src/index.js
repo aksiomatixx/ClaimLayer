@@ -2,10 +2,10 @@
 
 require('dotenv').config();
 
-const express     = require('express');
+const express      = require('express');
 const cookieParser = require('cookie-parser');
-const config      = require('./config');
-const logger      = require('./logger');
+const config       = require('./config');
+const logger       = require('./logger');
 const { auditLog } = require('./middleware/audit');
 
 const claimsRouter       = require('./routes/claims');
@@ -37,6 +37,14 @@ app.use('/api/v1/documents',     documentsRouter);
 app.use('/api/v1/auth',          authRouter);
 app.use('/webhooks',             webhooksRouter);
 
+// ── Optional employer portal router (present in M4+) ─────────────────────────
+try {
+  const employerRouter = require('./routes/employer');
+  app.use('/api/v1/employer', employerRouter);
+} catch {
+  // employer router not present — OK in older deployments
+}
+
 // ── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) =>
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` })
@@ -51,9 +59,17 @@ app.use((err, req, res, _next) => {
 
 // ── Start ────────────────────────────────────────────────────────────────────
 if (require.main === module) {
-  app.listen(config.port, () => {
-    logger.info({ msg: `HomeCare TPA backend listening`, port: config.port, env: config.nodeEnv });
-  });
+  const { verifyConnection } = require('./services/supabase');
+  verifyConnection()
+    .then(() => {
+      app.listen(config.port, () => {
+        logger.info({ msg: 'HomeCare TPA backend listening', port: config.port, env: config.nodeEnv });
+      });
+    })
+    .catch(err => {
+      logger.error({ msg: 'Supabase connection check failed — refusing to start', err: err.message });
+      process.exit(1);
+    });
 }
 
 module.exports = app; // exported for supertest

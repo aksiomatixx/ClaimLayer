@@ -20,6 +20,9 @@
  *   npm test -- tests/integration/intake-flow.test.js
  */
 
+// ── Mock Supabase ─────────────────────────────────────────────────────────────
+jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
+
 const request  = require('supertest');
 const app      = require('../../src/index');
 const { generateAdminToken, generateMagicToken } = require('../../src/middleware/auth');
