@@ -1,11 +1,14 @@
 -- ============================================================
--- M5 — Seed Data
--- Employers, provider MPN directory, and Supabase Auth users.
+-- M5 — Seed Data (v1.2)
+-- Employers, MPN provider directory.
 --
 -- NOTE: Supabase Auth users (for employer portal login) must be
 -- created via the Supabase Dashboard or the Auth Admin API —
 -- they cannot be inserted directly into auth.users via SQL.
 -- See docs/supabase-auth-setup.md for instructions.
+--
+-- Employer UUIDs here are fixed so they can be referenced in
+-- user_metadata for employer portal logins.
 -- ============================================================
 
 -- ── Employers ─────────────────────────────────────────────────────────────────
