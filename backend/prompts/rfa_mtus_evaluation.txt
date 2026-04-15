@@ -19,5 +19,8 @@ Required response structure:
   "rationale": "<explanation of the determination, referencing specific MTUS guidelines where applicable>",
   "urgency": "standard" | "expedited",
   "requiresIMRNotice": false,
+  "withinFrequencyLimits": true | false,
+  "withinDurationLimits": true | false,
+  "formularyStatus": "exempt" | "non_exempt" | "special_fill" | "n_a",
   "notes": "<any additional clinical observations or documentation gaps>"
 }
