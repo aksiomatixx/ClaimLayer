@@ -27,32 +27,37 @@ homecare-tpa/
 │       └── services/
 │           ├── claims.js             ← fetch wrappers: fetchClaims, triggerAnalysis, etc.
 │           ├── employer.js           ← loginEmployer, submitFROI, previewEmployee
-│           └── providers.js          ← fetchProviders(zipCode, limit)
+│           ├── providers.js          ← fetchProviders(zipCode, limit)
+│           └── rfas.js               ← fetchRFAs, submitRFA, approveRFA, routeToURO
 ├── backend/                          ← Express (Node.js) API
 │   ├── src/
 │   │   ├── index.js                  ← Express app entry point (port 3001)
 │   │   ├── config.js                 ← All environment variables
 │   │   ├── logger.js                 ← Structured JSON logging (Winston)
 │   │   ├── services/
+│   │   │   ├── supabase.js           ← Supabase service-role + anon-key clients
 │   │   │   ├── filehandler.js        ← FileHandler Enterprise client
 │   │   │   ├── adp.js                ← ADP OAuth2 client + AWW/TD calculation
 │   │   │   ├── claimService.js       ← Claim lifecycle orchestration + diaries
+│   │   │   ├── rfaService.js         ← RFA lifecycle: create → AI eval → route/approve
+│   │   │   ├── enlyteService.js      ← Enlyte URO stub (real API deferred to M8)
 │   │   │   ├── aiService.js          ← Claude API integration
 │   │   │   ├── pdfService.js         ← DWC-1, AI reasoning, auth letter (pdf-lib)
 │   │   │   ├── appointmentService.js ← MPN appointment booking
 │   │   │   ├── providerService.js    ← Provider search by zip + specialty
-│   │   │   ├── db.js                 ← In-memory DB helpers (replace with Supabase in M5)
+│   │   │   ├── db.js                 ← In-memory DB helpers (legacy; replaced by Supabase)
 │   │   │   ├── notificationService.js ← SendGrid magic-link email (no-op without API key)
 │   │   │   └── voiceService.js       ← OpenAI Whisper transcription + Claude extraction
 │   │   ├── routes/
 │   │   │   ├── claims.js             ← /api/v1/claims (CRUD + analyze + pdf + diaries)
+│   │   │   ├── rfas.js               ← /api/v1/rfas (create, list, approve, route-to-uro)
 │   │   │   ├── employer.js           ← /api/v1/employer (FROI submission + employee preview)
 │   │   │   ├── providers.js          ← /api/v1/providers
 │   │   │   ├── appointments.js       ← /api/v1/appointments
 │   │   │   ├── voice.js              ← /api/v1/voice (Whisper + text extraction)
 │   │   │   ├── documents.js          ← /api/v1/documents
 │   │   │   ├── auth.js               ← /api/v1/auth (magic link, employer login, dev-session)
-│   │   │   └── webhooks.js           ← DxF ADT, Enlyte, Lob receivers
+│   │   │   └── webhooks.js           ← DxF ADT, Enlyte determination, Lob receivers
 │   │   └── middleware/
 │   │       ├── auth.js               ← JWT validation, role enforcement, requireMFA stub
 │   │       └── audit.js              ← Request audit logging
@@ -64,6 +69,8 @@ homecare-tpa/
 │   │   └── mock_filehandler.py       ← Mock FileHandler server (port 8002, FastAPI)
 │   ├── tests/
 │   │   ├── setup.js
+│   │   ├── __mocks__/
+│   │   │   └── supabaseClient.js     ← In-memory Supabase mock (Map-based, QueryBuilder)
 │   │   ├── unit/
 │   │   │   ├── adp.test.js
 │   │   │   ├── filehandler.test.js
@@ -73,9 +80,17 @@ homecare-tpa/
 │   │       ├── claim-flow.test.js         ← Full FROI → ADP → FH → AI flow
 │   │       ├── intake-flow.test.js        ← M2: appointments, MPN, intake-progress
 │   │       ├── admin-console.test.js      ← M3: analyze, reserves, status, PDF, diaries
-│   │       └── employer-portal.test.js   ← M4: FROI, employer auth, RLS, magic link
+│   │       ├── employer-portal.test.js    ← M4: FROI, employer auth, RLS, magic link
+│   │       ├── supabase-swap.test.js      ← M5: Supabase persistence + RLS policies
+│   │       └── rfa-engine.test.js         ← M7: RFA pipeline, routing, AI paths (45 tests)
 │   ├── package.json
 │   └── .env.example
+├── supabase/
+│   └── migrations/
+│       ├── 20260101000001_initial_schema.sql  ← Core tables (users → claims → events)
+│       ├── 20260101000002_seed_data.sql       ← Employer + MPN provider seed data
+│       ├── 20260101000003_enable_rls.sql      ← Row-level security policies
+│       └── 20260101000004_missing_tables.sql  ← rfas, rfa_evaluations, ai_decisions, notices, audit_log
 ├── docs/
 │   ├── architecture.md               ← Full system design
 │   ├── integrations.md               ← API integration specs
@@ -190,13 +205,15 @@ Claude evaluates: mechanism vs. accepted body part, AOE/COE indicators, prior cl
 Claude calculates initial reserves based on: injury type, body part, time off work, AWW/TD rate, medical treatment to date, presence of surgical indicators. Reserves are suggestions — final authority is always the adjuster.
 
 ### RFA / MTUS Evaluation
-Claude compares the requested treatment against MTUS/ACOEM guidelines for the accepted diagnosis:
-- **Auto-approve:** Treatment type, frequency, and duration within MTUS parameters for accepted condition from MPN provider
-- **Adjuster review:** MTUS-consistent but at upper limit of guidelines or complex clinical picture
-- **Route to URO:** Outside MTUS parameters, surgical, experimental, off-formulary, or insufficient supporting documentation
-- **Defer:** Claim under compensability investigation (LC §4610(l))
+Claude compares the requested treatment against MTUS/ACOEM guidelines for the accepted diagnosis. `rfaService._resolveDecision()` applies the following routing logic in order:
 
-> **Critical:** Only a licensed physician may modify or deny an RFA (DWC FAQ). Claude may approve. The URO physician modifies or denies. This is not optional.
+1. **Surgical CPT override → route to URO:** Any CPT code in the surgical range (10000–69999) or Category III codes (`\d{4}T`) is unconditionally routed to Enlyte URO, regardless of AI recommendation. A physician must authorize surgical procedures.
+2. **Auto-approve:** AI recommends `auto_approve` (MTUS-consistent, within frequency/duration limits). Decision recorded immediately; `RFA_RESPONSE_DUE` diary closed.
+3. **Route to URO:** AI recommends `physician_review` AND treatment is MTUS-inconsistent. Packaged and submitted to Enlyte; `enlyte_referral_id` recorded.
+4. **Adjuster review:** AI recommends `physician_review` but treatment IS MTUS-consistent (e.g., at upper guideline limit, complex clinical picture). Queued as `pending_adjuster_review` for human decision.
+5. **Defer:** AI evaluation fails (API error, parse failure). Flagged for manual triage; never auto-approved on error.
+
+> **Critical:** Only a licensed physician may modify or deny an RFA (DWC FAQ). Claude may only approve. The Enlyte URO physician modifies or denies. This constraint is enforced in code — `rfaService` has no denial path.
 
 ### Diary Generation
 Claude generates the diary set from claim facts at claim creation and updates diaries on every significant event. Diaries are created in FileHandler via API, not maintained in our database.
@@ -211,13 +228,52 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M2 | Employee intake: Voice (Whisper), media upload, provider finder, appointment booking, DWC-1 (pdf-lib), i18n (EN/ES) | ✅ Complete |
 | M3 | Admin console: Action queue, AI analysis (backend-only), reserve approval, diaries, reasoning PDF, React Query | ✅ Complete |
 | M4 | Employer portal: FROI submission, magic link generation, employer email/password auth, claim RLS per employer, LC §4650/§4652 DELAY_NOTICE_DUE diary | ✅ Complete |
-| M5 | DxF / QHIO: Manifest MedEx roster, ADT push, clinical document pull | 🔲 Not started |
-| M6 | RFA engine: MTUS evaluation, auto-approval, Enlyte URO routing | 🔲 Not started |
-| M7 | Diary engine: Auto-generation, event-triggered updates, escalation | 🔲 Not started |
-| M8 | Notice center: Lob.com integration, statutory notice generation | 🔲 Not started |
-| M9 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
+| M5 | Supabase swap: Replace in-memory Maps with PostgreSQL via Supabase; schema migrations; in-memory mock for tests; `supabase-swap.test.js` | ✅ Complete |
+| M6 | DxF / QHIO: Manifest MedEx roster enrollment, ADT push notifications, clinical document pull | 🔲 Not started |
+| M7 | RFA engine: MTUS evaluation, `_resolveDecision` routing (surgical override, auto-approve, URO, adjuster queue), Enlyte stub, diary lifecycle | ✅ Complete |
+| M8 | Enlyte real integration: Replace stub with live Enlyte URO API; handle determination webhook | 🔲 Not started |
+| M9 | Notice center: Lob.com print-and-mail integration, statutory notice generation | 🔲 Not started |
+| M10 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
 
-### M4 — What was built (current)
+**Current test count: 197 passing** (10 suites — unit + integration)
+
+### M7 — What was built (current)
+
+- **`backend/src/services/rfaService.js`** (new) — Full RFA lifecycle orchestration:
+  - `createRFA(claimId, rfaData, receivedVia)` — inserts RFA row, calculates statutory deadline (5 business days standard / 72 hours expedited per CCR §9792.9.1), seeds `RFA_RESPONSE_DUE` diary, logs `rfa_received` claim event, triggers async AI evaluation via `setImmediate`.
+  - `evaluateRFA(rfaId)` — fetches RFA + claim, calls `aiService.evaluateRFA`, persists `rfa_evaluations` row, routes via `_resolveDecision`.
+  - `_resolveDecision(aiResult, rfa, claim)` — surgical CPT override → URO; AI auto_approve → approve; MTUS-inconsistent → URO; MTUS-consistent + physician_review → adjuster queue.
+  - `_isSurgical(cptCodes)` — CPT range 10000–69999 plus Category III (`/^\d{4}T$/i`).
+  - `adjusterApproveRFA(rfaId, adjusterEmail)` — sets `adjuster_approved`, closes diary, logs `rfa_approved` event.
+  - `adjusterRouteToURO(rfaId, adjusterEmail, reason)` — calls Enlyte, sets `sent_to_uro`, records `enlyte_referral_id`.
+  - Lazy `require('./claimService')` inside functions to break circular dependency.
+- **`backend/src/services/enlyteService.js`** (new) — Enlyte URO stub. `submitReferral()` returns `ENL-MOCK-{timestamp}` referral IDs and a calculated estimated response time. Real API deferred to M8 — service shape is final so `rfaService.js` won't need changes.
+- **`backend/src/routes/rfas.js`** (new) — Five endpoints with JWT auth and express-validator:
+  - `POST /api/v1/rfas` — create RFA (admin/adjuster only)
+  - `GET  /api/v1/rfas?claimId=` — list RFAs for a claim
+  - `GET  /api/v1/rfas?status=` — list by decision status, admin/adjuster only (powers RFA Queue)
+  - `GET  /api/v1/rfas/:id` — get RFA with latest evaluation
+  - `POST /api/v1/rfas/:id/approve` — adjuster approval
+  - `POST /api/v1/rfas/:id/route-to-uro` — adjuster URO escalation
+- **`backend/src/index.js`** — Registered `/api/v1/rfas` router.
+- **`backend/prompts/rfa_mtus_evaluation.txt`** — Added `withinFrequencyLimits`, `withinDurationLimits`, `formularyStatus` to required AI JSON response structure.
+- **`backend/tests/integration/rfa-engine.test.js`** (new) — 45 tests across 9 describe blocks: `_isSurgical` helper (9 cases), `_resolveDecision` routing (5 cases), `_calcDeadline` (2 cases), HTTP endpoint coverage for all 5 routes, and direct `evaluateRFA` pipeline tests for all four decision paths (auto-approve, adjuster-review, route-to-URO, defer-on-error).
+- **`frontend/src/services/rfas.js`** (new) — `fetchRFAs(filters)`, `fetchRFA`, `submitRFA`, `approveRFA`, `routeToURO` fetch wrappers.
+- **`frontend/src/App.jsx`** — Added `RFACenter` component (React Query, 15-second polling) with `RFADrawer` slide-in (treatment details, AI evaluation panel, approve/route-to-URO action buttons). Added "RFAs" tab to admin nav. Added "Pending RFAs" stat card to Claims Console dashboard.
+- **`supabase/migrations/20260101000004_missing_tables.sql`** (new) — Adds `rfas`, `rfa_evaluations`, `ai_decisions`, `notices`, `audit_log` to existing deployments. RLS policies for all five tables.
+
+### M5 — What was built
+
+- **`backend/src/services/supabase.js`** (new) — Service-role client (`supabase`) and anon-key client (`supabaseAuth`), both from `@supabase/supabase-js`. `verifyConnection()` runs a lightweight probe on startup; server refuses to start if Supabase is unreachable.
+- **`backend/src/services/claimService.js`** — Rewrote all persistence from in-memory Maps to Supabase queries. `_toClaim(row)` maps DB column names (snake_case) to JS shape. `_testStore` Map preserved for test-only `_seedClaim()` — `getClaim()` checks it first so sync test seeding still works. `_fetchClaim` uses `select('*, claim_events(*), diaries(*)')` join.
+- **`supabase/migrations/`** (new) — Three ordered migration files:
+  - `20260101000001_initial_schema.sql` — All tables: `users`, `employers`, `employees`, `claims`, `claim_events`, `documents`, `reserves`, `diaries`, `appointments`, `providers`, `magic_link_tokens`.
+  - `20260101000002_seed_data.sql` — Three employers with fixed UUIDs, 15 LA-area MPN providers.
+  - `20260101000003_enable_rls.sql` — RLS enabled on all tables; admin/adjuster all-access policies; employer-scoped read policies via `auth.uid()`.
+- **`backend/tests/__mocks__/supabaseClient.js`** (new) — In-memory Supabase mock for Jest. `QueryBuilder` class supports `select / insert / update / upsert / delete` with chained `.eq()` / `.neq()` / `.order()` / `.limit()` / `.single()`. Tables are `Map` objects; `_resetStore(tableNames?)` clears them between tests. `supabaseAuth.auth.signInWithPassword` validates against `MOCK_AUTH_USERS`.
+- **`backend/tests/integration/supabase-swap.test.js`** (new) — Verifies that all claim CRUD operations, RLS-scoped queries, and employer portal flows work against the mock Supabase client.
+
+### M4 — What was built
 
 - **`backend/src/routes/auth.js`** — Added `POST /api/v1/auth/employer/login` (email + password → employer JWT cookie) and `GET /api/v1/auth/dev-employer-session` (dev auto-login, blocked in production). MFA stubs relabelled M5.
 - **`backend/src/routes/employer.js`** (new) — `POST /api/v1/employer/froi`: auth-guarded (employer + admin roles), ADP pull, `claimService.createClaim`, magic token generation + single-use tracking, `notificationService.sendMagicLinkEmail`, 201 response with `magic_link_url`. `GET /api/v1/employer/employee-preview/:adpEmployeeId`: name/title preview before FROI submit, always returns 200.
