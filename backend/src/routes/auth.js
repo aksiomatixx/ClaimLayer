@@ -5,21 +5,27 @@
  *
  * POST /api/v1/auth/magic-link/validate      — validates single-use token, returns intake state
  * POST /api/v1/auth/magic-link/generate      — generates a new magic link (admin only)
- * POST /api/v1/auth/employer/login           — email/password login for employer portal
+ * POST /api/v1/auth/employer/login           — email/password login for employer portal (M5: Supabase Auth)
  * GET  /api/v1/auth/dev-session              — dev-only admin auto-login
  * GET  /api/v1/auth/dev-employer-session     — dev-only employer auto-login
  * POST /api/v1/auth/mfa/enroll              — MFA enroll stub (M5)
  * POST /api/v1/auth/mfa/verify              — MFA verify stub (M5)
  */
 
-const express = require('express');
-const jwt     = require('jsonwebtoken');
+const express  = require('express');
+const jwt      = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const db      = require('../services/db');
-const adp     = require('../services/adp');
-const logger  = require('../logger');
-const config  = require('../config');
-const { requireAuth, requireRole, generateMagicToken, generateEmployerToken } = require('../middleware/auth');
+const db             = require('../services/db');
+const { supabaseAuth } = require('../services/supabase');
+const adp            = require('../services/adp');
+const logger         = require('../logger');
+const config         = require('../config');
+const {
+  requireAuth,
+  requireRole,
+  generateMagicToken,
+  generateEmployerToken,
+} = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -53,7 +59,7 @@ router.post(
 
     // 2. Check single-use (jti required for production; optional in dev)
     if (payload.jti) {
-      const tokenRecord = db.magicLinkTokens.findByJti(payload.jti);
+      const tokenRecord = await db.magicLinkTokens.findByJti(payload.jti);
       if (!tokenRecord) {
         return res.status(401).json({ error: 'invalid_token', message: 'This link is no longer valid.' });
       }
@@ -61,15 +67,15 @@ router.post(
         return res.status(410).json({ error: 'link_already_used', message: 'This link has already been used. Please contact your employer for a new link.' });
       }
       // Mark used atomically
-      db.magicLinkTokens.markUsed(payload.jti);
+      await db.magicLinkTokens.markUsed(payload.jti);
     }
 
     // 3. Pull employee from ADP (or use cached record)
-    let employee = db.employees.findByAdpId(payload.adpEmployeeId);
+    let employee = await db.employees.findByAdpId(payload.adpEmployeeId);
     if (!employee && payload.adpEmployeeId) {
       try {
         const adpData = await adp.getEmployeeWithFinancials(payload.adpEmployeeId);
-        employee = db.employees.upsert(payload.adpEmployeeId, adpData);
+        employee = await db.employees.upsert(payload.adpEmployeeId, adpData);
       } catch (err) {
         logger.warn({ msg: 'magic-link: ADP pull failed (non-fatal)', err: err.message });
         // Use payload data as fallback
@@ -131,8 +137,7 @@ router.post(
 
       const token = generateMagicToken({ claimId: claim_id, adpEmployeeId: adp_employee_id, jti });
 
-      // Register token for single-use tracking
-      db.magicLinkTokens.create({
+      await db.magicLinkTokens.create({
         jti,
         claim_id,
         adp_employee_id,
@@ -151,8 +156,7 @@ router.post(
 );
 
 // ── POST /api/v1/auth/employer/login ─────────────────────────────────────────
-// Email + password login for employer portal.
-// Production replacement: swap mock lookup for supabase.auth.signInWithPassword()
+// M5: Uses Supabase Auth signInWithPassword instead of mock password check.
 router.post(
   '/employer/login',
   [
@@ -160,24 +164,28 @@ router.post(
     body('password').notEmpty().withMessage('password is required'),
   ],
   validate,
-  (req, res) => {
+  async (req, res) => {
     const { email, password } = req.body;
 
-    const user = db.users.findByEmail(email);
-    if (!user || user.role !== 'employer') {
+    // Authenticate via Supabase Auth
+    const { data: authData, error: authError } = await supabaseAuth.auth.signInWithPassword({ email, password });
+    if (authError || !authData?.user) {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
-    // Mock password check — replace with Supabase Auth in M5
-    if (!db.users.checkPassword(email, password)) {
+    const supaUser = authData.user;
+    const meta     = supaUser.user_metadata || {};
+
+    // Verify role is employer
+    if (meta.role && meta.role !== 'employer') {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
     const token = generateEmployerToken({
-      sub:          user.id,
-      email:        user.email,
-      employerId:   user.employer_id,
-      employerName: user.employer_name,
+      sub:          supaUser.id,
+      email:        supaUser.email,
+      employerId:   meta.employer_id,
+      employerName: meta.employer_name,
     });
 
     res.cookie('token', token, {
@@ -186,8 +194,8 @@ router.post(
       maxAge:   8 * 60 * 60 * 1000, // 8 hours
     });
 
-    logger.info({ msg: 'employer/login: success', email, employerId: user.employer_id });
-    res.json({ ok: true, employer_id: user.employer_id, employer_name: user.employer_name, email: user.email });
+    logger.info({ msg: 'employer/login: success', email, employerId: meta.employer_id });
+    res.json({ ok: true, employer_id: meta.employer_id, employer_name: meta.employer_name, email: supaUser.email });
   }
 );
 
@@ -206,12 +214,7 @@ router.get('/dev-session', (req, res) => {
     name:  'Dev Admin',
   });
 
-  res.cookie('token', token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge:   8 * 60 * 60 * 1000, // 8 hours
-  });
-
+  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
   res.json({ ok: true, role: 'admin', expiresIn: '8h' });
 });
 
@@ -226,17 +229,12 @@ router.get('/dev-employer-session', (req, res) => {
   const token = generateEmployerToken({
     sub:          'dev-employer',
     email:        'hr@brightcarehh.com',
-    employerId:   'employer-brightcare',
+    employerId:   'employer-brightcare-001',
     employerName: 'BrightCare Home Health',
   });
 
-  res.cookie('token', token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge:   8 * 60 * 60 * 1000, // 8 hours
-  });
-
-  res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare', employerName: 'BrightCare Home Health' });
+  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+  res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare-001', employerName: 'BrightCare Home Health' });
 });
 
 // ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M5) ─────────────

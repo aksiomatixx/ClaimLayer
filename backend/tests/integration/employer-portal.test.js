@@ -17,6 +17,9 @@
  *   npm test -- tests/integration/employer-portal.test.js
  */
 
+// ── Mock Supabase (must be first, before any service imports) ─────────────────
+jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
+
 const request      = require('supertest');
 const app          = require('../../src/index');
 const {
@@ -68,14 +71,14 @@ const adminToken = generateAdminToken({ sub: 'admin-001', email: 'admin@homecare
 const employerToken = generateEmployerToken({
   sub:          'user-employer-1',
   email:        'hr@brightcarehh.com',
-  employerId:   'employer-brightcare',
+  employerId:   'employer-brightcare-001',
   employerName: 'BrightCare Home Health',
 });
 
 const employeeToken = generateMagicToken({
   claimId:       'claim_test',
   adpEmployeeId: 'BC-001',
-  employerId:    'employer-brightcare',
+  employerId:    'employer-brightcare-001',
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -96,7 +99,7 @@ describe('POST /api/v1/auth/employer/login', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(res.body.employer_id).toBe('employer-brightcare');
+    expect(res.body.employer_id).toBe('employer-brightcare-001');
     expect(res.body.employer_name).toBe('BrightCare Home Health');
     expect(res.headers['set-cookie']).toBeDefined();
     expect(res.headers['set-cookie'][0]).toMatch(/token=/);
@@ -132,7 +135,7 @@ describe('GET /api/v1/auth/dev-employer-session', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.role).toBe('employer');
-    expect(res.body.employerId).toBe('employer-brightcare');
+    expect(res.body.employerId).toBe('employer-brightcare-001');
     expect(res.body.employerName).toBe('BrightCare Home Health');
     expect(res.headers['set-cookie']).toBeDefined();
   });
@@ -272,7 +275,7 @@ describe('GET /api/v1/claims — scope enforcement', () => {
     // Seed two claims: one for employer-brightcare, one for a different employer
     claimService._seedClaim({
       id: 'claim_bright_001', claimNumber: 'HHW-2026-001',
-      employerId: 'employer-brightcare', status: 'new_claim',
+      employerId: 'employer-brightcare-001', status: 'new_claim',
       createdAt: new Date().toISOString(), events: [], diaries: [],
     });
     claimService._seedClaim({

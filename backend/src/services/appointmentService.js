@@ -50,13 +50,13 @@ async function logMpnAcknowledgment(claimId, employeeId) {
 async function createAppointment({ claimId, providerId, appointmentType, scheduledAt, bookedByUserId }) {
   const claimService = getClaimService();
 
-  const provider = db.providers.findById(providerId);
+  const provider = await db.providers.findById(providerId);
   if (!provider) throw new Error(`Provider not found: ${providerId}`);
 
   const claim = await claimService.getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
-  const appointment = db.appointments.create({
+  const appointment = await db.appointments.create({
     claim_id:         claimId,
     provider_id:      providerId,
     appointment_type: appointmentType || 'initial_eval',
@@ -118,10 +118,10 @@ async function createAppointment({ claimId, providerId, appointmentType, schedul
  * 4. Advances intake progress
  */
 async function confirmAppointment(appointmentId, confirmationNumber) {
-  const appointment = db.appointments.findById(appointmentId);
+  const appointment = await db.appointments.findById(appointmentId);
   if (!appointment) throw new Error(`Appointment not found: ${appointmentId}`);
 
-  const updated = db.appointments.update(appointmentId, {
+  const updated = await db.appointments.update(appointmentId, {
     confirmation_number:   confirmationNumber,
     status:                'confirmed',
     authorization_sent_at: new Date().toISOString(),
@@ -152,7 +152,7 @@ async function confirmAppointment(appointmentId, confirmationNumber) {
 async function _postConfirmationTasks(appointment, claim) {
   if (!claim) return;
 
-  const employer = db.employers.findById(claim.employerId);
+  const employer = await db.employers.findById(claim.employerId);
   const config   = require('../config');
 
   // 1. Generate authorization letter PDF
@@ -216,7 +216,7 @@ async function _generateAndStoreDWC1(claim, employer, claimService) {
 
   // Store as document record
   const storagePath = `claims/${claim.id}/dwc1_${Date.now()}.pdf`;
-  const doc = db.documents.create({
+  const doc = await db.documents.create({
     claim_id:       claim.id,
     doc_type:       'dwc1',
     source:         'generated',
@@ -232,7 +232,7 @@ async function _generateAndStoreDWC1(claim, employer, claimService) {
     try {
       await filehandler.attachDocument(claim.filehandlerId, pdfBytes, 'DWC1',
         `DWC-1 Claim Form — ${claim.claimNumber}`);
-      db.documents.update(doc.id, { filehandler_pushed: true });
+      await db.documents.update(doc.id, { filehandler_pushed: true });
     } catch (err) {
       logger.error({ msg: '_generateAndStoreDWC1: FH push failed', err: err.message });
     }
