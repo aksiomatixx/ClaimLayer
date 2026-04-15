@@ -9,6 +9,7 @@
 -- ============================================================
 
 -- ── Enable RLS on sensitive tables ───────────────────────────────────────────
+ALTER TABLE users          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE claims         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE claim_events   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE diaries        ENABLE ROW LEVEL SECURITY;
