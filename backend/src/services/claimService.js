@@ -238,6 +238,10 @@ async function _runAnalysis(claimId) {
 
   try {
     const analysis = await aiService.analyzeCompensability(claim);
+    if (!analysis) {
+      logger.warn({ msg: '_runAnalysis: no analysis returned — skipping', claimId });
+      return;
+    }
 
     claim.aiAnalysis = analysis;
     claim.priority   = analysis.priority;
