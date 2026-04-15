@@ -1637,6 +1637,7 @@ export default function App(){
     }
   },[role]);
 
+
   // ── jsPDF (kept for NoticeCenter generateNoticePDF) ───────────────────────────
   useEffect(()=>{
     if(window.jspdf){setJsPdfReady(true);return;}
