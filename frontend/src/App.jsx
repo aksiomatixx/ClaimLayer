@@ -6,6 +6,7 @@ import { loginEmployer, ensureDevEmployerSession, previewEmployee, submitFROI } 
 import { fetchRFAs, approveRFA, routeToURO } from './services/rfas.js';
 import { fetchLossRun, fetchEmployerSummary, fetchExperienceModInputs, fetchCrossEmployerReport, fetchMissedDeadlines } from './services/reporting.js';
 import { fetchPanelsForClaim, requestPanel, issuePanel, recordStrikes, scheduleQmeAppointment, markReportReceived, fetchSupplementalRequests, approveSupplemental, dismissSupplemental } from './services/qme.js';
+import { evaluateMMISignals, fetchMMIEvaluations, solicitPR4, recordPR4Response, dismissMMIEvaluation, fetchPR4Solicitations } from './services/mmi.js';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -1340,6 +1341,22 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
     onError:(e)=>notify(`QME action failed: ${e.message}`,'error'),
   });
 
+  // M12: MMI / P&S data
+  const {data:mmiEvals=[]}=useQuery({queryKey:['mmi-evals',claimId],queryFn:()=>fetchMMIEvaluations(claimId),enabled:!!claimId&&drawerTab==='mmi',staleTime:30_000});
+  const {data:pr4List=[]}=useQuery({queryKey:['pr4-list',claimId],queryFn:()=>fetchPR4Solicitations(claimId),enabled:!!claimId&&drawerTab==='mmi',staleTime:30_000});
+  const [mmiModal,setMmiModal]=useState(null);
+  const [mmiForm,setMmiForm]=useState({});
+  const mmiMut=useMutation({
+    mutationFn:async(action)=>{
+      if(action.type==='evaluate') return evaluateMMISignals(claimId);
+      if(action.type==='solicit') return solicitPR4(action.evalId,claimId,action.physicianName,action.physicianFax,action.physicianAddress);
+      if(action.type==='response') return recordPR4Response(action.pr4Id,{wpi:action.wpi,workRestrictions:action.workRestrictions,futureMedical:action.futureMedical,apportionmentNoted:action.apportionmentNoted});
+      if(action.type==='dismiss') return dismissMMIEvaluation(action.evalId,action.note);
+    },
+    onSuccess:()=>{qc.invalidateQueries({queryKey:['mmi-evals',claimId]});qc.invalidateQueries({queryKey:['pr4-list',claimId]});qc.invalidateQueries({queryKey:['claim-diaries',claimId]});setMmiModal(null);setMmiForm({});notify('MMI action completed');},
+    onError:(e)=>notify(`MMI action failed: ${e.message}`,'error'),
+  });
+
   const today=new Date().toISOString().split('T')[0];
 
   if(claimLoading||!claim){
@@ -1401,7 +1418,7 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
         </div>
 
         <div style={{padding:"22px 26px"}}>
-          <Tabs tabs={[{key:"details",label:"Details"},{key:"qme",label:`QME/AME (${qmePanels.length})`}]} active={drawerTab} onChange={setDrawerTab}/>
+          <Tabs tabs={[{key:"details",label:"Details"},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"}]} active={drawerTab} onChange={setDrawerTab}/>
 
           {drawerTab==="details"&&<>
           {/* Claim Facts */}
@@ -1677,6 +1694,100 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
                 <div style={{display:"flex",gap:8,marginTop:12}}>
                   <Btn disabled={!qmeForm.appointmentDate||qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'appointment',panelId:qmeForm.panelId,appointmentDate:qmeForm.appointmentDate})}>{qmeMut.isPending?<Spinner/>:'Schedule'}</Btn>
                   <Btn variant="ghost" onClick={()=>setQmeModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+          </>}
+
+          {/* ── M12: MMI / P&S Tab ───────────────────────────────── */}
+          {drawerTab==="mmi"&&<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+              <SectionHead title="MMI Signal Evaluation"/>
+              <Btn small variant="outline" disabled={mmiMut.isPending} onClick={()=>mmiMut.mutate({type:'evaluate'})}>{mmiMut.isPending?<><Spinner/> Evaluating...</>:'Run MMI Evaluation'}</Btn>
+            </div>
+
+            {mmiEvals.length===0?<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"24px 22px",textAlign:"center",color:C.muted,fontSize:13}}>No MMI evaluations yet. Run an evaluation to detect P&S signals.</div>:mmiEvals.map(ev=>{
+              const recColor=ev.recommendation==='solicit_pr4'?C.red:ev.recommendation==='monitor'?C.amber:C.green;
+              const recBg=ev.recommendation==='solicit_pr4'?C.redF:ev.recommendation==='monitor'?C.amberF:C.greenF;
+              return(
+                <div key={ev.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px 20px",marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:recBg,color:recColor,border:`1px solid ${recColor}33`}}>{ev.recommendation.replace(/_/g,' ').toUpperCase()}</span>
+                      <span style={{fontFamily:C.mono,fontSize:11,color:C.muted}}>{ev.signal_count} signal{ev.signal_count!==1?'s':''}</span>
+                    </div>
+                    <span style={{fontSize:10,fontFamily:C.mono,color:C.muted}}>{new Date(ev.evaluated_at).toLocaleDateString()}</span>
+                  </div>
+                  {(ev.signals||[]).map((s,i)=>(
+                    <div key={i} style={{background:s.weight>=2?C.amberF:C.bg,border:`1px solid ${s.weight>=2?C.amber:C.border}33`,borderRadius:6,padding:"8px 12px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div><span style={{fontFamily:C.mono,fontSize:10,fontWeight:600,color:s.weight>=2?C.amber:C.dim}}>{s.type}</span><div style={{fontSize:11,color:C.dim,marginTop:2}}>{s.description}</div></div>
+                      <span style={{fontFamily:C.mono,fontSize:10,color:C.muted,flexShrink:0,marginLeft:10}}>wt {s.weight}</span>
+                    </div>
+                  ))}
+                  {ev.rationale&&<div style={{background:C.blueF,border:`1px solid ${C.blue}22`,borderRadius:8,padding:"10px 14px",marginTop:8,fontSize:11,color:C.dim,lineHeight:1.6}}>{ev.rationale}</div>}
+                  {ev.adjuster_action?<div style={{marginTop:10,fontSize:11,fontFamily:C.mono,color:ev.adjuster_action==='dismissed'?C.muted:C.green}}>{ev.adjuster_action==='dismissed'?'Dismissed':'PR-4 Solicited'}{ev.adjuster_note?` — ${ev.adjuster_note}`:''}</div>:(
+                    ev.recommendation!=='no_action'&&<div style={{display:"flex",gap:8,marginTop:12}}>
+                      {ev.recommendation==='solicit_pr4'&&<Btn small variant="success" onClick={()=>{setMmiModal('solicit');setMmiForm({evalId:ev.id,physicianName:'',physicianFax:'',physicianAddress:''});}}>Solicit PR-4</Btn>}
+                      <Btn small variant="ghost" onClick={()=>{const n=prompt('Note (optional):');mmiMut.mutate({type:'dismiss',evalId:ev.id,note:n||''});}}>Dismiss</Btn>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {pr4List.length>0&&<>
+              <div style={{height:1,background:C.border,margin:"18px 0"}}/>
+              <SectionHead title={`PR-4 Solicitations (${pr4List.length})`}/>
+              {pr4List.map(pr=>{
+                const overdue=pr.status==='sent'&&pr.response_due_date<today;
+                return(
+                  <div key={pr.id} style={{background:C.bg,border:`1px solid ${overdue?C.red+'44':C.border}`,borderRadius:8,padding:"14px 16px",marginBottom:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                      <div><span style={{fontSize:13,fontWeight:600,color:C.text}}>{pr.physician_name}</span><span style={{fontSize:10,fontFamily:C.mono,color:C.muted,marginLeft:10}}>{pr.method?.toUpperCase()}</span></div>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:pr.status==='received'?C.greenF:overdue?C.redF:C.amberF,color:pr.status==='received'?C.green:overdue?C.red:C.amber}}>{overdue?'OVERDUE':pr.status.toUpperCase()}</span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11,color:C.dim}}>
+                      <div>Sent: <span style={{fontFamily:C.mono}}>{pr.solicitation_date}</span></div>
+                      <div>Due: <span style={{fontFamily:C.mono,color:overdue?C.red:C.text}}>{pr.response_due_date}</span></div>
+                    </div>
+                    {pr.status==='received'&&<div style={{marginTop:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11}}>
+                      <div>WPI: <span style={{fontFamily:C.mono,fontWeight:600,color:C.cyan}}>{pr.wpi!=null?pr.wpi+'%':'—'}</span></div>
+                      <div>Apportionment: <span style={{fontFamily:C.mono,color:pr.apportionment_noted?C.amber:C.green}}>{pr.apportionment_noted?'Yes':'No'}</span></div>
+                      {pr.work_restrictions&&<div style={{gridColumn:"1/3",color:C.dim}}>Restrictions: {pr.work_restrictions}</div>}
+                      {pr.future_medical&&<div style={{gridColumn:"1/3",color:C.dim}}>Future Medical: {pr.future_medical}</div>}
+                    </div>}
+                    {pr.status==='sent'&&<div style={{marginTop:10}}><Btn small variant="outline" onClick={()=>{setMmiModal('response');setMmiForm({pr4Id:pr.id,wpi:'',workRestrictions:'',futureMedical:'',apportionmentNoted:false});}}>Record Response</Btn></div>}
+                  </div>
+                );
+              })}
+            </>}
+
+            {mmiModal==='solicit'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setMmiModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:440}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Solicit PR-4 Report</div>
+                <Field label="Physician Name"><input value={mmiForm.physicianName||''} onChange={e=>setMmiForm(f=>({...f,physicianName:e.target.value}))}/></Field>
+                <Field label="Physician Fax"><input value={mmiForm.physicianFax||''} onChange={e=>setMmiForm(f=>({...f,physicianFax:e.target.value}))}/></Field>
+                <Field label="Physician Address"><textarea rows={2} value={mmiForm.physicianAddress||''} onChange={e=>setMmiForm(f=>({...f,physicianAddress:e.target.value}))}/></Field>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn disabled={!mmiForm.physicianName||mmiMut.isPending} onClick={()=>mmiMut.mutate({type:'solicit',evalId:mmiForm.evalId,physicianName:mmiForm.physicianName,physicianFax:mmiForm.physicianFax,physicianAddress:mmiForm.physicianAddress})}>{mmiMut.isPending?<Spinner/>:'Send PR-4 Request'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setMmiModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {mmiModal==='response'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setMmiModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:480}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Record PR-4 Response</div>
+                <Field label="WPI (Whole Person Impairment %)"><input type="number" min="0" max="100" step="0.5" value={mmiForm.wpi||''} onChange={e=>setMmiForm(f=>({...f,wpi:e.target.value}))}/></Field>
+                <Field label="Work Restrictions"><textarea rows={2} value={mmiForm.workRestrictions||''} onChange={e=>setMmiForm(f=>({...f,workRestrictions:e.target.value}))}/></Field>
+                <Field label="Future Medical"><textarea rows={2} value={mmiForm.futureMedical||''} onChange={e=>setMmiForm(f=>({...f,futureMedical:e.target.value}))}/></Field>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:C.dim,marginTop:8,cursor:"pointer"}}>
+                  <input type="checkbox" checked={mmiForm.apportionmentNoted||false} onChange={e=>setMmiForm(f=>({...f,apportionmentNoted:e.target.checked}))}/>
+                  Apportionment noted in PR-4
+                </label>
+                <div style={{display:"flex",gap:8,marginTop:16}}>
+                  <Btn disabled={mmiMut.isPending} onClick={()=>mmiMut.mutate({type:'response',pr4Id:mmiForm.pr4Id,wpi:mmiForm.wpi?parseFloat(mmiForm.wpi):null,workRestrictions:mmiForm.workRestrictions,futureMedical:mmiForm.futureMedical,apportionmentNoted:mmiForm.apportionmentNoted})}>{mmiMut.isPending?<Spinner/>:'Record Response'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setMmiModal(null)}>Cancel</Btn>
                 </div>
               </div>
             </div>}
