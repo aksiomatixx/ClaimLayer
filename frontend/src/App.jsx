@@ -7,6 +7,7 @@ import { fetchRFAs, approveRFA, routeToURO } from './services/rfas.js';
 import { fetchLossRun, fetchEmployerSummary, fetchExperienceModInputs, fetchCrossEmployerReport, fetchMissedDeadlines } from './services/reporting.js';
 import { fetchPanelsForClaim, requestPanel, issuePanel, recordStrikes, scheduleQmeAppointment, markReportReceived, fetchSupplementalRequests, approveSupplemental, dismissSupplemental } from './services/qme.js';
 import { evaluateMMISignals, fetchMMIEvaluations, solicitPR4, recordPR4Response, dismissMMIEvaluation, fetchPR4Solicitations } from './services/mmi.js';
+import { calculatePD, initiatePDAdvances, recordPDAdvancePayment, waivePDAdvance, createStipulation, sendStipToWorker, recordWorkerSignature, recordAdjusterSignature, recordEAMSFiled, fetchPDData } from './services/pd.js';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -1357,6 +1358,29 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
     onError:(e)=>notify(`MMI action failed: ${e.message}`,'error'),
   });
 
+  // M13: PD / Stip data
+  const {data:pdData}=useQuery({queryKey:['pd-data',claimId],queryFn:()=>fetchPDData(claimId),enabled:!!claimId&&drawerTab==='pd',staleTime:30_000});
+  const pdEval=pdData?.pdEvaluation||null;
+  const pdAdvances=pdData?.pdAdvances||[];
+  const stipulation=pdData?.stipulation||null;
+  const [pdModal,setPdModal]=useState(null);
+  const [pdForm,setPdForm]=useState({});
+  const pdMut=useMutation({
+    mutationFn:async(action)=>{
+      if(action.type==='calculate') return calculatePD(claimId,action.pr4Id,action.apportionmentPercent);
+      if(action.type==='advances') return initiatePDAdvances(claimId,action.pdEvaluationId,action.tdEndDate);
+      if(action.type==='advPayment') return recordPDAdvancePayment(action.pdAdvanceId);
+      if(action.type==='advWaive') return waivePDAdvance(action.pdAdvanceId,action.reason);
+      if(action.type==='createStip') return createStipulation(claimId,action.pdEvaluationId,{futureMedical:action.futureMedical,futureMedicalDesc:action.futureMedicalDesc,bodyPartsAccepted:action.bodyPartsAccepted});
+      if(action.type==='sendStip') return sendStipToWorker(action.stipId);
+      if(action.type==='workerSign') return recordWorkerSignature(action.stipId);
+      if(action.type==='adjusterSign') return recordAdjusterSignature(action.stipId);
+      if(action.type==='eamsFiled') return recordEAMSFiled(action.stipId,action.filedDate);
+    },
+    onSuccess:()=>{qc.invalidateQueries({queryKey:['pd-data',claimId]});qc.invalidateQueries({queryKey:['claim-diaries',claimId]});qc.invalidateQueries({queryKey:['claim',claimId]});setPdModal(null);setPdForm({});notify('PD action completed');},
+    onError:(e)=>notify(`PD action failed: ${e.message}`,'error'),
+  });
+
   const today=new Date().toISOString().split('T')[0];
 
   if(claimLoading||!claim){
@@ -1418,7 +1442,7 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
         </div>
 
         <div style={{padding:"22px 26px"}}>
-          <Tabs tabs={[{key:"details",label:"Details"},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"}]} active={drawerTab} onChange={setDrawerTab}/>
+          <Tabs tabs={[{key:"details",label:"Details"},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"},{key:"pd",label:"PD / Stip"}]} active={drawerTab} onChange={setDrawerTab}/>
 
           {drawerTab==="details"&&<>
           {/* Claim Facts */}
@@ -1788,6 +1812,151 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
                 <div style={{display:"flex",gap:8,marginTop:16}}>
                   <Btn disabled={mmiMut.isPending} onClick={()=>mmiMut.mutate({type:'response',pr4Id:mmiForm.pr4Id,wpi:mmiForm.wpi?parseFloat(mmiForm.wpi):null,workRestrictions:mmiForm.workRestrictions,futureMedical:mmiForm.futureMedical,apportionmentNoted:mmiForm.apportionmentNoted})}>{mmiMut.isPending?<Spinner/>:'Record Response'}</Btn>
                   <Btn variant="ghost" onClick={()=>setMmiModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+          </>}
+
+          {/* ── M13: PD / Stip Tab ───────────────────────────────── */}
+          {drawerTab==="pd"&&<>
+            {/* PD Calculation */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+              <SectionHead title="Permanent Disability"/>
+              {!pdEval&&<Btn small variant="outline" onClick={()=>{setPdModal('calculate');setPdForm({pr4Id:'',apportionmentPercent:0});}}>Calculate PD</Btn>}
+            </div>
+
+            {pdEval?<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px 20px",marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+                {[["WPI",pdEval.wpi!=null?pdEval.wpi+"%":"—",C.cyan],["PD Rating",pdEval.pd_percent!=null?pdEval.pd_percent+"%":"—",C.amber],["Total Value",pdEval.pd_total_value!=null?"$"+Number(pdEval.pd_total_value).toLocaleString():"—",C.green]].map(([l,v,c])=>(
+                  <div key={l} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 14px"}}>
+                    <div style={{fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",marginBottom:6}}>{l}</div>
+                    <div style={{fontSize:15,fontWeight:700,color:c,fontFamily:C.mono}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:11,color:C.dim}}>
+                <div>Weeks: <span style={{fontFamily:C.mono}}>{pdEval.pd_weeks}</span></div>
+                <div>Rate: <span style={{fontFamily:C.mono}}>${pdEval.pd_weekly_rate}/wk</span></div>
+                {parseFloat(pdEval.apportionment_percent)>0&&<>
+                  <div>Apportionment: <span style={{fontFamily:C.mono,color:C.amber}}>{pdEval.apportionment_percent}%</span></div>
+                  <div>Adjusted: <span style={{fontFamily:C.mono,color:C.cyan}}>${Number(pdEval.adjusted_total_value).toLocaleString()}</span></div>
+                </>}
+              </div>
+            </div>:<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"24px 22px",textAlign:"center",color:C.muted,fontSize:13}}>No PD evaluation yet. Calculate PD from a PR-4 response.</div>}
+
+            {/* PD Advances */}
+            {pdEval&&<>
+              <div style={{height:1,background:C.border,margin:"18px 0"}}/>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <SectionHead title="PD Advances"/>
+                {pdAdvances.length===0&&<Btn small variant="outline" onClick={()=>{setPdModal('advances');setPdForm({tdEndDate:''});}}>Initiate PD Advances</Btn>}
+              </div>
+              {pdAdvances.map(adv=>{
+                const overdue=adv.status==='pending'&&adv.advance_due_date<today;
+                return(
+                  <div key={adv.id} style={{background:overdue?C.redF:C.bg,border:`1px solid ${overdue?C.red+'44':C.border}`,borderRadius:8,padding:"14px 16px",marginBottom:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                      <span style={{fontSize:12,fontWeight:600,color:C.text}}>PD Advance — ${adv.weekly_rate}/wk</span>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:adv.status==='active'?C.greenF:adv.status==='waived'?C.amberF:overdue?C.redF:C.amberF,color:adv.status==='active'?C.green:adv.status==='waived'?C.muted:overdue?C.red:C.amber}}>{overdue?'OVERDUE':adv.status.toUpperCase()}</span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11,color:C.dim}}>
+                      <div>TD End: <span style={{fontFamily:C.mono}}>{adv.td_end_date}</span></div>
+                      <div>Due: <span style={{fontFamily:C.mono,color:overdue?C.red:C.text}}>{adv.advance_due_date}</span></div>
+                    </div>
+                    {overdue&&<div style={{marginTop:6,fontSize:11,color:C.red,fontWeight:600}}>10% penalty exposure — LC §4650(b)</div>}
+                    {adv.status==='pending'&&<div style={{display:"flex",gap:8,marginTop:10}}>
+                      <Btn small variant="success" disabled={pdMut.isPending} onClick={()=>pdMut.mutate({type:'advPayment',pdAdvanceId:adv.id})}>Record Payment</Btn>
+                      <Btn small variant="ghost" disabled={pdMut.isPending} onClick={()=>{const r=prompt('Reason for waiver:');if(r)pdMut.mutate({type:'advWaive',pdAdvanceId:adv.id,reason:r});}}>Waive</Btn>
+                    </div>}
+                    {adv.status==='waived'&&adv.waived_reason&&<div style={{marginTop:6,fontSize:11,color:C.muted}}>Waived: {adv.waived_reason}</div>}
+                  </div>
+                );
+              })}
+            </>}
+
+            {/* Stipulation */}
+            {pdEval&&<>
+              <div style={{height:1,background:C.border,margin:"18px 0"}}/>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <SectionHead title="Stipulation"/>
+                {!stipulation&&<Btn small variant="outline" onClick={()=>{setPdModal('createStip');setPdForm({futureMedical:false,futureMedicalDesc:'',bodyPartsAccepted:claim.bodyPart||''});}}>Draft Stipulation</Btn>}
+              </div>
+
+              {stipulation?(()=>{
+                const SS=[['draft','Draft'],['sent_to_worker','Sent'],['worker_signed','Worker Signed'],['adjuster_signed','Adjuster Signed'],['eams_ready','EAMS Ready'],['filed','Filed'],['closed','Closed']];
+                const si=SS.findIndex(([k])=>k===stipulation.status);
+                return(
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px 20px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <span style={{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>PD {stipulation.pd_percent}% = ${Number(stipulation.pd_total_value).toLocaleString()}</span>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:stipulation.status==='filed'||stipulation.status==='closed'?C.greenF:C.amberF,color:stipulation.status==='filed'||stipulation.status==='closed'?C.green:C.amber}}>{stipulation.status.replace(/_/g,' ').toUpperCase()}</span>
+                    </div>
+                    {/* Step progression */}
+                    <div style={{display:"flex",gap:2,marginBottom:14}}>
+                      {SS.map(([k],i)=><div key={k} style={{flex:1,height:4,borderRadius:2,background:i<=si?C.amber:C.border}}/>)}
+                    </div>
+                    {stipulation.future_medical&&<div style={{fontSize:11,color:C.cyan,marginBottom:8}}>Future medical reserved{stipulation.future_medical_desc?`: ${stipulation.future_medical_desc}`:''}</div>}
+                    {/* Action buttons per status */}
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {stipulation.status==='draft'&&<Btn small variant="outline" disabled={pdMut.isPending} onClick={()=>pdMut.mutate({type:'sendStip',stipId:stipulation.id})}>Send to Worker</Btn>}
+                      {stipulation.status==='sent_to_worker'&&<Btn small variant="outline" disabled={pdMut.isPending} onClick={()=>pdMut.mutate({type:'workerSign',stipId:stipulation.id})}>Record Worker Signature</Btn>}
+                      {stipulation.status==='worker_signed'&&<Btn small variant="outline" disabled={pdMut.isPending} onClick={()=>pdMut.mutate({type:'adjusterSign',stipId:stipulation.id})}>Adjuster Sign</Btn>}
+                      {(stipulation.status==='eams_ready'||stipulation.status==='adjuster_signed')&&<Btn small variant="success" onClick={()=>{setPdModal('eamsFiled');setPdForm({filedDate:''});}}>Record EAMS Filed</Btn>}
+                    </div>
+                    {stipulation.eams_filed_at&&<div style={{marginTop:8,fontSize:11,color:C.green,fontFamily:C.mono}}>EAMS filed: {stipulation.eams_filed_at}</div>}
+                  </div>
+                );
+              })():<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"24px 22px",textAlign:"center",color:C.muted,fontSize:13}}>No stipulation yet.</div>}
+            </>}
+
+            {/* Modals */}
+            {pdModal==='calculate'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setPdModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:420}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Calculate Permanent Disability</div>
+                <Field label="PR-4 ID"><input value={pdForm.pr4Id||''} onChange={e=>setPdForm(f=>({...f,pr4Id:e.target.value}))}/></Field>
+                <Field label="Apportionment %"><input type="number" min="0" max="100" value={pdForm.apportionmentPercent||0} onChange={e=>setPdForm(f=>({...f,apportionmentPercent:e.target.value}))}/></Field>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn disabled={!pdForm.pr4Id||pdMut.isPending} onClick={()=>pdMut.mutate({type:'calculate',pr4Id:pdForm.pr4Id,apportionmentPercent:parseFloat(pdForm.apportionmentPercent)||0})}>{pdMut.isPending?<Spinner/>:'Calculate'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setPdModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {pdModal==='advances'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setPdModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:400}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Initiate PD Advances</div>
+                <Field label="TD End Date"><input type="date" value={pdForm.tdEndDate||''} onChange={e=>setPdForm(f=>({...f,tdEndDate:e.target.value}))}/></Field>
+                <div style={{fontSize:11,color:C.rose,marginBottom:12}}>First PD advance due 14 calendar days from TD end. 10% penalty if missed (LC §4650(b)).</div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn disabled={!pdForm.tdEndDate||pdMut.isPending} onClick={()=>pdMut.mutate({type:'advances',pdEvaluationId:pdEval.id,tdEndDate:pdForm.tdEndDate})}>{pdMut.isPending?<Spinner/>:'Initiate'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setPdModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {pdModal==='createStip'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setPdModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:460}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Draft Stipulation</div>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:C.dim,marginBottom:12,cursor:"pointer"}}>
+                  <input type="checkbox" checked={pdForm.futureMedical||false} onChange={e=>setPdForm(f=>({...f,futureMedical:e.target.checked}))}/>
+                  Reserve future medical treatment
+                </label>
+                {pdForm.futureMedical&&<Field label="Future Medical Description"><textarea rows={2} value={pdForm.futureMedicalDesc||''} onChange={e=>setPdForm(f=>({...f,futureMedicalDesc:e.target.value}))}/></Field>}
+                <Field label="Accepted Body Parts"><input value={pdForm.bodyPartsAccepted||''} onChange={e=>setPdForm(f=>({...f,bodyPartsAccepted:e.target.value}))}/></Field>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn disabled={pdMut.isPending} onClick={()=>pdMut.mutate({type:'createStip',pdEvaluationId:pdEval.id,futureMedical:pdForm.futureMedical,futureMedicalDesc:pdForm.futureMedicalDesc,bodyPartsAccepted:pdForm.bodyPartsAccepted?pdForm.bodyPartsAccepted.split(',').map(s=>s.trim()):null})}>{pdMut.isPending?<Spinner/>:'Draft Stip'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setPdModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {pdModal==='eamsFiled'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setPdModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:400}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Record EAMS Filing</div>
+                <Field label="Date Filed at DWC"><input type="date" value={pdForm.filedDate||''} onChange={e=>setPdForm(f=>({...f,filedDate:e.target.value}))}/></Field>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn disabled={!pdForm.filedDate||pdMut.isPending} onClick={()=>pdMut.mutate({type:'eamsFiled',stipId:stipulation.id,filedDate:pdForm.filedDate})}>{pdMut.isPending?<Spinner/>:'Record Filed'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setPdModal(null)}>Cancel</Btn>
                 </div>
               </div>
             </div>}
