@@ -554,43 +554,225 @@ async function _generateStipDocument(claim, pdEval, stip) {
 // sendStipToWorker
 // ═════════════════════════════════════════════════════════════════════════════
 async function sendStipToWorker(stipId) {
-  // stub
+  const { data: stip, error: fetchErr } = await supabase
+    .from('stipulations').select('*').eq('id', stipId).single();
+  if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
+  if (stip.status !== 'draft') throw new Error(`Cannot send stip in status: ${stip.status}`);
+
+  const claimService = _getClaimService();
+  const claim = await claimService.getClaim(stip.claim_id);
+  if (!claim) throw new Error(`Claim not found: ${stip.claim_id}`);
+
+  const now = new Date().toISOString();
+  const emp = claim.employee || {};
+  const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Injured Worker';
+
+  // Check if worker is represented (attorney on file)
+  const isRepresented = !!(claim.attorneyName || claim.representedBy);
+
+  if (isRepresented) {
+    // Represented worker: action item for attorney transmission only.
+    // NEVER send directly to worker.
+    await _createDiary(
+      stip.claim_id, 'STIP_ATTORNEY_TRANSMIT',
+      _addCalendarDays(now.split('T')[0], 3), 'HIGH',
+      `Stip ready for attorney transmission. Worker is represented — do NOT contact worker directly. Send stip package to attorney for review and worker signature.`,
+    );
+  } else {
+    // Unrepresented: send via Lob
+    try {
+      await lobService.sendLetter('stipulation', stip.claim_id, 'claimant', {
+        recipientName: empName,
+        recipientAddress: emp.address ? `${emp.address.line1 || ''}, ${emp.address.state || ''} ${emp.address.zip || ''}` : '',
+        pdfBuffer: null,
+      });
+    } catch (err) {
+      logger.error({ msg: 'pdService.sendStipToWorker: lob failed (non-fatal)', err: err.message });
+    }
+
+    await _createDiary(
+      stip.claim_id, 'STIP_WORKER_FOLLOWUP',
+      _addCalendarDays(now.split('T')[0], 21), 'MEDIUM',
+      `Stip sent to worker ${_formatDate(now)}. Follow up if not signed within 21 days.`,
+    );
+  }
+
+  await supabase.from('stipulations')
+    .update({ status: 'sent_to_worker', updated_at: now })
+    .eq('id', stipId);
+
+  await _writeAuditLog(
+    'stip_sent', 'stipulation', stipId,
+    `Stip sent. Represented: ${isRepresented ? 'Yes (attorney action item)' : 'No (Lob mail)'}`,
+    { isRepresented },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'stip_sent', timestamp: now,
+    data: { stipId, isRepresented },
+  });
+
+  logger.info({ msg: 'pdService.sendStipToWorker: complete', stipId, isRepresented });
+
+  const { data: updated } = await supabase.from('stipulations').select('*').eq('id', stipId).single();
+  return updated;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // recordWorkerSignature
 // ═════════════════════════════════════════════════════════════════════════════
 async function recordWorkerSignature(stipId) {
-  // stub
+  const { data: stip, error: fetchErr } = await supabase
+    .from('stipulations').select('*').eq('id', stipId).single();
+  if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
+  if (stip.status !== 'sent_to_worker') throw new Error(`Cannot record signature in status: ${stip.status}`);
+
+  const now = new Date().toISOString();
+
+  await supabase.from('stipulations')
+    .update({ worker_signed_at: now, status: 'worker_signed', updated_at: now })
+    .eq('id', stipId);
+
+  await _closeDiary(stip.claim_id, 'STIP_WORKER_FOLLOWUP');
+  await _closeDiary(stip.claim_id, 'STIP_ATTORNEY_TRANSMIT');
+
+  await _createDiary(
+    stip.claim_id, 'STIP_ADJUSTER_SIGN',
+    _addCalendarDays(now.split('T')[0], 3), 'HIGH',
+    'Worker signed stip. Adjuster signature needed to finalize.',
+  );
+
+  await _writeAuditLog('stip_worker_signed', 'stipulation', stipId, 'Worker signed stipulation', { signedAt: now });
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'stip_worker_signed', timestamp: now,
+    data: { stipId },
+  });
+
+  logger.info({ msg: 'pdService.recordWorkerSignature: complete', stipId });
+
+  const { data: updated } = await supabase.from('stipulations').select('*').eq('id', stipId).single();
+  return updated;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // recordAdjusterSignature
 // ═════════════════════════════════════════════════════════════════════════════
 async function recordAdjusterSignature(stipId, adjusterId) {
-  // stub
+  const { data: stip, error: fetchErr } = await supabase
+    .from('stipulations').select('*').eq('id', stipId).single();
+  if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
+  if (stip.status !== 'worker_signed') throw new Error(`Cannot sign stip in status: ${stip.status}`);
+
+  const now = new Date().toISOString();
+
+  await supabase.from('stipulations')
+    .update({
+      adjuster_signed_at: now,
+      status: 'eams_ready',
+      eams_package_ready: true,
+      updated_at: now,
+    })
+    .eq('id', stipId);
+
+  await _closeDiary(stip.claim_id, 'STIP_ADJUSTER_SIGN');
+
+  // EAMS filing action item — always manual
+  await _createDiary(
+    stip.claim_id, 'EAMS_FILE', _addCalendarDays(now.split('T')[0], 7), 'HIGH',
+    'EAMS filing package ready. File manually at DWC. Mark filed when complete.',
+  );
+
+  await _writeAuditLog(
+    'stip_adjuster_signed', 'stipulation', stipId,
+    `Adjuster signed stip. EAMS package ready for manual filing.`,
+    { adjusterId, eamsReady: true },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'stip_adjuster_signed', timestamp: now,
+    data: { stipId, adjusterId, eamsReady: true },
+  });
+
+  logger.info({ msg: 'pdService.recordAdjusterSignature: complete', stipId });
+
+  const { data: updated } = await supabase.from('stipulations').select('*').eq('id', stipId).single();
+  return updated;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // recordEAMSFiled
 // ═════════════════════════════════════════════════════════════════════════════
 async function recordEAMSFiled(stipId, { filedDate }) {
-  // stub
+  const { data: stip, error: fetchErr } = await supabase
+    .from('stipulations').select('*').eq('id', stipId).single();
+  if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
+  if (!['eams_ready', 'adjuster_signed'].includes(stip.status)) {
+    throw new Error(`Cannot file EAMS in status: ${stip.status}`);
+  }
+
+  const now = new Date().toISOString();
+
+  await supabase.from('stipulations')
+    .update({ eams_filed_at: filedDate, status: 'filed', updated_at: now })
+    .eq('id', stipId);
+
+  await _closeDiary(stip.claim_id, 'EAMS_FILE');
+
+  // Update claim status based on future_medical flag
+  const newClaimStatus = stip.future_medical ? 'future_medical_only' : 'closed';
+
+  await supabase.from('claims')
+    .update({ status: newClaimStatus, updated_at: now })
+    .eq('id', stip.claim_id);
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'status_changed', timestamp: now,
+    data: { from: 'pd_evaluation', to: newClaimStatus, changedBy: 'system', reason: 'EAMS filed' },
+  });
+
+  await _writeAuditLog(
+    'eams_filed', 'stipulation', stipId,
+    `EAMS filed on ${filedDate}. Claim status → ${newClaimStatus}`,
+    { filedDate, newClaimStatus, futureMedical: stip.future_medical },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'eams_filed', timestamp: now,
+    data: { stipId, filedDate },
+  });
+
+  logger.info({ msg: 'pdService.recordEAMSFiled: complete', stipId, filedDate, newClaimStatus });
+
+  const { data: updated } = await supabase.from('stipulations').select('*').eq('id', stipId).single();
+  return updated;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Read operations
 // ═════════════════════════════════════════════════════════════════════════════
 async function getPDEvaluation(claimId) {
-  // stub
+  const { data, error } = await supabase
+    .from('pd_evaluations').select('*').eq('claim_id', claimId)
+    .order('calculated_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data && data.length > 0) ? data[0] : null;
 }
 
 async function getStipulation(claimId) {
-  // stub
+  const { data, error } = await supabase
+    .from('stipulations').select('*').eq('claim_id', claimId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data && data.length > 0) ? data[0] : null;
 }
 
 async function getPDAdvances(claimId) {
-  // stub
+  const { data, error } = await supabase
+    .from('pd_advances').select('*').eq('claim_id', claimId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 module.exports = {
