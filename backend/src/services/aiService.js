@@ -88,15 +88,17 @@ async function analyzeCompensability(claim) {
   const systemPrompt = loadPrompt('compensability_analysis');
 
   const userContent = JSON.stringify({
-    claimNumber:       claim.claimNumber,
-    dateOfInjury:      claim.dateOfInjury,
-    bodyPart:          claim.bodyPart,
-    injuryType:        claim.injuryType,
-    injuryDescription: claim.injuryDescription,
-    jobTitle:          claim.employee.jobTitle,
-    aww:               claim.aww,
-    tdRate:            claim.tdRate,
+    claimNumber:        claim.claimNumber,
+    dateOfInjury:       claim.dateOfInjury,
+    bodyPart:           claim.bodyPart,
+    injuryType:         claim.injuryType,
+    injuryDescription:  claim.injuryDescription,
+    jobTitle:           claim.employee.jobTitle,
+    aww:                claim.aww,
+    tdRate:             claim.tdRate,
     stateOfJurisdiction: 'CA',
+    employerContests:   claim.employerContests   ?? false,
+    motorVehicleFields: claim.motorVehicleFields ?? null,
   });
 
   const result = await callClaude(systemPrompt, userContent);

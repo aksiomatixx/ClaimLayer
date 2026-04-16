@@ -279,6 +279,10 @@ function MediaUploader({files,onAdd,onRemove}){
 
   return(
     <div>
+      <div style={{background:C.amberF,border:`1px solid ${C.amber}33`,borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12,color:C.dim,lineHeight:1.6}}>
+        ⚠️ Please ensure photos do not include patients, patient faces, or any patient
+        identifying information. Uploading patient PHI may violate HIPAA.
+      </div>
       <input ref={inputRef} type="file" multiple accept="image/*,video/*" style={{display:"none"}} onChange={e=>handle(e.target.files)}/>
       <div
         onClick={()=>inputRef.current?.click()}
@@ -427,7 +431,7 @@ function generateNoticePDF(claim,noticeType){
 // ═══════════════════════════════════════════════════════════
 // EMPLOYEE INTAKE WIZARD (M2) — i18n · equal voice/text · real API
 // ═══════════════════════════════════════════════════════════
-const EMPTY_M2={claimant:'',claimantDOB:'',homeAddr:'',homeZip:'',phone:'',employer:'',dateOfInjury:'',bodyPart:'',injuryType:'',mechanism:'',voiceTranscript:'',medTreatment:'',timeOff:false,priorClaims:'None',witnesses:'',media:[],aww:null,tdRate:null};
+const EMPTY_M2={claimant:'',claimantDOB:'',homeAddr:'',homeZip:'',phone:'',employer:'',dateOfInjury:'',bodyPart:'',injuryType:'',mechanism:'',voiceTranscript:'',medTreatment:'',timeOff:false,priorClaims:'None',witnesses:'',media:[],aww:null,tdRate:null,motorVehicleFields:null};
 
 function EmployeeIntakeWizard({onComplete}){
   const {t,i18n}=useTranslation('intake');
@@ -583,6 +587,26 @@ function EmployeeIntakeWizard({onComplete}){
             <Field label="Type of Injury">
               <select value={form.injuryType} onChange={f('injuryType')}><option value="">Select…</option>{INJURY_TYPES.map(ty=><option key={ty}>{ty}</option>)}</select>
             </Field>
+            {form.injuryType==='Motor Vehicle'&&(
+              <div style={{background:C.card,border:`1px solid ${C.amber}33`,borderRadius:9,padding:'14px 16px',marginTop:14}}>
+                <Lbl color={C.amber}>A few quick questions about the accident</Lbl>
+                {[
+                  ['driving_between_patients','Were you driving between patient locations when this occurred?'],
+                  ['other_vehicle_involved','Was another vehicle involved?'],
+                  ['police_responded','Did police respond to the scene?'],
+                ].map(([key,question])=>(
+                  <div key={key} style={{marginBottom:12}}>
+                    <div style={{fontSize:13,color:C.dim,marginBottom:6}}>{question}</div>
+                    <RadioGroup
+                      name={key}
+                      value={form.motorVehicleFields?.[key]??null}
+                      onChange={val=>setForm(p=>({...p,motorVehicleFields:{...(p.motorVehicleFields||{}),[key]:val}}))}
+                      options={[['Yes',true],['No',false],["I don't know",null]]}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
             <Field label="Did your doctor take you off work?">
               <RadioGroup value={form.timeOff} onChange={v=>setForm(p=>({...p,timeOff:v}))} options={[['Yes',true],['No',false]]} name="tof"/>
             </Field>
@@ -1194,7 +1218,7 @@ function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,
 
   return(
     <div style={{paddingTop:32,animation:"fadeUp .3s ease"}}>
-      <div style={{marginBottom:26}}><h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Claims Console</h1><p style={{color:C.muted,fontSize:13}}>Action Queue · AI Analysis · Reserve Approval · FileHandler Sync</p></div>
+      <div style={{marginBottom:26}}><h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Claims Console</h1><p style={{color:C.muted,fontSize:13}}>Action Queue · AI Analysis · Reserve Approval · CMS Sync</p></div>
       <div style={{display:"flex",gap:14,marginBottom:24}}>
         <StatCard label="Total Claims" value={claims.length} delay={0}/>
         <StatCard label="Need Action" value={actionCount} accent={actionCount>0?C.amber:C.green} sub="In queue" delay={.05}/>
@@ -1480,7 +1504,7 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
                 </Btn>
                 <Btn variant="ghost" onClick={()=>setResEditing(false)}>Cancel</Btn>
               </div>
-              {reserveMut.isSuccess&&<div style={{marginTop:8,fontSize:12,color:C.green}}>✓ Reserves approved and sent to FileHandler</div>}
+              {reserveMut.isSuccess&&<div style={{marginTop:8,fontSize:12,color:C.green}}>✓ Reserves approved and synced to CMS</div>}
             </div>
           )}
         </div>

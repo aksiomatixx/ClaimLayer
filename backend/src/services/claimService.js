@@ -65,12 +65,15 @@ function _toClaim(row) {
     injuryType:       row.injury_type,
     injuryDescription: row.injury_description,
     employerName:     row.employer_name,
-    filed_at:         row.filed_at,
-    filehandlerId:    row.filehandler_id,
-    aiAnalysis:       row.ai_analysis || null,
-    priority:         row.priority    || null,
-    createdAt:        row.created_at,
-    updatedAt:        row.updated_at,
+    filed_at:            row.filed_at,
+    filehandlerId:       row.filehandler_id,
+    aiAnalysis:          row.ai_analysis || null,
+    priority:            row.priority    || null,
+    motorVehicleFields:  row.motor_vehicle_fields || null,
+    employerContests:    row.employer_contests    ?? false,
+    subrogationStatus:   row.subrogation_status   || null,
+    createdAt:           row.created_at,
+    updatedAt:           row.updated_at,
     events: ((row.claim_events || [])
       .slice()
       .sort((a, b) => new Date(a.timestamp || a.created_at) - new Date(b.timestamp || b.created_at))
@@ -179,12 +182,15 @@ async function createClaim(froiData, employerId) {
     injury_type:      froiData.injuryType,
     injury_description: froiData.injuryDescription,
     employer_name:    froiData.employerName,
-    filed_at:         now,
-    filehandler_id:   null,
-    ai_analysis:      null,
-    priority:         null,
-    created_at:       now,
-    updated_at:       now,
+    filed_at:             now,
+    filehandler_id:       null,
+    ai_analysis:          null,
+    priority:             null,
+    motor_vehicle_fields: froiData.motorVehicleFields || null,
+    employer_contests:    froiData.employerContests   || false,
+    subrogation_status:   null,
+    created_at:           now,
+    updated_at:           now,
   };
 
   await supabase.from('claims').insert(claimRow);
@@ -247,6 +253,14 @@ async function createClaim(froiData, employerId) {
   // ── Step 6: Seed initial statutory diaries ─────────────────────────────────
   if (filehandlerId) {
     await _seedInitialDiaries(claimId, froiData.dateOfInjury, now, employee.aww, employee.tdRate);
+  }
+
+  // ── Step 6.5: Motor vehicle subrogation flag ─────────────────────────────────
+  if (froiData.injuryType === 'Motor Vehicle') {
+    await supabase
+      .from('claims')
+      .update({ subrogation_status: 'under_evaluation' })
+      .eq('id', claimId);
   }
 
   // ── Step 7: Trigger async AI analysis ──────────────────────────────────────
