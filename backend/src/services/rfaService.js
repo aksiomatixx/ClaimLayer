@@ -29,6 +29,20 @@ function getClaimService() {
   return require('./claimService');
 }
 
+// Lazy require to avoid loading noticeService before it is fully initialised
+function _getNoticeService() {
+  return require('./noticeService');
+}
+
+// Fire-and-forget notice helper — logs errors, never throws
+function _fireNotice(fn, ...args) {
+  setImmediate(() => {
+    fn(...args).catch(err =>
+      logger.error({ msg: 'rfaService: notice trigger failed', fn: fn.name, err: err.message }),
+    );
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -366,13 +380,18 @@ async function evaluateRFA(rfaId) {
 
   if (decision === 'auto_approve') {
     await _autoApproveRFA(rfaId, rfa.claim_id, rfa.response_due_at);
+    _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
   } else if (decision === 'adjuster_review') {
     await _queueForAdjusterReview(rfaId, rfa.claim_id, aiResult);
+    // No notice yet — pending human decision
   } else if (decision === 'route_to_uro') {
     const reason = _isSurgical(rfa.cpt_codes || [])
       ? 'Surgical procedure — URO required per CCR §9792.6.1'
       : 'MTUS-inconsistent treatment — physician review required';
     await _routeToEnlyte(rfaId, rfa.claim_id, rfa, claim, aiResult, reason);
+    // URO denial: RFA determination letter + IMR rights notice
+    _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+    _fireNotice(_getNoticeService().generateImrRightsNotice, rfaId);
   }
 }
 
@@ -400,6 +419,7 @@ async function adjusterApproveRFA(rfaId, adjusterEmail) {
   });
 
   await _completeRFADiary(rfa.claim_id, rfaId);
+  _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
   logger.info({ msg: 'rfaService.adjusterApproveRFA: approved', rfaId, adjusterEmail });
 
   return getRFA(rfaId);
@@ -423,6 +443,8 @@ async function adjusterRouteToURO(rfaId, adjusterEmail, reason) {
     updated_at: now,
   }).eq('id', rfaId);
 
+  _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+  _fireNotice(_getNoticeService().generateImrRightsNotice, rfaId);
   logger.info({ msg: 'rfaService.adjusterRouteToURO', rfaId, adjusterEmail });
   return getRFA(rfaId);
 }

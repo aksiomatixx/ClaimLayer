@@ -23,6 +23,7 @@ const { supabase }         = require('./supabase');
 const filehandler          = require('./filehandler');
 const adp                  = require('./adp');
 const aiService            = require('./aiService');
+const noticeService        = require('./noticeService');
 const logger               = require('../logger');
 const { addBusinessDays }  = require('../utils/businessDays');
 
@@ -265,6 +266,14 @@ async function createClaim(froiData, employerId) {
 
   // ── Step 7: Trigger async AI analysis ──────────────────────────────────────
   setImmediate(() => _runAnalysis(claimId));
+
+  // ── Step 8: DWC-7 notice — fire-and-forget ────────────────────────────────
+  // Runs after HTTP response returns. Errors are logged, never rethrown.
+  setImmediate(() => {
+    noticeService.generateDwc7(claimId).catch(err =>
+      logger.error({ msg: 'createClaim: DWC-7 notice failed', claimId, err: err.message }),
+    );
+  });
 
   logger.info({ msg: 'createClaim: complete', claimNumber, claimId });
 

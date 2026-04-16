@@ -28,7 +28,8 @@ homecare-tpa/
 │           ├── claims.js             ← fetch wrappers: fetchClaims, triggerAnalysis, etc.
 │           ├── employer.js           ← loginEmployer, submitFROI, previewEmployee
 │           ├── providers.js          ← fetchProviders(zipCode, limit)
-│           └── rfas.js               ← fetchRFAs, submitRFA, approveRFA, routeToURO
+│           ├── rfas.js               ← fetchRFAs, submitRFA, approveRFA, routeToURO
+│           └── notices.js            ← (M9 pending) fetchNotices, sendDenialNotice
 ├── backend/                          ← Express (Node.js) API
 │   ├── src/
 │   │   ├── constants.js              ← Controlled vocabulary: CLAIM_STATUSES, SUBROGATION_STATUSES, DOCUMENT_CATEGORIES
@@ -39,9 +40,11 @@ homecare-tpa/
 │   │   │   ├── supabase.js           ← Supabase service-role + anon-key clients
 │   │   │   ├── filehandler.js        ← FileHandler Enterprise client
 │   │   │   ├── adp.js                ← ADP OAuth2 client + AWW/TD calculation
-│   │   │   ├── claimService.js       ← Claim lifecycle orchestration + diaries
-│   │   │   ├── rfaService.js         ← RFA lifecycle: create → AI eval → route/approve
-│   │   │   ├── enlyteService.js      ← Enlyte URO stub (real API deferred to M8)
+│   │   │   ├── claimService.js       ← Claim lifecycle orchestration + diaries + DWC-7 trigger
+│   │   │   ├── rfaService.js         ← RFA lifecycle: create → AI eval → route/approve + notice triggers
+│   │   │   ├── enlyteService.js      ← Enlyte URO stub (real API deferred to M10)
+│   │   │   ├── lobService.js         ← Lob.com print & mail stub (LOB_LIVE flag for real API)
+│   │   │   ├── noticeService.js      ← CA WC statutory notice generation (pdf-lib, 5 notice types)
 │   │   │   ├── aiService.js          ← Claude API integration
 │   │   │   ├── pdfService.js         ← DWC-1, AI reasoning, auth letter (pdf-lib)
 │   │   │   ├── appointmentService.js ← MPN appointment booking
@@ -77,7 +80,8 @@ homecare-tpa/
 │   │   │   ├── filehandler.test.js
 │   │   │   ├── businessDays.test.js
 │   │   │   ├── providers.test.js
-│   │   │   └── m6-schema.test.js     ← M6: constants/enum validation (CLAIM_STATUSES, SUBROGATION_STATUSES, DOCUMENT_CATEGORIES)
+│   │   │   ├── m6-schema.test.js     ← M6: constants/enum validation (CLAIM_STATUSES, SUBROGATION_STATUSES, DOCUMENT_CATEGORIES)
+│   │   │   └── noticeService.test.js ← M9: trigger wiring, denial guard, notices table writes (14 tests)
 │   │   └── integration/
 │   │       ├── claim-flow.test.js         ← Full FROI → ADP → FH → AI flow
 │   │       ├── intake-flow.test.js        ← M2: appointments, MPN, intake-progress
@@ -235,13 +239,40 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M6 | Schema retrofit: `employer_contests`, `motor_vehicle_fields`, `subrogation_status`, `future_medical_only` status, document indexing columns, `automation_config` + `supplemental_requests` tables; MV subrogation logic; AI payload fields; PHI disclaimer; constants module | ✅ Complete |
 | M7 | RFA engine: MTUS evaluation, `_resolveDecision` routing (surgical override, auto-approve, URO, adjuster queue), Enlyte stub, diary lifecycle | ✅ Complete |
 | M8 | DxF / QHIO: Manifest MedEx roster enrollment, ADT push notifications, clinical document pull | 🔲 Not started |
-| M9 | Enlyte real integration: Replace stub with live Enlyte URO API; handle determination webhook | 🔲 Not started |
-| M10 | Notice center: Lob.com print-and-mail integration, statutory notice generation | 🔲 Not started |
+| M9 | Notice Center: `lobService` stub, `noticeService` (5 CA WC notice types), fire-and-forget triggers in `claimService` + `rfaService`, DWC I&A block structurally hardcoded, denial guard, notices table + audit_log writes | ✅ Complete |
+| M10 | Enlyte real integration: Replace stub with live Enlyte URO API; handle determination webhook | 🔲 Not started |
 | M11 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
 
-**Current test count: 212 passing** (11 suites — unit + integration)
+**Current test count: 226 passing** (12 suites — unit + integration)
 
-### M6 — What was built (current)
+### M9 — What was built (current)
+
+Notice Center infrastructure sprint. No existing tests broken; test count grew from 212 → 226.
+
+- **`backend/src/services/lobService.js`** (new) — Lob.com print & mail stub following the `enlyteService.js` pattern exactly. `sendLetter(noticeType, claimId, recipientRole, payload)` returns `{ letterId: 'ltr_MOCK-{ts}', status: 'queued', estimatedDelivery }`. `getLetterStatus(lobId)` returns `{ letterId, status: 'in_transit' }`. One-line flag swap to production: set `LOB_LIVE=true` and provision `LOB_API_KEY`. Both functions return the same shape as the real Lob API so `noticeService.js` needs no changes when live integration lands.
+
+- **`backend/src/services/noticeService.js`** (new) — Five CA WC statutory notice generators, all server-side pdf-lib (no client-side PDF). Each generator: builds PDF, writes `notices` table row, calls `lobService.sendLetter`, writes `audit_log` entry (7-year retention per CA WC regs).
+  - `generateDwc7(claimId)` — DWC-7 "Notice of Rights" per LC §5401.7 and 8 CCR §9810. 5 business day deadline from claim receipt.
+  - `generateTdNotice(claimId)` — TD benefit notice per LC §4650. AWW and TD rate breakdown, 14 calendar day deadline, payment schedule, 104-week cap, worker obligations.
+  - `generateRfaLetter(rfaId)` — RFA determination letter per 8 CCR §9792.9.1. Addressed to requesting physician (cc to injured worker). Decision-aware body: approval → authorized treatment; denial → MTUS rationale + full IMR rights (Maximus Federal contact, 30-day LC §4610.5 deadline); other → status update.
+  - `generateImrRightsNotice(rfaId)` — IMR rights notice per LC §4610.5. 30 calendar day filing deadline. Complete Maximus Federal contact block (phone `1-888-845-7100`, fax, website, mailing address). WCAB appeal path if IMR upholds denial.
+  - `generateDenialNotice(claimId, adjusterId)` — Claim denial notice. **Hard guard**: throws synchronously if `adjusterId` is missing, empty, or whitespace — no PDF generated, no DB write, no Lob call. `adjusterId` stamped in audit log and PDF footer. WCAB appeal rights and LC §5405 statute of limitations.
+  - **DWC I&A block**: `_drawIABlock()` is called directly from every generator — structurally hardcoded, no conditional path can omit it (LC §5401.7, 8 CCR §9812). Block includes: DWC I&A Unit 1-800-736-7401, website, local office finder, CA State Bar referral.
+  - **Shared helpers**: `_drawLetterhead()`, `_drawIABlock()`, `_writeAuditLog()`, `_formatDate()`, `_wrapText()`, `_getClaimService()` (lazy require to avoid circular dependency).
+
+- **`backend/src/services/claimService.js`** — Step 8 (new): after AI analysis trigger, fire-and-forget `generateDwc7(claimId)` via `setImmediate`. Errors caught and logged, never rethrown — claim creation never blocks or fails on notice generation.
+
+- **`backend/src/services/rfaService.js`** — `_getNoticeService()` lazy require + `_fireNotice(fn, ...args)` helper (wraps every call in `setImmediate` + `.catch(logger.error)`). Notice triggers added:
+  - `evaluateRFA`: `auto_approve` → `generateRfaLetter`; `route_to_uro` → `generateRfaLetter` + `generateImrRightsNotice`
+  - `adjusterApproveRFA` → `generateRfaLetter`
+  - `adjusterRouteToURO` → `generateRfaLetter` + `generateImrRightsNotice`
+
+- **`backend/tests/unit/noticeService.test.js`** (new, 14 tests):
+  - **Trigger wiring**: spy pattern — real claimService and rfaService with mocked deps, spied noticeService, `drainSetImmediates()` flush. Verifies `generateDwc7` called after claim creation; `generateRfaLetter` called on `auto_approve` and `route_to_uro`; `generateImrRightsNotice` called on `route_to_uro`, NOT on `auto_approve`.
+  - **Denial guard**: 4 variants — `undefined`, empty string, whitespace-only, no argument. All throw `'adjusterId is required'` before any side effects.
+  - **Notices table writes**: all 5 notice types verified against the supabase mock store after calling each generator directly. Confirms `_drawIABlock` executed (it runs synchronously before the DB write, so a successful `notices` insert proves the I&A block rendered).
+
+### M6 — What was built (previous)
 
 Additive retrofit sprint. No existing tests broken; test count grew from 197 → 212.
 
