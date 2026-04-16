@@ -17,6 +17,7 @@ const documentsRouter    = require('./routes/documents');
 const authRouter         = require('./routes/auth');
 const employerRouter     = require('./routes/employer');
 const rfasRouter         = require('./routes/rfas');
+const reportingRouter    = require('./routes/reporting');
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/v1/documents',     documentsRouter);
 app.use('/api/v1/auth',          authRouter);
 app.use('/api/v1/employer',      employerRouter);
 app.use('/api/v1/rfas',         rfasRouter);
+app.use('/api/v1',               reportingRouter);
 app.use('/webhooks',             webhooksRouter);
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────
