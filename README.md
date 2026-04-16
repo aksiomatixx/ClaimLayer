@@ -268,7 +268,9 @@ Additive retrofit sprint. No existing tests broken; test count grew from 197 →
 - **`backend/tests/unit/m6-schema.test.js`** (new) — 9 tests validating the constants module: `future_medical_only` in `CLAIM_STATUSES`; `SUBROGATION_STATUSES` matches migration CHECK exactly (and rejects `pursuing`, `closed`, etc.); all 11 `DOCUMENT_CATEGORIES` present.
 - **`backend/tests/integration/claim-flow.test.js`** — Added `jest.mock` for `aiService` (prevents live Claude calls; enables payload inspection). Five new M6 tests: MV claim sets `subrogationStatus: 'under_evaluation'`; MV claim passes `motorVehicleFields` to `analyzeCompensability`; non-MV claim passes `motorVehicleFields: null`; `employerContests: true` propagates to AI payload; unset `employerContests` defaults to `false`.
 
-### M7 — What was built — Full RFA lifecycle orchestration:
+### M7 — What was built
+
+- **`backend/src/services/rfaService.js`** (new) — Full RFA lifecycle orchestration:
   - `createRFA(claimId, rfaData, receivedVia)` — inserts RFA row, calculates statutory deadline (5 business days standard / 72 hours expedited per CCR §9792.9.1), seeds `RFA_RESPONSE_DUE` diary, logs `rfa_received` claim event, triggers async AI evaluation via `setImmediate`.
   - `evaluateRFA(rfaId)` — fetches RFA + claim, calls `aiService.evaluateRFA`, persists `rfa_evaluations` row, routes via `_resolveDecision`.
   - `_resolveDecision(aiResult, rfa, claim)` — surgical CPT override → URO; AI auto_approve → approve; MTUS-inconsistent → URO; MTUS-consistent + physician_review → adjuster queue.
