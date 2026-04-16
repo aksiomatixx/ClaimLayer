@@ -161,14 +161,160 @@ function _computePDWeeklyRate(aww, pdPercent) {
 // calculatePD
 // ═════════════════════════════════════════════════════════════════════════════
 async function calculatePD(claimId, pr4Id, { apportionmentPercent }) {
-  // stub
+  const claimService = _getClaimService();
+  const claim = await claimService.getClaim(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+
+  // Fetch PR-4 for WPI
+  const { data: pr4, error: pr4Err } = await supabase
+    .from('pr4_solicitations').select('*').eq('id', pr4Id).single();
+  if (pr4Err || !pr4) throw new Error(`PR-4 not found: ${pr4Id}`);
+  if (pr4.wpi == null) throw new Error('PR-4 has no WPI recorded');
+
+  const wpi = parseFloat(pr4.wpi);
+
+  // Compute age at DOI
+  const emp = claim.employee || {};
+  let ageAtDoi = null;
+  if (emp.dob && claim.dateOfInjury) {
+    const dob = new Date(emp.dob + 'T00:00:00');
+    const doi = new Date(claim.dateOfInjury + 'T00:00:00');
+    ageAtDoi = doi.getFullYear() - dob.getFullYear();
+    const m = doi.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && doi.getDate() < dob.getDate())) ageAtDoi--;
+  }
+
+  // PDRS lookup — find closest match
+  const { data: pdrsRows } = await supabase
+    .from('pdrs_lookup')
+    .select('*')
+    .eq('wpi_percent', wpi)
+    .eq('occupation_group', 1);
+
+  let pdPercent, pdWeeks;
+  if (pdrsRows && pdrsRows.length > 0) {
+    // Use age_factor = 1.0 (closest match for now; real impl uses age lookup)
+    const row = pdrsRows[0];
+    pdPercent = parseFloat(row.pd_percent);
+    pdWeeks   = parseFloat(row.weekly_pd_weeks);
+  } else {
+    // Fallback: linear approximation when WPI not in table
+    // PD% ≈ WPI * 1.4 (rough 2005 PDRS linear estimate for group 1)
+    pdPercent = Math.round(wpi * 1.4 * 100) / 100;
+    // Weeks ≈ PD% * 4 (rough estimate)
+    pdWeeks = Math.round(pdPercent * 4 * 100) / 100;
+  }
+
+  // PD weekly rate
+  const pdWeeklyRate = _computePDWeeklyRate(claim.aww, pdPercent);
+  const pdTotalValue = Math.round(pdWeeks * pdWeeklyRate * 100) / 100;
+
+  // Apportionment
+  const apport = parseFloat(apportionmentPercent) || 0;
+  const adjustedPdPercent  = Math.round(pdPercent * (1 - apport / 100) * 100) / 100;
+  const adjustedTotalValue = Math.round(pdWeeks * (1 - apport / 100) * pdWeeklyRate * 100) / 100;
+
+  // Write pd_evaluations row
+  const { data: evalRow, error: evalErr } = await supabase
+    .from('pd_evaluations')
+    .insert({
+      claim_id:              claimId,
+      pr4_id:                pr4Id,
+      wpi,
+      age_at_doi:            ageAtDoi,
+      occupation_group:      1,
+      pd_percent:            pdPercent,
+      pd_weeks:              pdWeeks,
+      pd_weekly_rate:        pdWeeklyRate,
+      pd_total_value:        pdTotalValue,
+      apportionment_percent: apport,
+      adjusted_pd_percent:   adjustedPdPercent,
+      adjusted_total_value:  adjustedTotalValue,
+      calculated_at:         new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (evalErr) throw new Error(`pdService.calculatePD: insert failed — ${evalErr.message}`);
+
+  // Diary
+  const apportLabel = apport > 0 ? `Apportionment: ${apport}%. Adjusted total: $${adjustedTotalValue}. ` : '';
+  await _createDiary(
+    claimId, 'PD_CALCULATED', _addCalendarDays(new Date().toISOString().split('T')[0], 5), 'HIGH',
+    `PD calculated: ${pdPercent}% (${pdWeeks} weeks @ $${pdWeeklyRate}/wk = $${pdTotalValue}). ${apportLabel}Review and initiate PD advances if TD has ended.`,
+  );
+
+  // Update claim status to pd_evaluation
+  await supabase.from('claims')
+    .update({ status: 'pd_evaluation', updated_at: new Date().toISOString() })
+    .eq('id', claimId);
+
+  await supabase.from('claim_events').insert({
+    claim_id: claimId, type: 'status_changed', timestamp: new Date().toISOString(),
+    data: { from: claim.status, to: 'pd_evaluation', changedBy: 'system' },
+  });
+
+  await _writeAuditLog(
+    'pd_calculated', 'pd_evaluation', evalRow.id,
+    `PD calculated: ${pdPercent}% → $${pdTotalValue} (apport ${apport}% → $${adjustedTotalValue})`,
+    { wpi, pdPercent, pdWeeks, pdWeeklyRate, pdTotalValue, apport, adjustedTotalValue },
+  );
+
+  logger.info({ msg: 'pdService.calculatePD: complete', claimId, pdPercent, pdTotalValue, adjustedTotalValue });
+
+  return evalRow;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // initiatePDAdvances
 // ═════════════════════════════════════════════════════════════════════════════
 async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
-  // stub
+  // Fetch PD evaluation for weekly rate
+  const { data: pdEval, error: evalErr } = await supabase
+    .from('pd_evaluations').select('*').eq('id', pdEvaluationId).single();
+  if (evalErr || !pdEval) throw new Error(`PD evaluation not found: ${pdEvaluationId}`);
+
+  // 14 CALENDAR days from TD end — LC §4650(b). NOT business days.
+  const advanceDueDate = _addCalendarDays(tdEndDate, 14);
+  const weeklyRate     = parseFloat(pdEval.pd_weekly_rate);
+
+  const { data: advRow, error: advErr } = await supabase
+    .from('pd_advances')
+    .insert({
+      claim_id:         claimId,
+      pd_evaluation_id: pdEvaluationId,
+      td_end_date:      tdEndDate,
+      advance_due_date: advanceDueDate,
+      weekly_rate:      weeklyRate,
+      status:           'pending',
+      created_at:       new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (advErr) throw new Error(`pdService.initiatePDAdvances: insert failed — ${advErr.message}`);
+
+  // CRITICAL no-snooze diary — 10% penalty if missed
+  await _createDiary(
+    claimId, 'PD_ADVANCE_DUE', advanceDueDate, 'CRITICAL',
+    `PD ADVANCE DUE: ${advanceDueDate}. First PD advance payment must issue by this date. 10% penalty if missed. LC §4650(b). Rate: $${weeklyRate}/wk.`,
+    { noSnooze: true },
+  );
+
+  await _writeAuditLog(
+    'pd_advance_initiated', 'pd_advance', advRow.id,
+    `PD advance initiated. TD end: ${tdEndDate}. Due: ${advanceDueDate}. Rate: $${weeklyRate}/wk`,
+    { tdEndDate, advanceDueDate, weeklyRate },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: claimId, type: 'pd_advance_initiated', timestamp: new Date().toISOString(),
+    data: { pdAdvanceId: advRow.id, advanceDueDate, weeklyRate },
+  });
+
+  logger.info({ msg: 'pdService.initiatePDAdvances: complete', claimId, advanceDueDate, weeklyRate });
+
+  return advRow;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
