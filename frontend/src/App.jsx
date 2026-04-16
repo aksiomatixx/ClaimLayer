@@ -5,6 +5,7 @@ import { fetchClaims, fetchClaim, triggerAnalysis, approveReserves, updateClaimS
 import { loginEmployer, ensureDevEmployerSession, previewEmployee, submitFROI } from './services/employer.js';
 import { fetchRFAs, approveRFA, routeToURO } from './services/rfas.js';
 import { fetchLossRun, fetchEmployerSummary, fetchExperienceModInputs, fetchCrossEmployerReport, fetchMissedDeadlines } from './services/reporting.js';
+import { fetchPanelsForClaim, requestPanel, issuePanel, recordStrikes, scheduleQmeAppointment, markReportReceived, fetchSupplementalRequests, approveSupplemental, dismissSupplemental } from './services/qme.js';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -1318,6 +1319,26 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
 
   const [resForm,setResForm]=useState({medical:'',indemnity:'',expense:'',reason:''});
   const [resEditing,setResEditing]=useState(false);
+  const [drawerTab,setDrawerTab]=useState("details");
+
+  // M11: QME/AME data
+  const {data:qmePanels=[]}=useQuery({queryKey:['qme-panels',claimId],queryFn:()=>fetchPanelsForClaim(claimId),enabled:!!claimId,staleTime:30_000});
+  const {data:suppReqs=[]}=useQuery({queryKey:['supplementals',claimId],queryFn:()=>fetchSupplementalRequests(claimId),enabled:!!claimId&&drawerTab==='qme',staleTime:30_000});
+  const [qmeModal,setQmeModal]=useState(null); // 'request'|'issue'|'strikes'|'appointment'|null
+  const [qmeForm,setQmeForm]=useState({});
+  const qmeMut=useMutation({
+    mutationFn:async(action)=>{
+      if(action.type==='request') return requestPanel(claimId,action.specialty,action.notes);
+      if(action.type==='issue') return issuePanel(action.panelId,{panelIssuedDate:action.panelIssuedDate,doctor1:action.doctor1,doctor2:action.doctor2,doctor3:action.doctor3});
+      if(action.type==='strikes') return recordStrikes(action.panelId,action.strike1Npi,action.strike2Npi);
+      if(action.type==='appointment') return scheduleQmeAppointment(action.panelId,action.appointmentDate);
+      if(action.type==='report') return markReportReceived(action.panelId);
+      if(action.type==='approve-supp') return approveSupplemental(action.id);
+      if(action.type==='dismiss-supp') return dismissSupplemental(action.id,action.reason);
+    },
+    onSuccess:()=>{qc.invalidateQueries({queryKey:['qme-panels',claimId]});qc.invalidateQueries({queryKey:['supplementals',claimId]});qc.invalidateQueries({queryKey:['claim-diaries',claimId]});setQmeModal(null);setQmeForm({});notify('QME action completed');},
+    onError:(e)=>notify(`QME action failed: ${e.message}`,'error'),
+  });
 
   const today=new Date().toISOString().split('T')[0];
 
@@ -1380,6 +1401,9 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
         </div>
 
         <div style={{padding:"22px 26px"}}>
+          <Tabs tabs={[{key:"details",label:"Details"},{key:"qme",label:`QME/AME (${qmePanels.length})`}]} active={drawerTab} onChange={setDrawerTab}/>
+
+          {drawerTab==="details"&&<>
           {/* Claim Facts */}
           <SectionHead title="Claim Facts"/>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 22px",marginBottom:12}}>
@@ -1508,6 +1532,155 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
               {reserveMut.isSuccess&&<div style={{marginTop:8,fontSize:12,color:C.green}}>✓ Reserves approved and synced to CMS</div>}
             </div>
           )}
+          </>}
+
+          {/* ── M11: QME/AME Tab ─────────────────────────────────── */}
+          {drawerTab==="qme"&&<>
+            {/* Request Panel button */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+              <SectionHead title="QME/AME Panels"/>
+              <Btn small variant="outline" onClick={()=>{setQmeModal('request');setQmeForm({specialty:'',notes:''});}}>Request QME Panel</Btn>
+            </div>
+
+            {/* Active panels */}
+            {qmePanels.length===0?<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"24px 22px",textAlign:"center",color:C.muted,fontSize:13}}>No QME/AME panels for this claim.</div>:qmePanels.map(p=>{
+              const QS=[['panel_requested','Requested'],['panel_issued','Issued'],['strikes_pending','Strikes'],['doctor_selected','Doctor Selected'],['appointment_scheduled','Appt Scheduled'],['report_pending','Report Pending'],['report_received','Report Received'],['closed','Closed']];
+              const si=QS.findIndex(([k])=>k===p.status);
+              const deadlineDays=p.strike_deadline?Math.ceil((new Date(p.strike_deadline+'T00:00:00')-new Date())/(1000*60*60*24)):null;
+              const deadlineUrgent=deadlineDays!=null&&deadlineDays<=3&&deadlineDays>=0&&p.status==='panel_issued';
+              return(
+                <div key={p.id} style={{background:C.card,border:`1px solid ${deadlineUrgent?C.red+'66':C.border}`,borderRadius:12,padding:"18px 20px",marginBottom:14}}>
+                  {/* Header */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div>
+                      <span style={{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.amber}}>{p.track.toUpperCase()}</span>
+                      <span style={{color:C.muted,fontSize:11,marginLeft:10}}>{p.specialty}</span>
+                    </div>
+                    <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:p.status==='report_received'?C.greenF:C.amberF,color:p.status==='report_received'?C.green:C.amber,border:`1px solid ${p.status==='report_received'?C.green:C.amber}33`}}>{p.status.replace(/_/g,' ').toUpperCase()}</span>
+                  </div>
+
+                  {/* Strike deadline warning */}
+                  {deadlineUrgent&&<div style={{background:C.redF,border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:18}}>⚠</span>
+                    <div><div style={{fontSize:12,fontWeight:700,color:C.red}}>STRIKE DEADLINE: {p.strike_deadline}</div><div style={{fontSize:11,color:C.rose}}>{deadlineDays===0?'DUE TODAY':deadlineDays===1?'DUE TOMORROW':`${deadlineDays} days remaining`} — CANNOT BE MISSED</div></div>
+                  </div>}
+
+                  {/* Progress steps */}
+                  <div style={{display:"flex",gap:2,marginBottom:14}}>
+                    {QS.map(([k,l],i)=><div key={k} style={{flex:1,height:4,borderRadius:2,background:i<=si?C.amber:C.border,transition:"background .3s"}} title={l}/>)}
+                  </div>
+
+                  {/* Panel info */}
+                  {p.selected_name&&<InfoPair label="Selected Doctor" value={`${p.selected_name} (NPI: ${p.selected_npi})`} mono/>}
+                  {p.appointment_date&&<InfoPair label="Appointment" value={p.appointment_date} mono/>}
+                  {p.report_due_date&&<InfoPair label="Report Due" value={p.report_due_date} mono/>}
+                  {p.report_received_at&&<InfoPair label="Report Received" value={new Date(p.report_received_at).toLocaleDateString()} mono accent={C.green}/>}
+
+                  {/* Panel doctors (when issued) */}
+                  {p.doctor_1_name&&!p.selected_name&&<div style={{marginBottom:10}}>
+                    <Lbl>Panel Doctors</Lbl>
+                    {[1,2,3].map(i=>{const nm=p[`doctor_${i}_name`];const npi=p[`doctor_${i}_npi`];return nm?<div key={i} style={{fontSize:12,color:C.dim,marginBottom:3}}>{nm} <span style={{fontFamily:C.mono,fontSize:10,color:C.muted}}>NPI: {npi}</span></div>:null;})}
+                  </div>}
+
+                  {/* Action buttons based on status */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                    {p.status==='panel_requested'&&<Btn small variant="outline" onClick={()=>{setQmeModal('issue');setQmeForm({panelId:p.id,panelIssuedDate:'',d1name:'',d1npi:'',d1addr:'',d2name:'',d2npi:'',d2addr:'',d3name:'',d3npi:'',d3addr:''});}}>Record Panel Issue</Btn>}
+                    {p.status==='panel_issued'&&<Btn small variant="outline" onClick={()=>{setQmeModal('strikes');setQmeForm({panelId:p.id,strike1:'',strike2:'',npis:[p.doctor_1_npi,p.doctor_2_npi,p.doctor_3_npi],names:[p.doctor_1_name,p.doctor_2_name,p.doctor_3_name]});}}>Record Strikes</Btn>}
+                    {p.status==='doctor_selected'&&<Btn small variant="outline" onClick={()=>{setQmeModal('appointment');setQmeForm({panelId:p.id,appointmentDate:''});}}>Schedule Appointment</Btn>}
+                    {(p.status==='appointment_scheduled'||p.status==='report_pending')&&<Btn small variant="success" disabled={qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'report',panelId:p.id})}>Mark Report Received</Btn>}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Supplemental requests */}
+            {suppReqs.length>0&&<>
+              <div style={{height:1,background:C.border,margin:"18px 0"}}/>
+              <SectionHead title={`Supplemental Requests (${suppReqs.length})`}/>
+              {suppReqs.map(sr=>(
+                <div key={sr.id} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                    <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:sr.status==='sent'?C.greenF:sr.status==='dismissed'?C.redF:C.amberF,color:sr.status==='sent'?C.green:sr.status==='dismissed'?C.red:C.amber}}>{sr.status.toUpperCase()}</span>
+                    <span style={{fontSize:10,fontFamily:C.mono,color:C.muted}}>{new Date(sr.created_at).toLocaleDateString()}</span>
+                  </div>
+                  {(sr.flags||[]).map((f,i)=><div key={i} style={{background:f.severity==='critical'?C.redF:C.amberF,border:`1px solid ${f.severity==='critical'?C.red:C.amber}22`,borderRadius:6,padding:"8px 12px",marginBottom:6,fontSize:11}}>
+                    <span style={{fontFamily:C.mono,fontWeight:600,color:f.severity==='critical'?C.red:C.amber}}>{f.flag}</span>
+                    <div style={{color:C.dim,marginTop:3}}>{f.description}</div>
+                  </div>)}
+                  {sr.status==='draft'&&<div style={{display:"flex",gap:8,marginTop:10}}>
+                    <Btn small variant="success" disabled={qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'approve-supp',id:sr.id})}>Approve & Send</Btn>
+                    <Btn small variant="ghost" disabled={qmeMut.isPending} onClick={()=>{const r=prompt('Reason for dismissal:');if(r)qmeMut.mutate({type:'dismiss-supp',id:sr.id,reason:r});}}>Dismiss</Btn>
+                  </div>}
+                </div>
+              ))}
+            </>}
+
+            {/* ── QME Modals ─── */}
+            {qmeModal==='request'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setQmeModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:420,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Request QME Panel</div>
+                <Field label="Specialty"><select value={qmeForm.specialty||''} onChange={e=>setQmeForm(f=>({...f,specialty:e.target.value}))}>
+                  <option value="">Select specialty...</option>
+                  {['Orthopedic Surgery','Internal Medicine','Neurology','Pain Management','Psychiatry','Occupational Medicine','Physical Medicine & Rehabilitation','Chiropractic'].map(s=><option key={s} value={s}>{s}</option>)}
+                </select></Field>
+                <Field label="Adjuster Notes (optional)"><textarea rows={3} value={qmeForm.notes||''} onChange={e=>setQmeForm(f=>({...f,notes:e.target.value}))}/></Field>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn disabled={!qmeForm.specialty||qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'request',specialty:qmeForm.specialty,notes:qmeForm.notes})}>{qmeMut.isPending?<Spinner/>:'Request Panel'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setQmeModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {qmeModal==='issue'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setQmeModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:520,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Record Panel Issue</div>
+                <Field label="Panel Issued Date"><input type="date" value={qmeForm.panelIssuedDate||''} onChange={e=>setQmeForm(f=>({...f,panelIssuedDate:e.target.value}))}/></Field>
+                {[1,2,3].map(i=><div key={i} style={{marginBottom:14,padding:"12px 14px",background:C.bg,borderRadius:8,border:`1px solid ${C.border}`}}>
+                  <Lbl>Doctor {i}</Lbl>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <Field label="Name"><input value={qmeForm[`d${i}name`]||''} onChange={e=>setQmeForm(f=>({...f,[`d${i}name`]:e.target.value}))}/></Field>
+                    <Field label="NPI"><input value={qmeForm[`d${i}npi`]||''} onChange={e=>setQmeForm(f=>({...f,[`d${i}npi`]:e.target.value}))}/></Field>
+                  </div>
+                </div>)}
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <Btn disabled={!qmeForm.panelIssuedDate||!qmeForm.d1name||!qmeForm.d1npi||!qmeForm.d2name||!qmeForm.d2npi||!qmeForm.d3name||!qmeForm.d3npi||qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'issue',panelId:qmeForm.panelId,panelIssuedDate:qmeForm.panelIssuedDate,doctor1:{name:qmeForm.d1name,npi:qmeForm.d1npi,address:qmeForm.d1addr},doctor2:{name:qmeForm.d2name,npi:qmeForm.d2npi,address:qmeForm.d2addr},doctor3:{name:qmeForm.d3name,npi:qmeForm.d3npi,address:qmeForm.d3addr}})}>{qmeMut.isPending?<Spinner/>:'Issue Panel'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setQmeModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {qmeModal==='strikes'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setQmeModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:440}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:6}}>Record Strikes</div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:18}}>Select 2 doctors to strike. The remaining doctor will be selected.</div>
+                {(qmeForm.npis||[]).map((npi,i)=>{const checked=qmeForm.strike1===npi||qmeForm.strike2===npi;return(
+                  <label key={npi} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:checked?C.redF:C.bg,border:`1px solid ${checked?C.red+'33':C.border}`,borderRadius:8,marginBottom:8,cursor:"pointer"}}>
+                    <input type="checkbox" checked={checked} onChange={()=>{
+                      if(checked){setQmeForm(f=>f.strike1===npi?{...f,strike1:''}:{...f,strike2:''});}
+                      else{setQmeForm(f=>!f.strike1?{...f,strike1:npi}:!f.strike2?{...f,strike2:npi}:f);}
+                    }}/>
+                    <div><div style={{fontSize:13,fontWeight:600,color:checked?C.red:C.text}}>{qmeForm.names?.[i]}</div><div style={{fontSize:10,fontFamily:C.mono,color:C.muted}}>NPI: {npi}</div></div>
+                    {checked&&<span style={{marginLeft:"auto",fontSize:10,color:C.red,fontFamily:C.mono,fontWeight:600}}>STRUCK</span>}
+                  </label>
+                );})}
+                <div style={{display:"flex",gap:8,marginTop:14}}>
+                  <Btn disabled={!qmeForm.strike1||!qmeForm.strike2||qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'strikes',panelId:qmeForm.panelId,strike1Npi:qmeForm.strike1,strike2Npi:qmeForm.strike2})}>{qmeMut.isPending?<Spinner/>:'Confirm Strikes'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setQmeModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+
+            {qmeModal==='appointment'&&<div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setQmeModal(null)}>
+              <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:400}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:18}}>Schedule QME Appointment</div>
+                <Field label="Appointment Date"><input type="date" value={qmeForm.appointmentDate||''} onChange={e=>setQmeForm(f=>({...f,appointmentDate:e.target.value}))}/></Field>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn disabled={!qmeForm.appointmentDate||qmeMut.isPending} onClick={()=>qmeMut.mutate({type:'appointment',panelId:qmeForm.panelId,appointmentDate:qmeForm.appointmentDate})}>{qmeMut.isPending?<Spinner/>:'Schedule'}</Btn>
+                  <Btn variant="ghost" onClick={()=>setQmeModal(null)}>Cancel</Btn>
+                </div>
+              </div>
+            </div>}
+          </>}
         </div>
       </div>
     </>

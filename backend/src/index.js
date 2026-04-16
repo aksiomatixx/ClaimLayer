@@ -18,6 +18,7 @@ const authRouter         = require('./routes/auth');
 const employerRouter     = require('./routes/employer');
 const rfasRouter         = require('./routes/rfas');
 const reportingRouter    = require('./routes/reporting');
+const qmeRouter          = require('./routes/qme');
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/v1/documents',     documentsRouter);
 app.use('/api/v1/auth',          authRouter);
 app.use('/api/v1/employer',      employerRouter);
 app.use('/api/v1/rfas',         rfasRouter);
+app.use('/api/v1/qme',          qmeRouter);
 app.use('/api/v1',               reportingRouter);
 app.use('/webhooks',             webhooksRouter);
 
