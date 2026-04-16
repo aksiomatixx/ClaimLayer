@@ -31,6 +31,7 @@ homecare-tpa/
 │           └── rfas.js               ← fetchRFAs, submitRFA, approveRFA, routeToURO
 ├── backend/                          ← Express (Node.js) API
 │   ├── src/
+│   │   ├── constants.js              ← Controlled vocabulary: CLAIM_STATUSES, SUBROGATION_STATUSES, DOCUMENT_CATEGORIES
 │   │   ├── index.js                  ← Express app entry point (port 3001)
 │   │   ├── config.js                 ← All environment variables
 │   │   ├── logger.js                 ← Structured JSON logging (Winston)
@@ -75,7 +76,8 @@ homecare-tpa/
 │   │   │   ├── adp.test.js
 │   │   │   ├── filehandler.test.js
 │   │   │   ├── businessDays.test.js
-│   │   │   └── providers.test.js
+│   │   │   ├── providers.test.js
+│   │   │   └── m6-schema.test.js     ← M6: constants/enum validation (CLAIM_STATUSES, SUBROGATION_STATUSES, DOCUMENT_CATEGORIES)
 │   │   └── integration/
 │   │       ├── claim-flow.test.js         ← Full FROI → ADP → FH → AI flow
 │   │       ├── intake-flow.test.js        ← M2: appointments, MPN, intake-progress
@@ -90,7 +92,8 @@ homecare-tpa/
 │       ├── 20260101000001_initial_schema.sql  ← Core tables (users → claims → events)
 │       ├── 20260101000002_seed_data.sql       ← Employer + MPN provider seed data
 │       ├── 20260101000003_enable_rls.sql      ← Row-level security policies
-│       └── 20260101000004_missing_tables.sql  ← rfas, rfa_evaluations, ai_decisions, notices, audit_log
+│       ├── 20260101000004_missing_tables.sql  ← rfas, rfa_evaluations, ai_decisions, notices, audit_log
+│       └── 20260101000005_m6_retrofit.sql     ← M6: employer_contests, motor_vehicle_fields, subrogation_status, document indexing, automation_config, supplemental_requests
 ├── docs/
 │   ├── architecture.md               ← Full system design
 │   ├── integrations.md               ← API integration specs
@@ -199,7 +202,7 @@ Diary approaching    → Escalation timer starts (48hr warning → adjuster noti
 ## AI Decision Framework
 
 ### Compensability Analysis
-Claude evaluates: mechanism vs. accepted body part, AOE/COE indicators, prior claims history, witness statements, medical consistency. Returns: compensability rating (Likely / Questionable / Non-Compensable), confidence score 0-100, red flags, recommended actions, analysis narrative.
+Claude evaluates: mechanism vs. accepted body part, AOE/COE indicators, prior claims history, witness statements, medical consistency, `employerContests` flag, and `motorVehicleFields` (going-and-coming rule, third-party liability). Returns: compensability rating (Likely / Questionable / Non-Compensable), confidence score 0-100, red flags (including `SUBROGATION_POTENTIAL` when another vehicle was involved), recommended actions, analysis narrative.
 
 ### Reserve Recommendations
 Claude calculates initial reserves based on: injury type, body part, time off work, AWW/TD rate, medical treatment to date, presence of surgical indicators. Reserves are suggestions — final authority is always the adjuster.
@@ -229,17 +232,43 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M3 | Admin console: Action queue, AI analysis (backend-only), reserve approval, diaries, reasoning PDF, React Query | ✅ Complete |
 | M4 | Employer portal: FROI submission, magic link generation, employer email/password auth, claim RLS per employer, LC §4650/§4652 DELAY_NOTICE_DUE diary | ✅ Complete |
 | M5 | Supabase swap: Replace in-memory Maps with PostgreSQL via Supabase; schema migrations; in-memory mock for tests; `supabase-swap.test.js` | ✅ Complete |
-| M6 | DxF / QHIO: Manifest MedEx roster enrollment, ADT push notifications, clinical document pull | 🔲 Not started |
+| M6 | Schema retrofit: `employer_contests`, `motor_vehicle_fields`, `subrogation_status`, `future_medical_only` status, document indexing columns, `automation_config` + `supplemental_requests` tables; MV subrogation logic; AI payload fields; PHI disclaimer; constants module | ✅ Complete |
 | M7 | RFA engine: MTUS evaluation, `_resolveDecision` routing (surgical override, auto-approve, URO, adjuster queue), Enlyte stub, diary lifecycle | ✅ Complete |
-| M8 | Enlyte real integration: Replace stub with live Enlyte URO API; handle determination webhook | 🔲 Not started |
-| M9 | Notice center: Lob.com print-and-mail integration, statutory notice generation | 🔲 Not started |
-| M10 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
+| M8 | DxF / QHIO: Manifest MedEx roster enrollment, ADT push notifications, clinical document pull | 🔲 Not started |
+| M9 | Enlyte real integration: Replace stub with live Enlyte URO API; handle determination webhook | 🔲 Not started |
+| M10 | Notice center: Lob.com print-and-mail integration, statutory notice generation | 🔲 Not started |
+| M11 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
 
-**Current test count: 197 passing** (10 suites — unit + integration)
+**Current test count: 212 passing** (11 suites — unit + integration)
 
-### M7 — What was built (current)
+### M6 — What was built (current)
 
-- **`backend/src/services/rfaService.js`** (new) — Full RFA lifecycle orchestration:
+Additive retrofit sprint. No existing tests broken; test count grew from 197 → 212.
+
+- **`supabase/migrations/20260101000005_m6_retrofit.sql`** (new) — Purely additive schema changes applied to staging (`uhgrggmcrrsftpusdgwh`):
+  - `employees.ssdi_receiving BOOLEAN` — LC §4661.5 TD offset flag; MSA screening at settlement (M11 will use this).
+  - `claims.employer_contests BOOLEAN` — populated by employer acknowledgment form in a future milestone; surfaced to AI as a compensability risk factor.
+  - `claims.motor_vehicle_fields JSONB` — AOE/COE intake answers: `driving_between_patients`, `other_vehicle_involved`, `police_responded` (each bool or null).
+  - `claims.subrogation_status VARCHAR(30)` — CHECK constraint: `not_applicable` (default) | `under_evaluation` | `waived` | `referred` | `recovered`. Set to `under_evaluation` automatically on Motor Vehicle claims.
+  - `claims` status CHECK — extended to include `future_medical_only` (RTW with ongoing medical, no indemnity).
+  - `documents` indexing columns — `confidence SMALLINT`, `category VARCHAR(30)`, `title VARCHAR(300)`, `source_type VARCHAR(30)`, `dos_range_start/end DATE`, `dos_is_range BOOLEAN`; partial indexes on `confidence` and `category` for M8 document processing queue.
+  - `automation_config` table — key-value store for automation level settings (M9 will seed this).
+  - `supplemental_requests` table — QME/PR-4 supplemental report tracking with RLS (M11 will use this).
+- **`backend/src/constants.js`** (new) — Single source of truth for all controlled-vocabulary fields: `CLAIM_STATUSES`, `SETTABLE_CLAIM_STATUSES`, `SUBROGATION_STATUSES` (matches migration CHECK), `DOCUMENT_CATEGORIES` (11 values). Claims route now imports from here instead of maintaining inline arrays.
+- **`backend/src/services/claimService.js`** — Three changes:
+  - `_toClaim()` maps new DB columns to JS shape (`motorVehicleFields`, `employerContests`, `subrogationStatus`).
+  - `claimRow` insert persists `motor_vehicle_fields`, `employer_contests`, `subrogation_status: null`.
+  - Step 6.5 (new): after diary seeding, if `froiData.injuryType === 'Motor Vehicle'`, update `subrogation_status` to `under_evaluation`.
+- **`backend/src/services/aiService.js`** — `analyzeCompensability` payload now includes `employerContests` (bool, default `false`) and `motorVehicleFields` (object or null). Both fields pass through to Claude on every claim analysis.
+- **`backend/prompts/compensability_analysis.txt`** — Added `INPUT FIELD NOTES` block before the output format instructions. Explains `employerContests` as a compensability risk factor requiring investigation (not determinative). Explains `motorVehicleFields` with going-and-coming rule exception for home health workers; instructs Claude to include `"SUBROGATION_POTENTIAL"` in `redFlags` when `other_vehicle_involved` is true.
+- **`frontend/src/App.jsx`** — Three UI changes:
+  - `MediaUploader`: PHI disclaimer div rendered above the drop zone — warns against uploading patient faces or identifying information. No AI vision logic.
+  - `EMPTY_M2` + intake Step 1: `motorVehicleFields: null` added to form state; conditional block renders three yes/no/unknown `RadioGroup` questions (`driving_between_patients`, `other_vehicle_involved`, `police_responded`) when `injuryType === 'Motor Vehicle'`. Fields included in submission payload via form spread.
+  - Label cleanup: "FileHandler Sync" → "CMS Sync"; "sent to FileHandler" → "synced to CMS".
+- **`backend/tests/unit/m6-schema.test.js`** (new) — 9 tests validating the constants module: `future_medical_only` in `CLAIM_STATUSES`; `SUBROGATION_STATUSES` matches migration CHECK exactly (and rejects `pursuing`, `closed`, etc.); all 11 `DOCUMENT_CATEGORIES` present.
+- **`backend/tests/integration/claim-flow.test.js`** — Added `jest.mock` for `aiService` (prevents live Claude calls; enables payload inspection). Five new M6 tests: MV claim sets `subrogationStatus: 'under_evaluation'`; MV claim passes `motorVehicleFields` to `analyzeCompensability`; non-MV claim passes `motorVehicleFields: null`; `employerContests: true` propagates to AI payload; unset `employerContests` defaults to `false`.
+
+### M7 — What was built — Full RFA lifecycle orchestration:
   - `createRFA(claimId, rfaData, receivedVia)` — inserts RFA row, calculates statutory deadline (5 business days standard / 72 hours expedited per CCR §9792.9.1), seeds `RFA_RESPONSE_DUE` diary, logs `rfa_received` claim event, triggers async AI evaluation via `setImmediate`.
   - `evaluateRFA(rfaId)` — fetches RFA + claim, calls `aiService.evaluateRFA`, persists `rfa_evaluations` row, routes via `_resolveDecision`.
   - `_resolveDecision(aiResult, rfa, claim)` — surgical CPT override → URO; AI auto_approve → approve; MTUS-inconsistent → URO; MTUS-consistent + physician_review → adjuster queue.
