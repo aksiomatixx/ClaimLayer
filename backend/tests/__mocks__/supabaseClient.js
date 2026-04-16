@@ -91,7 +91,7 @@ class QueryBuilder {
     }
     // Check if cols requests nested relations
     if (typeof cols === 'string' &&
-        (cols.includes('claim_events') || cols.includes('diaries'))) {
+        (cols.includes('claim_events') || cols.includes('diaries') || cols.includes('reserves'))) {
       this._joinRelations = true;
     }
     return this;
@@ -151,10 +151,12 @@ class QueryBuilder {
     if (!this._joinRelations || this._table !== 'claims') return rows;
     const evtTbl = getTable('claim_events');
     const dirTbl = getTable('diaries');
+    const resTbl = getTable('reserves');
     return rows.map(r => ({
       ...r,
       claim_events: Array.from(evtTbl.values()).filter(e => e.claim_id === r.id),
       diaries:      Array.from(dirTbl.values()).filter(d => d.claim_id === r.id),
+      reserves:     Array.from(resTbl.values()).filter(rv => rv.claim_id === r.id),
     }));
   }
 

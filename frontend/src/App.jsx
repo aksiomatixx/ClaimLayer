@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchClaims, fetchClaim, triggerAnalysis, approveReserves, updateClaimStatus, fetchDiaries, ensureDevSession } from './services/claims.js';
 import { loginEmployer, ensureDevEmployerSession, previewEmployee, submitFROI } from './services/employer.js';
 import { fetchRFAs, approveRFA, routeToURO } from './services/rfas.js';
+import { fetchLossRun, fetchEmployerSummary, fetchExperienceModInputs, fetchCrossEmployerReport, fetchMissedDeadlines } from './services/reporting.js';
 
 // ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
@@ -1685,6 +1686,305 @@ function FROIForm(){
 }
 
 // ═══════════════════════════════════════════════════════════
+// M10: EMPLOYER REPORTS — Summary, Loss Run, Experience Mod
+// ═══════════════════════════════════════════════════════════
+function EmployerReports({employerId}){
+  const [tab,setTab]=useState("summary");
+
+  const {data:summary,isLoading:sumLoading}=useQuery({
+    queryKey:['employer-summary',employerId],
+    queryFn:()=>fetchEmployerSummary(employerId),
+    enabled:!!employerId,
+    staleTime:60_000,
+  });
+
+  const {data:lossRunData,isLoading:lrLoading}=useQuery({
+    queryKey:['employer-loss-run',employerId],
+    queryFn:()=>fetchLossRun(employerId),
+    enabled:!!employerId,
+    staleTime:60_000,
+  });
+
+  const {data:emod,isLoading:emodLoading}=useQuery({
+    queryKey:['employer-emod',employerId],
+    queryFn:()=>fetchExperienceModInputs(employerId),
+    enabled:!!employerId,
+    staleTime:60_000,
+  });
+
+  const lossRun=lossRunData?.lossRun||[];
+
+  // CSV export
+  const exportCSV=()=>{
+    if(!lossRun.length) return;
+    const headers=["Claim Number","Worker","Date of Injury","Injury Type","Body Part","Status","Medical","Indemnity","Expense","Total Incurred","Open/Closed"];
+    const rows=lossRun.map(r=>[
+      r.claimNumber,r.worker,r.dateOfInjury,r.injuryType||'',r.bodyPart||'',r.status,
+      r.medical.toFixed(2),r.indemnity.toFixed(2),r.expense.toFixed(2),r.totalIncurred.toFixed(2),
+      r.isOpen?'Open':'Closed'
+    ]);
+    const csv=[headers,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob=new Blob([csv],{type:"text/csv"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=`loss_run_${employerId}_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();URL.revokeObjectURL(url);
+  };
+
+  return(
+    <div>
+      {/* Summary cards */}
+      {sumLoading?<div style={{padding:36,textAlign:"center"}}><Spinner/></div>:summary&&(
+        <div style={{display:"flex",gap:14,marginBottom:24}}>
+          <StatCard label="Open Claims" value={summary.openClaimCount} accent={summary.openClaimCount>0?C.amber:C.green} delay={0}/>
+          <StatCard label="Total Incurred YTD" value={fmt$(summary.totalIncurredYTD)} accent={C.cyan} delay={.05}/>
+          <StatCard label="TD Weeks Paid YTD" value={summary.tdWeeksPaidYTD} accent={C.blue} delay={.1}/>
+          <StatCard label="Avg Days to 1st Payment" value={summary.avgDaysToFirstPayment!=null?summary.avgDaysToFirstPayment:'—'} accent={summary.avgDaysToFirstPayment!=null&&summary.avgDaysToFirstPayment>14?C.red:C.green} sub={summary.avgDaysToFirstPayment!=null&&summary.avgDaysToFirstPayment>14?"Exceeds 14-day target":""} delay={.15}/>
+        </div>
+      )}
+
+      <Tabs tabs={[{key:"summary",label:"Loss Run"},{key:"emod",label:"Experience Mod"}]} active={tab} onChange={setTab}/>
+
+      {tab==="summary"&&(
+        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>LOSS RUN — {lossRun.length} CLAIMS</span>
+            <Btn small variant="outline" onClick={exportCSV} disabled={!lossRun.length}>Export CSV</Btn>
+          </div>
+          {lrLoading?<div style={{padding:36,textAlign:"center"}}><Spinner/></div>:lossRun.length===0
+            ?<div style={{padding:36,textAlign:"center",color:C.muted}}>No claims on file.</div>
+            :(
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+                    {["Claim #","Worker","DOI","Injury","Status","Medical","Indemnity","Expense","Total","Open"].map(h=>
+                      <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+                    )}
+                  </tr></thead>
+                  <tbody>{lossRun.map((r,i)=>(
+                    <tr key={r.claimId} className="rh" style={{borderBottom:i<lossRun.length-1?`1px solid ${C.border}`:"none"}}>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{r.claimNumber}</td>
+                      <td style={{padding:"12px 13px",fontSize:13,fontWeight:500}}>{r.worker}</td>
+                      <td style={{padding:"12px 13px",fontSize:12,fontFamily:C.mono,color:C.dim}}>{r.dateOfInjury||'—'}</td>
+                      <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{[r.injuryType,r.bodyPart].filter(Boolean).join(' · ')||'—'}</td>
+                      <td style={{padding:"12px 13px"}}><Badge status={r.status}/></td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.cyan}}>{fmt$(r.medical)}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.blue}}>{fmt$(r.indemnity)}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.purple}}>{fmt$(r.expense)}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>{fmt$(r.totalIncurred)}</td>
+                      <td style={{padding:"12px 13px"}}><span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,background:r.isOpen?C.amberF:C.greenF,color:r.isOpen?C.amber:C.green,border:`1px solid ${r.isOpen?C.amber:C.green}33`}}>{r.isOpen?'Open':'Closed'}</span></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )
+          }
+        </div>
+      )}
+
+      {tab==="emod"&&(
+        emodLoading?<div style={{padding:36,textAlign:"center"}}><Spinner/></div>:emod&&(
+          <div>
+            {/* Payroll by class code */}
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:22}}>
+              <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>PAYROLL BY CLASS CODE — {emod.experiencePeriod?.label||''}</div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+                  {["Class Code","Description","Rate","Annual Payroll","Est. Premium"].map(h=>
+                    <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                  )}
+                </tr></thead>
+                <tbody>{(emod.payrollByClass||[]).map((p,i)=>(
+                  <tr key={p.classCode} style={{borderBottom:i<emod.payrollByClass.length-1?`1px solid ${C.border}`:"none"}}>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{p.classCode}</td>
+                    <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{p.description}</td>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.text}}>{p.rate}%</td>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.cyan}}>{fmt$(p.annualPayroll)}</td>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.green}}>{fmt$(p.premium)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              <div style={{padding:"12px 22px",borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontFamily:C.mono,fontSize:11,color:C.muted}}>Total Payroll: <span style={{color:C.cyan,fontWeight:600}}>{fmt$(emod.totalPayroll)}</span></span>
+                <span style={{fontFamily:C.mono,fontSize:11,color:C.muted}}>Total Premium: <span style={{color:C.green,fontWeight:600}}>{fmt$(emod.totalPremium)}</span></span>
+              </div>
+            </div>
+
+            {/* Loss trend chart (CSS bar chart) */}
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:22}}>
+              <div style={{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text,marginBottom:18}}>LOSS TREND — 5 YEAR</div>
+              {(()=>{
+                const trend=emod.trendData||[];
+                const maxLoss=Math.max(...trend.map(t=>t.totalLosses),1);
+                const maxCount=Math.max(...trend.map(t=>t.claimCount),1);
+                return(
+                  <div style={{display:"flex",gap:12,alignItems:"flex-end",height:180}}>
+                    {trend.map(t=>{
+                      const barH=Math.max((t.totalLosses/maxLoss)*150,4);
+                      const countH=Math.max((t.claimCount/maxCount)*150,4);
+                      return(
+                        <div key={t.year} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                          <div style={{fontSize:10,fontFamily:C.mono,color:C.cyan,fontWeight:600}}>{fmt$(t.totalLosses)}</div>
+                          <div style={{display:"flex",gap:3,alignItems:"flex-end",height:150}}>
+                            <div style={{width:20,height:barH,background:`linear-gradient(180deg,${C.cyan},${C.blue})`,borderRadius:"3px 3px 0 0",transition:"height .4s ease"}} title={`Losses: ${fmt$(t.totalLosses)}`}/>
+                            <div style={{width:14,height:countH,background:`linear-gradient(180deg,${C.amber},${C.amberD})`,borderRadius:"3px 3px 0 0",transition:"height .4s ease"}} title={`Claims: ${t.claimCount}`}/>
+                          </div>
+                          <div style={{fontSize:11,fontFamily:C.mono,color:C.muted}}>{t.year}</div>
+                          <div style={{fontSize:9,fontFamily:C.mono,color:C.dim}}>{t.claimCount} claims</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <div style={{display:"flex",gap:20,justifyContent:"center",marginTop:16}}>
+                <span style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:C.muted}}><span style={{width:10,height:10,background:C.cyan,borderRadius:2,display:"inline-block"}}/> Losses</span>
+                <span style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:C.muted}}><span style={{width:10,height:10,background:C.amber,borderRadius:2,display:"inline-block"}}/> Claims</span>
+              </div>
+            </div>
+
+            {/* Losses by class code */}
+            {(emod.lossesByClass||[]).length>0&&(
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginTop:22}}>
+                <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>LOSSES BY CLASS CODE</div>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+                    {["Class Code","Description","Claims","Open","Total Losses"].map(h=>
+                      <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                    )}
+                  </tr></thead>
+                  <tbody>{emod.lossesByClass.map((l,i)=>(
+                    <tr key={l.classCode} style={{borderBottom:i<emod.lossesByClass.length-1?`1px solid ${C.border}`:"none"}}>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{l.classCode}</td>
+                      <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{l.description}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.text}}>{l.claimCount}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:l.openClaims>0?C.amber:C.green}}>{l.openClaims}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.cyan}}>{fmt$(l.totalLosses)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// M10: ADMIN REPORTS — Cross-Employer, Missed Deadlines
+// ═══════════════════════════════════════════════════════════
+function AdminReports({onSelect}){
+  const [tab,setTab]=useState("overview");
+
+  const {data:crossReport,isLoading:crossLoading}=useQuery({
+    queryKey:['admin-cross-employer'],
+    queryFn:fetchCrossEmployerReport,
+    staleTime:60_000,
+  });
+
+  const {data:deadlines,isLoading:dlLoading}=useQuery({
+    queryKey:['admin-missed-deadlines'],
+    queryFn:fetchMissedDeadlines,
+    staleTime:60_000,
+  });
+
+  return(
+    <div style={{paddingTop:32,animation:"fadeUp .3s ease"}}>
+      <div style={{marginBottom:26}}>
+        <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Reporting</h1>
+        <p style={{color:C.muted,fontSize:13}}>Cross-employer analytics · Compliance monitoring</p>
+      </div>
+
+      {/* Summary cards */}
+      {crossReport&&(
+        <div style={{display:"flex",gap:14,marginBottom:24}}>
+          <StatCard label="Total Open Claims" value={crossReport.totalOpenClaims} accent={crossReport.totalOpenClaims>0?C.amber:C.green} delay={0}/>
+          <StatCard label="All Claims" value={crossReport.totalAllClaims} delay={.05}/>
+          <StatCard label="Total Incurred" value={fmt$(crossReport.totalIncurred)} accent={C.cyan} delay={.1}/>
+          <StatCard label="Compliance Flags" value={deadlines?.totalViolations||0} accent={deadlines?.totalViolations>0?C.red:C.green} sub={deadlines?.totalViolations>0?"Action required":""} delay={.15}/>
+        </div>
+      )}
+
+      <Tabs tabs={[{key:"overview",label:"Employer Overview"},{key:"compliance",label:`Missed Deadlines (${deadlines?.totalViolations||0})`}]} active={tab} onChange={setTab}/>
+
+      {tab==="overview"&&(
+        crossLoading?<div style={{padding:36,textAlign:"center"}}><Spinner/></div>:(
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>ALL EMPLOYERS — {crossReport?.employers?.length||0}</div>
+            {(!crossReport?.employers?.length)?<div style={{padding:36,textAlign:"center",color:C.muted}}>No employer data.</div>:(
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+                  {["Employer","Total Claims","Open","Total Incurred"].map(h=>
+                    <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                  )}
+                </tr></thead>
+                <tbody>{crossReport.employers.map((e,i)=>(
+                  <tr key={e.employerId} className="rh" style={{borderBottom:i<crossReport.employers.length-1?`1px solid ${C.border}`:"none"}}>
+                    <td style={{padding:"12px 13px",fontSize:13,fontWeight:600,color:C.text}}>{e.employerName}</td>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.dim}}>{e.totalClaims}</td>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:e.openClaims>0?C.amber:C.green,fontWeight:600}}>{e.openClaims}</td>
+                    <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.cyan}}>{fmt$(e.totalIncurred)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+        )
+      )}
+
+      {tab==="compliance"&&(
+        dlLoading?<div style={{padding:36,textAlign:"center"}}><Spinner/></div>:(
+          <div>
+            {/* Violation type summary */}
+            {deadlines&&(
+              <div style={{display:"flex",gap:14,marginBottom:22}}>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 20px",flex:1}}>
+                  <div style={{fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",marginBottom:6}}>TD Late (LC §4650)</div>
+                  <div style={{fontSize:22,fontFamily:C.mono,fontWeight:600,color:deadlines.byType?.TD_LATE>0?C.red:C.green}}>{deadlines.byType?.TD_LATE||0}</div>
+                </div>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 20px",flex:1}}>
+                  <div style={{fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",marginBottom:6}}>DWC-7 Late</div>
+                  <div style={{fontSize:22,fontFamily:C.mono,fontWeight:600,color:deadlines.byType?.DWC7_LATE>0?C.red:C.green}}>{deadlines.byType?.DWC7_LATE||0}</div>
+                </div>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 20px",flex:1}}>
+                  <div style={{fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",marginBottom:6}}>RFA Expired</div>
+                  <div style={{fontSize:22,fontFamily:C.mono,fontWeight:600,color:deadlines.byType?.RFA_EXPIRED>0?C.red:C.green}}>{deadlines.byType?.RFA_EXPIRED||0}</div>
+                </div>
+              </div>
+            )}
+
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+              <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>COMPLIANCE VIOLATIONS — {deadlines?.totalViolations||0}</div>
+              {(!deadlines?.violations?.length)?<div style={{padding:36,textAlign:"center",color:C.green,fontFamily:C.mono,fontSize:13}}>No missed deadlines. All statutory timelines met.</div>:(
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+                    {["Claim","Worker","Type","Description","Days Over","Penalty"].map(h=>
+                      <th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+                    )}
+                  </tr></thead>
+                  <tbody>{deadlines.violations.map((v,i)=>(
+                    <tr key={`${v.claimId}-${v.type}-${i}`} className="rh" style={{borderBottom:i<deadlines.violations.length-1?`1px solid ${C.border}`:"none"}} onClick={()=>v.claimId&&onSelect(v.claimId)}>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{v.claimNumber||v.claimId||'—'}</td>
+                      <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{v.worker||'—'}</td>
+                      <td style={{padding:"12px 13px"}}><span style={{fontSize:10,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,fontWeight:600,background:v.type==='RFA_EXPIRED'?C.redF:v.type==='TD_LATE'?C.amberF:C.blueF,color:v.type==='RFA_EXPIRED'?C.red:v.type==='TD_LATE'?C.amber:C.blue,border:`1px solid ${v.type==='RFA_EXPIRED'?C.red:v.type==='TD_LATE'?C.amber:C.blue}33`}}>{v.type.replace(/_/g,' ')}</span></td>
+                      <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{v.description}</td>
+                      <td style={{padding:"12px 13px",fontFamily:C.mono,fontSize:12,fontWeight:700,color:C.red}}>{v.daysOverdue}d</td>
+                      <td style={{padding:"12px 13px",fontSize:11,color:C.rose}}>{v.penalty}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // EMPLOYER PORTAL
 // ═══════════════════════════════════════════════════════════
 function EmployerPortal({employerUser,setEmployerUser,onSelect}){
@@ -1708,7 +2008,7 @@ function EmployerPortal({employerUser,setEmployerUser,onSelect}){
         <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Employer Portal</h1>
         <p style={{color:C.muted,fontSize:13}}>{employerName}</p>
       </div>
-      <Tabs tabs={[{key:"new",label:"Report Injury"},{key:"list",label:`All Claims (${myClaims.length})`}]} active={view} onChange={setView}/>
+      <Tabs tabs={[{key:"new",label:"Report Injury"},{key:"list",label:`All Claims (${myClaims.length})`},{key:"reports",label:"Reports"}]} active={view} onChange={setView}/>
       {view==="new"&&<FROIForm/>}
       {view==="list"&&(
         <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
@@ -1751,6 +2051,7 @@ function EmployerPortal({employerUser,setEmployerUser,onSelect}){
           }
         </div>
       )}
+      {view==="reports"&&<EmployerReports employerId={employerUser.employerId}/>}
     </div>
   );
 }
@@ -1775,7 +2076,7 @@ function TopNav({role,setRole,claims,adminView,setAdminView}){
       <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         {role==="admin"&&(
           <div style={{display:"flex",background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:2,gap:2}}>
-            {[{key:"claims",label:"Claims"},{key:"rfas",label:"RFAs"},{key:"notices",label:"Notices"}].map(({key,label})=>(
+            {[{key:"claims",label:"Claims"},{key:"rfas",label:"RFAs"},{key:"notices",label:"Notices"},{key:"reports",label:"Reports"}].map(({key,label})=>(
               <button key={key} onClick={()=>setAdminView(key)} style={{background:adminView===key?C.borderMid:"transparent",color:adminView===key?C.text:C.muted,border:"none",padding:"4px 12px",borderRadius:5,fontSize:11,fontWeight:600,fontFamily:C.sans,cursor:"pointer"}}>{label}</button>
             ))}
           </div>
@@ -1864,6 +2165,7 @@ export default function App(){
         )}
         {role==="admin"&&adminView==="rfas"&&<RFACenter notify={notify}/>}
         {role==="admin"&&adminView==="notices"&&<NoticeCenter claims={claims} jsPdfReady={jsPdfReady} notify={notify}/>}
+        {role==="admin"&&adminView==="reports"&&<AdminReports onSelect={setSelectedId}/>}
         {role==="employer"&&<EmployerPortal employerUser={employerUser} setEmployerUser={setEmployerUser} onSelect={setSelectedId}/>}
         {role==="employee"&&(
           <div style={{paddingTop:32,maxWidth:660,animation:"fadeUp .3s ease"}}>
