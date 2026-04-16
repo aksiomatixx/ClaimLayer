@@ -321,21 +321,233 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
 // recordPDAdvancePayment
 // ═════════════════════════════════════════════════════════════════════════════
 async function recordPDAdvancePayment(pdAdvanceId) {
-  // stub
+  const { data: adv, error: fetchErr } = await supabase
+    .from('pd_advances').select('*').eq('id', pdAdvanceId).single();
+  if (fetchErr || !adv) throw new Error(`PD advance not found: ${pdAdvanceId}`);
+  if (adv.status !== 'pending') throw new Error(`PD advance is not pending: ${adv.status}`);
+
+  const now = new Date().toISOString();
+
+  const { error } = await supabase.from('pd_advances')
+    .update({ first_payment_at: now, status: 'active' })
+    .eq('id', pdAdvanceId);
+  if (error) throw new Error(`pdService.recordPDAdvancePayment: ${error.message}`);
+
+  await _closeDiary(adv.claim_id, 'PD_ADVANCE_DUE');
+
+  await _writeAuditLog(
+    'pd_advance_payment', 'pd_advance', pdAdvanceId,
+    `PD advance first payment recorded. Rate: $${adv.weekly_rate}/wk`,
+    { firstPaymentAt: now },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: adv.claim_id, type: 'pd_advance_payment', timestamp: now,
+    data: { pdAdvanceId, weeklyRate: adv.weekly_rate },
+  });
+
+  logger.info({ msg: 'pdService.recordPDAdvancePayment: complete', pdAdvanceId });
+
+  const { data: updated } = await supabase.from('pd_advances').select('*').eq('id', pdAdvanceId).single();
+  return updated;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // waivePDAdvance
 // ═════════════════════════════════════════════════════════════════════════════
 async function waivePDAdvance(pdAdvanceId, adjusterId, reason) {
-  // stub
+  const { data: adv, error: fetchErr } = await supabase
+    .from('pd_advances').select('*').eq('id', pdAdvanceId).single();
+  if (fetchErr || !adv) throw new Error(`PD advance not found: ${pdAdvanceId}`);
+
+  const now = new Date().toISOString();
+
+  const { error } = await supabase.from('pd_advances')
+    .update({ status: 'waived', waived_reason: reason || null })
+    .eq('id', pdAdvanceId);
+  if (error) throw new Error(`pdService.waivePDAdvance: ${error.message}`);
+
+  await _closeDiary(adv.claim_id, 'PD_ADVANCE_DUE');
+
+  await _writeAuditLog(
+    'pd_advance_waived', 'pd_advance', pdAdvanceId,
+    `PD advance waived by adjuster: ${reason || 'No reason'}`,
+    { adjusterId, reason },
+  );
+
+  logger.info({ msg: 'pdService.waivePDAdvance: complete', pdAdvanceId, reason });
+
+  return { id: pdAdvanceId, status: 'waived' };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // createStipulation
 // ═════════════════════════════════════════════════════════════════════════════
 async function createStipulation(claimId, pdEvaluationId, { futureMedical, futureMedicalDesc, bodyPartsAccepted }) {
-  // stub
+  const claimService = _getClaimService();
+  const claim = await claimService.getClaim(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+
+  // Fetch PD evaluation
+  const { data: pdEval, error: evalErr } = await supabase
+    .from('pd_evaluations').select('*').eq('id', pdEvaluationId).single();
+  if (evalErr || !pdEval) throw new Error(`PD evaluation not found: ${pdEvaluationId}`);
+
+  const pdPercent    = parseFloat(pdEval.adjusted_pd_percent ?? pdEval.pd_percent);
+  const pdTotalValue = parseFloat(pdEval.adjusted_total_value ?? pdEval.pd_total_value);
+  const parts        = bodyPartsAccepted || (claim.bodyPart ? [claim.bodyPart] : []);
+
+  // Create stipulations row
+  const { data: stip, error: stipErr } = await supabase
+    .from('stipulations')
+    .insert({
+      claim_id:           claimId,
+      pd_evaluation_id:   pdEvaluationId,
+      pd_percent:         pdPercent,
+      pd_total_value:     pdTotalValue,
+      future_medical:     futureMedical || false,
+      future_medical_desc: futureMedicalDesc || null,
+      body_parts_accepted: parts,
+      status:             'draft',
+      created_at:         new Date().toISOString(),
+      updated_at:         new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (stipErr) throw new Error(`pdService.createStipulation: insert failed — ${stipErr.message}`);
+
+  // Generate stip document PDF
+  try {
+    await _generateStipDocument(claim, pdEval, stip);
+  } catch (err) {
+    logger.error({ msg: 'pdService.createStipulation: PDF gen failed (non-fatal)', err: err.message });
+  }
+
+  // Diary
+  await _createDiary(
+    claimId, 'STIP_DRAFTED', _addCalendarDays(new Date().toISOString().split('T')[0], 5), 'HIGH',
+    `Stip drafted. PD: ${pdPercent}% = $${pdTotalValue}. Future medical: ${futureMedical ? 'Yes' : 'No'}. Send to worker for signature.`,
+  );
+
+  await _writeAuditLog(
+    'stip_created', 'stipulation', stip.id,
+    `Stipulation drafted: ${pdPercent}% PD = $${pdTotalValue}. Future medical: ${futureMedical ? 'Yes' : 'No'}`,
+    { pdPercent, pdTotalValue, futureMedical, bodyParts: parts },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: claimId, type: 'stip_created', timestamp: new Date().toISOString(),
+    data: { stipId: stip.id, pdPercent, pdTotalValue, futureMedical },
+  });
+
+  logger.info({ msg: 'pdService.createStipulation: complete', claimId, stipId: stip.id });
+
+  return stip;
+}
+
+// ── Stip document PDF generator ──────────────────────────────────────────────
+
+async function _generateStipDocument(claim, pdEval, stip) {
+  const pdfDoc = await PDFDocument.create();
+  const page   = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  const fonts  = {
+    regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
+    bold:    await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+  };
+
+  let y = _drawLetterhead(page, fonts);
+
+  const emp     = claim.employee || {};
+  const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Injured Worker';
+
+  // Title
+  page.drawText('STIPULATION WITH REQUEST FOR AWARD', { x: MARGIN, y, size: 13, font: fonts.bold, color: BLUE });
+  y -= 18;
+  page.drawText(`Claim Number: ${claim.claimNumber}`, { x: MARGIN, y, size: 10, font: fonts.bold, color: DARK });
+  y -= 14;
+
+  // LC §5405 — Statute of limitations: DOI + 5 years
+  const doi5yr = new Date(claim.dateOfInjury + 'T00:00:00');
+  doi5yr.setFullYear(doi5yr.getFullYear() + 5);
+  const lc5405Date = _formatDate(doi5yr.toISOString());
+
+  const lines = [
+    `Injured Worker: ${empName}`,
+    `Date of Injury: ${_formatDate(claim.dateOfInjury)}`,
+    `Employer: ${claim.employerName || ''}`,
+    `Body Part(s): ${(stip.body_parts_accepted || []).join(', ') || claim.bodyPart || '—'}`,
+    '',
+    'The parties stipulate and agree as follows:',
+    '',
+    `1. The injured worker sustained injury arising out of and in the course of`,
+    `   employment on ${_formatDate(claim.dateOfInjury)}.`,
+    '',
+    `2. The injured worker's permanent disability is rated at ${stip.pd_percent}%,`,
+    `   with a total permanent disability value of $${parseFloat(stip.pd_total_value).toLocaleString()}.`,
+    '',
+  ];
+
+  if (parseFloat(pdEval.apportionment_percent) > 0) {
+    lines.push(`3. Apportionment of ${pdEval.apportionment_percent}% has been applied per LC §4663/4664.`);
+    lines.push(`   Adjusted PD: ${pdEval.adjusted_pd_percent}% = $${parseFloat(pdEval.adjusted_total_value).toLocaleString()}.`);
+    lines.push('');
+  }
+
+  const nextNum = parseFloat(pdEval.apportionment_percent) > 0 ? 4 : 3;
+
+  if (stip.future_medical) {
+    lines.push(`${nextNum}. Future medical treatment is reserved and shall remain open.`);
+    if (stip.future_medical_desc) {
+      lines.push(`   ${stip.future_medical_desc}`);
+    }
+    lines.push('');
+    lines.push(`${nextNum + 1}. Upon approval by the WCAB, the claim shall be reclassified as`);
+    lines.push(`   Future Medical Only.`);
+  } else {
+    lines.push(`${nextNum}. No future medical treatment is reserved. Upon approval by the WCAB,`);
+    lines.push(`   the claim shall be closed.`);
+  }
+
+  lines.push('');
+  lines.push('STATUTE OF LIMITATIONS NOTICE — LC §5405');
+  lines.push(`Proceedings for the collection of benefits must be commenced within five`);
+  lines.push(`years from the date of injury. The statute of limitations for this claim`);
+  lines.push(`expires on ${lc5405Date}.`);
+  lines.push('');
+  lines.push('');
+  lines.push('____________________________          ____________________________');
+  lines.push('Injured Worker Signature               Date');
+  lines.push('');
+  lines.push('');
+  lines.push('____________________________          ____________________________');
+  lines.push('Claims Administrator Signature         Date');
+
+  for (const line of lines) {
+    if (y < MARGIN + 220) break; // Reserve space for I&A block
+    const isHeader = line.startsWith('STIPULATION') || line.startsWith('STATUTE OF LIMITATIONS');
+    page.drawText(line, {
+      x: MARGIN, y, size: isHeader ? 10 : 9.5,
+      font: isHeader ? fonts.bold : fonts.regular,
+      color: isHeader ? BLUE : DARK,
+    });
+    y -= 13;
+  }
+
+  // DWC I&A block — structurally required for unrepresented workers
+  y -= 10;
+  _drawIABlock(page, y, fonts);
+
+  // Write notice row for audit trail
+  await supabase.from('notices').insert({
+    claim_id:           claim.id,
+    notice_type:        'stipulation',
+    statutory_deadline: lc5405Date,
+    generated_at:       new Date().toISOString(),
+    pdf_buffer_b64:     Buffer.from(await pdfDoc.save()).toString('base64'),
+  });
+
+  return Buffer.from(await pdfDoc.save());
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
