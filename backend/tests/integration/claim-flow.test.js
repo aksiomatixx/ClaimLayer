@@ -14,6 +14,23 @@
 // ── Mock Supabase (must be first, before any service imports) ─────────────────
 jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
 
+// ── Mock AI service — prevents real Claude API calls and enables payload inspection
+jest.mock('../../src/services/aiService', () => ({
+  analyzeCompensability: jest.fn().mockResolvedValue({
+    compensability:            'Likely Compensable',
+    compensabilityScore:       85,
+    priority:                  'High',
+    suggestedMedicalReserve:   10000,
+    suggestedIndemnityReserve: 8000,
+    suggestedExpenseReserve:   1000,
+    redFlags:                  [],
+    nextActions:               ['Schedule initial evaluation'],
+    rationale:                 'Mock analysis for integration testing.',
+  }),
+  evaluateRFA:  jest.fn().mockResolvedValue({}),
+  _callClaude:  jest.fn().mockResolvedValue({}),
+}));
+
 
 // ── Mock external services ────────────────────────────────────────────────────
 jest.mock('../../src/services/adp', () => ({
@@ -341,4 +358,128 @@ describe('Webhook receivers', () => {
       });
     expect(res.status).toBe(200);
   });
+});
+
+// ── M6: Motor vehicle subrogation + AI payload assertions ─────────────────────
+describe('M6 — motor vehicle subrogation and AI payload', () => {
+  const aiService = require('../../src/services/aiService');
+
+  beforeEach(() => {
+    aiService.analyzeCompensability.mockClear();
+  });
+
+  it('MV claim creation sets subrogationStatus to under_evaluation', async () => {
+    const res = await request(app)
+      .post('/api/v1/claims')
+      .set('Authorization', authHeader)
+      .send({
+        adpEmployeeId:     'BC-001',
+        employerName:      'BrightCare Home Health',
+        dateOfInjury:      '2026-04-01',
+        bodyPart:          'Multiple Body Parts',
+        injuryType:        'Motor Vehicle',
+        injuryDescription: 'Driving between patient locations when rear-ended at intersection.',
+        motorVehicleFields: {
+          driving_between_patients: true,
+          other_vehicle_involved:   true,
+          police_responded:         true,
+        },
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.subrogationStatus).toBe('under_evaluation');
+  }, 20_000);
+
+  it('MV claim — analyzeCompensability called with motorVehicleFields in payload', async () => {
+    const mvFields = { driving_between_patients: true, other_vehicle_involved: true, police_responded: false };
+
+    const res = await request(app)
+      .post('/api/v1/claims')
+      .set('Authorization', authHeader)
+      .send({
+        adpEmployeeId:     'BC-001',
+        employerName:      'BrightCare Home Health',
+        dateOfInjury:      '2026-04-01',
+        bodyPart:          'Lumbar Spine / Lower Back',
+        injuryType:        'Motor Vehicle',
+        injuryDescription: 'Patient home visit transit injury — rear-ended at red light.',
+        motorVehicleFields: mvFields,
+      });
+
+    expect(res.status).toBe(201);
+
+    // setImmediate in createClaim schedules _runAnalysis; drain the queue
+    await new Promise(r => setImmediate(r));
+
+    expect(aiService.analyzeCompensability).toHaveBeenCalled();
+    const [claimArg] = aiService.analyzeCompensability.mock.calls[0];
+    expect(claimArg.motorVehicleFields).toEqual(mvFields);
+  }, 20_000);
+
+  it('non-MV claim — motorVehicleFields is null in AI payload', async () => {
+    const res = await request(app)
+      .post('/api/v1/claims')
+      .set('Authorization', authHeader)
+      .send({
+        adpEmployeeId:     'BC-001',
+        employerName:      'BrightCare Home Health',
+        dateOfInjury:      '2026-04-01',
+        bodyPart:          'Shoulder',
+        injuryType:        'Lifting Injury',
+        injuryDescription: 'Strained right shoulder lifting patient from wheelchair to bed.',
+      });
+
+    expect(res.status).toBe(201);
+
+    await new Promise(r => setImmediate(r));
+
+    expect(aiService.analyzeCompensability).toHaveBeenCalled();
+    const [claimArg] = aiService.analyzeCompensability.mock.calls[0];
+    expect(claimArg.motorVehicleFields).toBeNull();
+  }, 20_000);
+
+  it('employer_contests: true is included in AI payload', async () => {
+    const res = await request(app)
+      .post('/api/v1/claims')
+      .set('Authorization', authHeader)
+      .send({
+        adpEmployeeId:     'BC-001',
+        employerName:      'BrightCare Home Health',
+        dateOfInjury:      '2026-04-01',
+        bodyPart:          'Knee',
+        injuryType:        'Slip & Fall',
+        injuryDescription: 'Slipped on wet floor at patient residence causing medial knee injury.',
+        employerContests:  true,
+      });
+
+    expect(res.status).toBe(201);
+
+    await new Promise(r => setImmediate(r));
+
+    expect(aiService.analyzeCompensability).toHaveBeenCalled();
+    const [claimArg] = aiService.analyzeCompensability.mock.calls[0];
+    expect(claimArg.employerContests).toBe(true);
+  }, 20_000);
+
+  it('employer_contests unset → employerContests defaults to false in AI payload', async () => {
+    const res = await request(app)
+      .post('/api/v1/claims')
+      .set('Authorization', authHeader)
+      .send({
+        adpEmployeeId:     'BC-001',
+        employerName:      'BrightCare Home Health',
+        dateOfInjury:      '2026-04-01',
+        bodyPart:          'Wrist / Hand',
+        injuryType:        'Repetitive Motion',
+        injuryDescription: 'Carpal tunnel syndrome from repetitive documentation and IV administration.',
+      });
+
+    expect(res.status).toBe(201);
+
+    await new Promise(r => setImmediate(r));
+
+    expect(aiService.analyzeCompensability).toHaveBeenCalled();
+    const [claimArg] = aiService.analyzeCompensability.mock.calls[0];
+    expect(claimArg.employerContests).toBe(false);
+  }, 20_000);
 });

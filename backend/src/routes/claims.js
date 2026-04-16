@@ -6,6 +6,7 @@ const claimService      = require('../services/claimService');
 const pdfService        = require('../services/pdfService');
 const db                = require('../services/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { CLAIM_STATUSES, SETTABLE_CLAIM_STATUSES } = require('../constants');
 
 const router = express.Router();
 
@@ -55,11 +56,7 @@ router.get(
   [
     query('status')
       .optional()
-      .isIn([
-        'new_claim', 'intake_complete', 'under_investigation', 'accepted',
-        'active_medical', 'p_and_s', 'pd_evaluation',
-        'settlement_discussions', 'litigated', 'denied', 'closed',
-      ])
+      .isIn(CLAIM_STATUSES)
       .withMessage('Invalid status value'),
   ],
   validate,
@@ -156,11 +153,7 @@ router.patch(
   [
     param('id').notEmpty(),
     body('status')
-      .isIn([
-        'intake_complete', 'under_investigation', 'accepted',
-        'active_medical', 'p_and_s', 'pd_evaluation',
-        'settlement_discussions', 'litigated', 'denied', 'closed',
-      ])
+      .isIn(SETTABLE_CLAIM_STATUSES)
       .withMessage('Invalid target status'),
   ],
   validate,

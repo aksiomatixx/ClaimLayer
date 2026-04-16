@@ -11,6 +11,17 @@ RULES:
 6. redFlags should call out anything that could complicate the claim: delayed reporting, pre-existing conditions, prior claims on the same body part, surgical likelihood, high reserve exposure.
 7. nextActions must be specific, actionable, and ordered by urgency.
 
+INPUT FIELD NOTES:
+employerContests: boolean — If true, the employer has indicated they have information
+suggesting the injury did not occur at work. Treat as an additional compensability
+risk factor requiring investigation. Do not treat as determinative on its own.
+motorVehicleFields: object | null — Present only for Motor Vehicle injury type.
+Contains: driving_between_patients, other_vehicle_involved, police_responded (each
+bool or null). If other_vehicle_involved is true, include "SUBROGATION_POTENTIAL"
+in the redFlags array. Note: home health workers driving between patient locations
+fall under the going-and-coming rule exception and injuries are generally compensable
+under California Labor Code.
+
 RESPOND ONLY WITH VALID JSON. No markdown fences, no explanation, no preamble outside the JSON object.
 
 Required response structure:
