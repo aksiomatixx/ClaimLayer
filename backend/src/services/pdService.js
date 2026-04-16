@@ -568,7 +568,9 @@ async function sendStipToWorker(stipId) {
   const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Injured Worker';
 
   // Check if worker is represented (attorney on file)
-  const isRepresented = !!(claim.attorneyName || claim.representedBy);
+  // attorneyName is not yet a formal claims column — check raw row for future-proofing
+  const { data: rawClaim } = await supabase.from('claims').select('*').eq('id', stip.claim_id).single();
+  const isRepresented = !!(rawClaim?.attorneyName || rawClaim?.attorney_name || claim.attorneyName || claim.representedBy);
 
   if (isRepresented) {
     // Represented worker: action item for attorney transmission only.
