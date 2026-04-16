@@ -29,6 +29,10 @@ homecare-tpa/
 │           ├── employer.js           ← loginEmployer, submitFROI, previewEmployee
 │           ├── providers.js          ← fetchProviders(zipCode, limit)
 │           ├── rfas.js               ← fetchRFAs, submitRFA, approveRFA, routeToURO
+│           ├── reporting.js          ← fetchLossRun, fetchEmployerSummary, fetchExperienceModInputs, fetchCrossEmployerReport, fetchMissedDeadlines
+│           ├── qme.js                ← fetchPanelsForClaim, requestPanel, issuePanel, recordStrikes, scheduleQmeAppointment, markReportReceived
+│           ├── mmi.js                ← evaluateMMISignals, fetchMMIEvaluations, solicitPR4, recordPR4Response, dismissMMIEvaluation
+│           ├── pd.js                 ← calculatePD, initiatePDAdvances, createStipulation, sendStipToWorker, recordEAMSFiled
 │           └── notices.js            ← (M9 pending) fetchNotices, sendDenialNotice
 ├── backend/                          ← Express (Node.js) API
 │   ├── src/
@@ -42,9 +46,14 @@ homecare-tpa/
 │   │   │   ├── adp.js                ← ADP OAuth2 client + AWW/TD calculation
 │   │   │   ├── claimService.js       ← Claim lifecycle orchestration + diaries + DWC-7 trigger
 │   │   │   ├── rfaService.js         ← RFA lifecycle: create → AI eval → route/approve + notice triggers
-│   │   │   ├── enlyteService.js      ← Enlyte URO stub (real API deferred to M10)
+│   │   │   ├── enlyteService.js      ← Enlyte URO stub (real API deferred to M_enlyte)
 │   │   │   ├── lobService.js         ← Lob.com print & mail stub (LOB_LIVE flag for real API)
 │   │   │   ├── noticeService.js      ← CA WC statutory notice generation (pdf-lib, 5 notice types)
+│   │   │   ├── reportingService.js   ← M10: loss run, employer summary, experience mod, cross-employer, missed deadlines
+│   │   │   ├── qmeService.js         ← M11: QME/AME panel lifecycle (request → issue → strikes → appointment → report)
+│   │   │   ├── supplementalRequestService.js ← M11: AI-powered QME report evaluation + supplemental request drafting
+│   │   │   ├── mmiService.js         ← M12: MMI signal detection (Claude AI), PR-4 solicitation (pdf-lib), response tracking
+│   │   │   ├── pdService.js          ← M13: PD calculation (PDRS lookup), PD advances (LC §4650(b)), stipulation lifecycle, EAMS filing
 │   │   │   ├── aiService.js          ← Claude API integration
 │   │   │   ├── pdfService.js         ← DWC-1, AI reasoning, auth letter (pdf-lib)
 │   │   │   ├── appointmentService.js ← MPN appointment booking
@@ -56,6 +65,10 @@ homecare-tpa/
 │   │   │   ├── claims.js             ← /api/v1/claims (CRUD + analyze + pdf + diaries)
 │   │   │   ├── rfas.js               ← /api/v1/rfas (create, list, approve, route-to-uro)
 │   │   │   ├── employer.js           ← /api/v1/employer (FROI submission + employee preview)
+│   │   │   ├── reporting.js          ← /api/v1/employers/:id/loss-run, /summary, /experience-mod-inputs + admin reports
+│   │   │   ├── qme.js                ← /api/v1/qme (panel CRUD + supplemental requests)
+│   │   │   ├── mmi.js                ← /api/v1/mmi (MMI evaluation + PR-4 solicitation)
+│   │   │   ├── pd.js                 ← /api/v1/pd (PD calculation, advances, stipulation, EAMS filing)
 │   │   │   ├── providers.js          ← /api/v1/providers
 │   │   │   ├── appointments.js       ← /api/v1/appointments
 │   │   │   ├── voice.js              ← /api/v1/voice (Whisper + text extraction)
@@ -88,7 +101,11 @@ homecare-tpa/
 │   │       ├── admin-console.test.js      ← M3: analyze, reserves, status, PDF, diaries
 │   │       ├── employer-portal.test.js    ← M4: FROI, employer auth, RLS, magic link
 │   │       ├── supabase-swap.test.js      ← M5: Supabase persistence + RLS policies
-│   │       └── rfa-engine.test.js         ← M7: RFA pipeline, routing, AI paths (45 tests)
+│   │       ├── rfa-engine.test.js         ← M7: RFA pipeline, routing, AI paths (45 tests)
+│   │       ├── reporting.test.js          ← M10: loss run, employer isolation, admin access, missed deadlines (20 tests)
+│   │       ├── qme.test.js               ← M11: QME panel lifecycle, strike deadline, calendar days (17 tests)
+│   │       ├── mmi.test.js               ← M12: MMI signal evaluation, PR-4 solicitation, response (12 tests)
+│   │       └── pd.test.js                ← M13: PD calculation, advances, stip lifecycle, EAMS filing (12 tests)
 │   ├── package.json
 │   └── .env.example
 ├── supabase/
@@ -97,7 +114,10 @@ homecare-tpa/
 │       ├── 20260101000002_seed_data.sql       ← Employer + MPN provider seed data
 │       ├── 20260101000003_enable_rls.sql      ← Row-level security policies
 │       ├── 20260101000004_missing_tables.sql  ← rfas, rfa_evaluations, ai_decisions, notices, audit_log
-│       └── 20260101000005_m6_retrofit.sql     ← M6: employer_contests, motor_vehicle_fields, subrogation_status, document indexing, automation_config, supplemental_requests
+│       ├── 20260101000005_m6_retrofit.sql     ← M6: employer_contests, motor_vehicle_fields, subrogation_status, document indexing, automation_config, supplemental_requests
+│       ├── 20260101000006_m11_qme.sql        ← M11: qme_panels table + diaries.no_snooze column
+│       ├── 20260101000007_m12_mmi.sql        ← M12: mmi_evaluations, pr4_solicitations tables
+│       └── 20260101000008_m13_pd.sql         ← M13: pdrs_lookup (seeded), pd_evaluations, pd_advances, stipulations tables
 ├── docs/
 │   ├── architecture.md               ← Full system design
 │   ├── integrations.md               ← API integration specs
@@ -240,12 +260,81 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M7 | RFA engine: MTUS evaluation, `_resolveDecision` routing (surgical override, auto-approve, URO, adjuster queue), Enlyte stub, diary lifecycle | ✅ Complete |
 | M8 | DxF / QHIO: Manifest MedEx roster enrollment, ADT push notifications, clinical document pull | 🔲 Not started |
 | M9 | Notice Center: `lobService` stub, `noticeService` (5 CA WC notice types), fire-and-forget triggers in `claimService` + `rfaService`, DWC I&A block structurally hardcoded, denial guard, notices table + audit_log writes | ✅ Complete |
-| M10 | Enlyte real integration: Replace stub with live Enlyte URO API; handle determination webhook | 🔲 Not started |
-| M11 | Reporting: Employer dashboard, loss run, experience mod tracking | 🔲 Not started |
+| M10 | Reporting: Employer dashboard (summary cards, loss run table + CSV export, experience mod trend chart), admin cross-employer view, missed deadline compliance report (TD/DWC-7/RFA) | ✅ Complete |
+| M11 | QME/AME process management: Panel lifecycle (request → issue → strikes → doctor selected → appointment → report), 10 cal day strike deadline (LC §4062.2, no_snooze), supplemental report AI evaluation (Claude), supplemental request drafting | ✅ Complete |
+| M12 | MMI management + PR-4 solicitation: AI signal detection (7 weighted signals), PR-4 letter generation (pdf-lib + lobService), response recording (WPI, restrictions, future medical, apportionment), 30 cal day response deadline | ✅ Complete |
+| M13 | Stipulation + PD closure + PD advances: PDRS lookup table, PD calculation with apportionment, PD advances (14 cal day deadline LC §4650(b), CRITICAL no_snooze), stip document (pdf-lib + LC §5405 + DWC I&A), full signature chain, EAMS filing (manual), claim closure | ✅ Complete |
+| M14 | Compromise and Release (no MSA only) | 🔲 Not started |
 
-**Current test count: 226 passing** (12 suites — unit + integration)
+**Current test count: 287 passing** (16 suites — unit + integration)
 
-### M9 — What was built (current)
+### M13 — What was built (current)
+
+Stipulation + PD Closure + PD Advances. No existing tests broken; test count grew from 275 → 287.
+
+- **`supabase/migrations/20260101000008_m13_pd.sql`** (new, staged) — `pdrs_lookup` table (2005 PDRS with 5 seed rows: WPI 5/10/15/25/50% at age_factor 1.0, occupation_group 1), `pd_evaluations` (WPI, PD%, weeks, rate, total, apportionment), `pd_advances` (td_end_date, advance_due_date, weekly_rate, status), `stipulations` (full lifecycle: draft → sent → signed → EAMS filed → closed).
+- **`backend/src/services/pdService.js`** (new) — Complete PD lifecycle:
+  - `calculatePD(claimId, pr4Id, {apportionmentPercent})` — Fetches PR-4 WPI, PDRS table lookup, computes age at DOI, PD weekly rate using 2026 statutory tiers (1%-69.75%: $160-$290/wk; 70%+: $240-$435/wk), applies apportionment, writes `pd_evaluations`, updates claim status to `pd_evaluation`.
+  - `initiatePDAdvances(claimId, pdEvaluationId, {tdEndDate})` — 14 CALENDAR days from TD end (LC §4650(b)). Creates CRITICAL `no_snooze: true` diary with 10% penalty warning. Never uses `addBusinessDays`.
+  - `recordPDAdvancePayment` / `waivePDAdvance` — Documented waiver with audit log.
+  - `createStipulation` — Generates pdf-lib document with: accepted body parts, PD%, total value, apportionment clause, future medical reservation, **LC §5405 statute of limitations with specific date** (DOI + 5 years), signature lines, **DWC I&A block** (structurally required via `_drawIABlock`). Writes `notices` table row.
+  - `sendStipToWorker` — **Represented workers**: creates attorney action item diary only, never contacts worker directly, never calls lobService. **Unrepresented**: sends via lobService + 21-day follow-up diary.
+  - `recordWorkerSignature` / `recordAdjusterSignature` — EAMS package preparation.
+  - `recordEAMSFiled` — Sets claim status to `closed` (no future medical) or `future_medical_only` (future medical reserved). EAMS filing is always manual.
+- **`backend/src/routes/pd.js`** (new) — 10 endpoints, all `requireRole(['admin'])`.
+- **`frontend/src/services/pd.js`** (new) — Fetch wrappers for all PD endpoints.
+- **`frontend/src/App.jsx`** — PD/Stip tab in ClaimDrawer: PD calculation card (WPI/PD%/total/apportionment), PD advances with overdue detection + 10% penalty warning, stipulation step progression (Draft→Sent→Worker Signed→Adjuster Signed→EAMS Ready→Filed→Closed), modals for all actions.
+- **`backend/tests/integration/pd.test.js`** (new, 12 tests) — calculatePD writes row + applies apportionment (25% on 16% → 12%); claim status → pd_evaluation; PD advance 14 cal days + CRITICAL no_snooze; waive writes audit log; EAMS filed → closed (no future medical) or future_medical_only; represented worker → attorney action item only; LC §5405 in notices table.
+
+### M12 — What was built
+
+MMI Management + PR-4 Solicitation. No existing tests broken; test count grew from 263 → 275.
+
+- **`supabase/migrations/20260101000007_m12_mmi.sql`** (new, staged) — `mmi_evaluations` (signals JSONB, recommendation, adjuster_action), `pr4_solicitations` (solicitation/response tracking, WPI, work_restrictions, future_medical, apportionment_noted).
+- **`backend/src/services/mmiService.js`** (new) — MMI signal detection and PR-4 solicitation:
+  - `evaluateMMISignals(claimId)` — Calls Claude with claim snapshot. Evaluates 7 weighted signals (claim_age_exceeds_typical, pr2_stable_plateau, treatment_frequency_declining, rfas_shifting_maintenance, td_over_90_days_soft_tissue, td_104_week_approaching, no_active_treatment). Returns recommendation: no_action (0 signals) / monitor (weight 1-3) / solicit_pr4 (weight ≥4 or two weight-2 signals). Creates diary per recommendation level. **Never auto-changes claim status.**
+  - `solicitPR4(claimId, mmiEvaluationId, {physicianName, physicianFax, physicianAddress})` — Generates PR-4 solicitation letter (pdf-lib, requests WPI per AMA 5th Ed, apportionment per LC §4663/4664), sends via lobService, 30 calendar day response deadline.
+  - `recordPR4Response(pr4Id, {wpi, workRestrictions, futureMedical, apportionmentNoted})` — Closes response due diary, creates review diary. If `apportionmentNoted`: additional diary flagging QME/AME may be needed.
+  - `dismissMMIEvaluation(mmiEvaluationId, adjusterId, note)` — Sets adjuster_action = dismissed with audit log.
+- **`backend/src/routes/mmi.js`** (new) — 6 endpoints, all `requireRole(['admin'])`.
+- **`frontend/src/services/mmi.js`** (new) — Fetch wrappers for all MMI endpoints.
+- **`frontend/src/App.jsx`** — MMI/P&S tab in ClaimDrawer: signal evaluation cards with weight indicators, recommendation badges (green/amber/red), rationale, solicit PR-4 modal, record response modal (WPI, restrictions, apportionment checkbox), PR-4 solicitations list with overdue detection.
+- **`backend/tests/integration/mmi.test.js`** (new, 12 tests) — evaluateMMISignals writes row; solicit_pr4 creates diary; monitor creates diary; no_action creates no diary; solicitPR4 30 cal day due + calls lobService; recordPR4Response apportionment=true → 2 diaries; dismiss sets adjuster_action.
+
+### M11 — What was built
+
+QME/AME Process Management. No existing tests broken; test count grew from 246 → 263.
+
+- **`supabase/migrations/20260101000006_m11_qme.sql`** (new, staged) — `qme_panels` table (3 doctors, strikes, selected doctor, appointment, report tracking, QME/AME track). `diaries.no_snooze BOOLEAN` column added for CRITICAL strike deadlines.
+- **`backend/src/services/qmeService.js`** (new) — Full QME panel lifecycle:
+  - `requestPanel(claimId, specialty, adjusterNotes)` — Creates panel row + CRITICAL diary.
+  - `issuePanel(panelId, {panelIssuedDate, doctor1, doctor2, doctor3})` — **10 CALENDAR days** strike deadline (LC §4062.2, NOT business days). CRITICAL `no_snooze: true` diary.
+  - `recordStrikes(panelId, {strike1Npi, strike2Npi})` — Validates NPIs in panel, derives remaining doctor, rejects same-doctor-twice.
+  - `scheduleAppointment(panelId, {appointmentDate})` — 30 calendar day report due (CCR §35).
+  - `recordReportReceived(panelId)` — Triggers supplemental report AI evaluation (fire-and-forget).
+- **`backend/src/services/supplementalRequestService.js`** (new) — `evaluateQmeReport(panelId)`: Claude identifies gaps (apportionment, future medical, work restrictions, body parts, PR-2 contradictions), drafts supplemental request letter, writes `supplemental_requests` row. `approveAndSend` / `dismiss` for adjuster workflow.
+- **`backend/src/routes/qme.js`** (new) — 10 endpoints (7 panel + 3 supplemental), all `requireRole(['admin'])`.
+- **`frontend/src/services/qme.js`** (new) — Fetch wrappers.
+- **`frontend/src/App.jsx`** — QME/AME tab in ClaimDrawer: step progression, red strike deadline warning (within 3 days), modals (request panel, record issue with 3 doctors, record strikes with checkboxes, schedule appointment), supplemental request review.
+- **`backend/tests/integration/qme.test.js`** (new, 17 tests) — Panel lifecycle through all states; strike deadline = 10 cal days (Friday+10=Monday); no_snooze diary; NPI validation + same-doctor rejection; report_due = appt+30; AME track: no automated worker comms; auth guards.
+
+### M10 — What was built
+
+Reporting: Employer Dashboard + Loss Run + Admin Compliance. No existing tests broken; test count grew from 226 → 246.
+
+- **`backend/src/services/reportingService.js`** (new) — 5 query functions:
+  - `getLossRun(employerId)` — All claims with reserve totals (adjuster reserves preferred, AI-suggested fallback). Returns: claim number, worker, DOI, injury type, status, medical/indemnity/expense/total incurred, open/closed.
+  - `getEmployerSummary(employerId)` — Open claim count, total incurred YTD, TD weeks paid YTD, average days to first payment.
+  - `getExperienceModInputs(employerId)` — Payroll by class code (8827/8835/8742 for home health), losses by class code, 5-year loss trend data, WCIRB experience period.
+  - `getCrossEmployerReport()` — Admin-only: all employers aggregated (total claims, open claims, total incurred).
+  - `getMissedDeadlineReport()` — Admin-only: TD late (>14 days, LC §4650), DWC-7 late (>5 days), RFA expired (response_due_at passed with no decision).
+- **`backend/src/routes/reporting.js`** (new) — 5 GET endpoints with employer scope enforcement (employers see own data only, admins see all).
+- **`frontend/src/services/reporting.js`** (new) — Fetch wrappers.
+- **`frontend/src/App.jsx`** — Employer portal "Reports" tab: summary cards, loss run table with CSV export, experience mod tables, 5-year loss trend CSS bar chart. Admin nav "Reports" tab: cross-employer overview, missed deadline compliance report with violation type breakdown.
+- **`backend/tests/__mocks__/supabaseClient.js`** — Extended `_attachRelations` to join `reserves` table when claims are fetched with `select('*, reserves(*)')`.
+- **`backend/tests/integration/reporting.test.js`** (new, 20 tests) — Loss run totals + AI reserve fallback; employer A cannot see employer B (403); admin sees all; summary aggregates; experience mod class codes + trend data; TD/DWC-7/RFA missed deadline detection; completed diaries and decided RFAs not flagged.
+
+### M9 — What was built
 
 Notice Center infrastructure sprint. No existing tests broken; test count grew from 212 → 226.
 
