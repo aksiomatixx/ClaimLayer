@@ -258,7 +258,7 @@ Claude generates diary descriptions only — all statutory dates are calculated 
 
 ## Milestones
 
-**Current test count: 302 passing (19 suites — unit + integration)**
+**Current test count: 341 passing (21 suites — unit + integration)**
 
 | Milestone | Description | Status |
 |---|---|---|
@@ -275,7 +275,7 @@ Claude generates diary descriptions only — all statutory dates are calculated 
 | M12 | MMI management + PR-4 solicitation: AI 7-signal evaluation, PR-4 letter, 30 cal day response, apportionment tracking | ✅ Complete |
 | M13 | Stipulation + PD closure + PD advances: PDRS lookup, PD calc with apportionment, 14 cal day advances (LC §4650(b), CRITICAL no_snooze), stip lifecycle, EAMS filing, closure | ✅ Complete |
 | M19 | Settlement foundation: MSA screening gate, C&R AI pricing with guardrails, PDRS extension, `calculateStipValue` wrapper, settlement_offers table | ✅ Complete |
-| M14 | Compromise and Release (no MSA only) — workflow built on M19 foundation | 🔲 Next — unblocked |
+| M14 | Compromise and Release (no MSA only): offer → accept → sign → EAMS → OACR → paid lifecycle, MSA gate on pricing, CCR §10880 30-day payment due (CRITICAL no_snooze), C&R closes claim (no future medical) | ✅ Complete |
 
 ---
 
