@@ -86,6 +86,19 @@ async function seedClaimWithPD() {
     created_at: new Date().toISOString(),
   });
 
+  // M14: MSA screening required before priceCnr. Seed a "not required" row
+  // so the existing M19 end-to-end test (which screens AFTER pricing) still
+  // exercises the same assertions.
+  await supabase.from('msa_screenings').insert({
+    claim_id: claimId,
+    screened_at: new Date().toISOString(),
+    medicare_eligible: false,
+    age_at_screening: 41,
+    ssdi_receiving: false,
+    projected_settlement_value: 22000,
+    msa_required: false,
+  });
+
   return { claimId, pdEvalId };
 }
 
