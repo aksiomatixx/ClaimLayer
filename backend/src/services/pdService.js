@@ -777,6 +777,32 @@ async function getPDAdvances(claimId) {
   return data || [];
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// calculateStipValue — M19 thin wrapper over existing PD math
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function calculateStipValue(claimId) {
+  const pdEval = await getPDEvaluation(claimId);
+  if (!pdEval) throw new Error(`No PD evaluation found for claim: ${claimId}`);
+
+  const adjustedValue = parseFloat(pdEval.adjusted_total_value ?? pdEval.pd_total_value);
+  const adjustedPct   = parseFloat(pdEval.adjusted_pd_percent ?? pdEval.pd_percent);
+
+  return {
+    claimId,
+    pdEvaluationId:      pdEval.id,
+    wpi:                 parseFloat(pdEval.wpi),
+    pdPercent:           parseFloat(pdEval.pd_percent),
+    pdWeeks:             parseFloat(pdEval.pd_weeks),
+    pdWeeklyRate:        parseFloat(pdEval.pd_weekly_rate),
+    pdTotalValue:        parseFloat(pdEval.pd_total_value),
+    apportionmentPercent: parseFloat(pdEval.apportionment_percent || 0),
+    adjustedPdPercent:   adjustedPct,
+    adjustedTotalValue:  adjustedValue,
+    stipValue:           adjustedValue,
+  };
+}
+
 module.exports = {
   calculatePD,
   initiatePDAdvances,
@@ -790,6 +816,7 @@ module.exports = {
   getPDEvaluation,
   getStipulation,
   getPDAdvances,
+  calculateStipValue,
   // Exported for tests
   _computePDWeeklyRate,
   _addCalendarDays,

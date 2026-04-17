@@ -265,8 +265,9 @@ Claude generates the diary set from claim facts at claim creation and updates di
 | M12 | MMI management + PR-4 solicitation: AI signal detection (7 weighted signals), PR-4 letter generation (pdf-lib + lobService), response recording (WPI, restrictions, future medical, apportionment), 30 cal day response deadline | ✅ Complete |
 | M13 | Stipulation + PD closure + PD advances: PDRS lookup table, PD calculation with apportionment, PD advances (14 cal day deadline LC §4650(b), CRITICAL no_snooze), stip document (pdf-lib + LC §5405 + DWC I&A), full signature chain, EAMS filing (manual), claim closure | ✅ Complete |
 | M14 | Compromise and Release (no MSA only) | 🔲 Not started |
+| M19 | Settlement foundation: MSA screening gate (Medicare/SSDI/age thresholds), C&R AI pricing (Claude + guardrails), PDRS extension (body-part context, age/occupation JSON), calculateStipValue wrapper, settlement_offers table | ✅ Complete |
 
-**Current test count: 287 passing** (16 suites — unit + integration)
+**Current test count: 302 passing** (19 suites — unit + integration)
 
 ### M13 — What was built (current)
 
