@@ -41,6 +41,18 @@ async function priceCnr(claimId) {
   const claim = await claimService.getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
+  // M14: MSA gate — C&R is blocked when MSA is required. Must screen first.
+  const { data: msaRows } = await supabase
+    .from('msa_screenings').select('*').eq('claim_id', claimId)
+    .order('screened_at', { ascending: false });
+  const latestMsa = (msaRows && msaRows.length > 0) ? msaRows[0] : null;
+  if (!latestMsa) {
+    throw new Error('MSA_SCREENING_REQUIRED_BEFORE_CNR_PRICING');
+  }
+  if (latestMsa.msa_required) {
+    throw new Error('CNR_BLOCKED_MSA_REQUIRED');
+  }
+
   // Get stip value from existing PD math (no duplication)
   const stipData = await pdService.calculateStipValue(claimId);
 
@@ -89,16 +101,17 @@ async function priceCnr(claimId) {
   const { data: offer, error } = await supabase
     .from('settlement_offers')
     .insert({
-      claim_id:        claimId,
-      offer_type:      'cnr',
-      stip_value:      stipData.stipValue,
-      cnr_value:       cnrValue,
-      cnr_premium_pct: stipData.stipValue > 0
+      claim_id:         claimId,
+      offer_type:       'cnr',
+      stip_value:       stipData.stipValue,
+      cnr_value:        cnrValue,
+      cnr_premium_pct:  stipData.stipValue > 0
         ? Math.round((cnrValue / stipData.stipValue - 1) * 10000) / 100
         : null,
-      pricing_method:  'claude_ai',
-      status:          'draft',
-      created_at:      new Date().toISOString(),
+      pricing_method:   'claude_ai',
+      msa_screening_id: latestMsa.id,
+      status:           'draft',
+      created_at:       new Date().toISOString(),
     })
     .select()
     .single();

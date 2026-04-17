@@ -77,7 +77,25 @@ async function seedClaimWithPD(overrides = {}) {
     calculated_at: new Date().toISOString(),
   });
 
-  return { claimId, pdEvalId };
+  // M14: MSA screening required before priceCnr. Seed a "not required" row
+  // by default so legacy priceCnr/compareOffers tests continue to pass.
+  // Tests that exercise the MSA gate skip this by passing skipMsaSeed:true.
+  let msaScreeningId = null;
+  if (!overrides.skipMsaSeed) {
+    const { data: msa } = await supabase.from('msa_screenings').insert({
+      claim_id: claimId,
+      screened_at: new Date().toISOString(),
+      medicare_eligible: false,
+      age_at_screening: 41,
+      ssdi_receiving: false,
+      projected_settlement_value: 22000,
+      msa_required: overrides.msaRequired === true,
+      msa_required_reason: overrides.msaRequired === true ? 'Test: MSA required' : null,
+    }).select().single();
+    msaScreeningId = msa?.id || null;
+  }
+
+  return { claimId, pdEvalId, msaScreeningId };
 }
 
 beforeEach(() => {
@@ -125,6 +143,39 @@ describe('priceCnr', () => {
 
     const result = await pdPricingService.priceCnr(claimId);
     expect(result.recommendation).toBe('adjuster_review');
+  });
+
+  // ─── M14 MSA gate ─────────────────────────────────────────────────────────
+  it('throws MSA_SCREENING_REQUIRED_BEFORE_CNR_PRICING when no screening exists', async () => {
+    const { claimId } = await seedClaimWithPD({ skipMsaSeed: true });
+    mockCallClaude.mockResolvedValue({ cnrValueMid: 20000, recommendation: 'adjuster_review' });
+
+    await expect(pdPricingService.priceCnr(claimId)).rejects.toThrow(
+      'MSA_SCREENING_REQUIRED_BEFORE_CNR_PRICING',
+    );
+  });
+
+  it('throws CNR_BLOCKED_MSA_REQUIRED when msa_required=true', async () => {
+    const { claimId } = await seedClaimWithPD({ msaRequired: true });
+    mockCallClaude.mockResolvedValue({ cnrValueMid: 20000, recommendation: 'adjuster_review' });
+
+    await expect(pdPricingService.priceCnr(claimId)).rejects.toThrow(
+      'CNR_BLOCKED_MSA_REQUIRED',
+    );
+  });
+
+  it('populates settlement_offers.msa_screening_id from the latest screening', async () => {
+    const { claimId, msaScreeningId } = await seedClaimWithPD();
+    mockCallClaude.mockResolvedValue({
+      cnrValueLow: 18000, cnrValueMid: 22000, cnrValueHigh: 28000,
+      recommendation: 'adjuster_review',
+    });
+
+    await pdPricingService.priceCnr(claimId);
+
+    const { data: offers } = await supabase.from('settlement_offers').select('*').eq('claim_id', claimId);
+    expect(offers.length).toBe(1);
+    expect(offers[0].msa_screening_id).toBe(msaScreeningId);
   });
 });
 
