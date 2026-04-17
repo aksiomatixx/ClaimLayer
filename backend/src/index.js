@@ -21,6 +21,7 @@ const reportingRouter    = require('./routes/reporting');
 const qmeRouter          = require('./routes/qme');
 const mmiRouter          = require('./routes/mmi');
 const pdRouter           = require('./routes/pd');
+const settlementRouter   = require('./routes/settlement');
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use('/api/v1/rfas',         rfasRouter);
 app.use('/api/v1/qme',          qmeRouter);
 app.use('/api/v1/mmi',          mmiRouter);
 app.use('/api/v1/pd',           pdRouter);
+app.use('/api/v1/claims',        settlementRouter);
 app.use('/api/v1',               reportingRouter);
 app.use('/webhooks',             webhooksRouter);
 
