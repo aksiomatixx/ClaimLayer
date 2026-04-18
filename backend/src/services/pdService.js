@@ -389,35 +389,106 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// recordPDAdvancePayment
+// recordPDAdvancePayment (M14.5 — per-week disbursement)
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordPDAdvancePayment(pdAdvanceId) {
+//
+// M14.5 breaking change: now accepts { weekStartDate, weekEndDate, amountPaid,
+// paidBy, reference } and writes a row to pd_advance_payments. Enforces the
+// represented/unrepresented cap unless the advance has a cap override or was
+// created pre-M14.5 (estimated_pd_denominator IS NULL — legacy rows skip
+// enforcement for back-compat).
+//
+// OLD signature: recordPDAdvancePayment(pdAdvanceId)
+// NEW signature: recordPDAdvancePayment(pdAdvanceId, { weekStartDate, weekEndDate,
+//                  amountPaid, paidBy, reference })
+async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
+  const { weekStartDate, weekEndDate, amountPaid, paidBy, reference } = opts;
+  if (!weekStartDate || !weekEndDate) {
+    throw new Error('weekStartDate and weekEndDate are required');
+  }
+  const amount = parseFloat(amountPaid);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('amountPaid must be a positive number');
+  }
+
   const { data: adv, error: fetchErr } = await supabase
     .from('pd_advances').select('*').eq('id', pdAdvanceId).single();
   if (fetchErr || !adv) throw new Error(`PD advance not found: ${pdAdvanceId}`);
-  if (adv.status !== 'pending') throw new Error(`PD advance is not pending: ${adv.status}`);
+  if (!['pending', 'active'].includes(adv.status)) {
+    throw new Error(`PD advance is not accepting payments: ${adv.status}`);
+  }
+
+  // Sum prior paid payments on this advance.
+  const { data: priorRows } = await supabase
+    .from('pd_advance_payments').select('*').eq('pd_advance_id', pdAdvanceId);
+  const priorPaidTotal = Math.round(
+    (priorRows || [])
+      .filter(r => r.status === 'paid')
+      .reduce((acc, r) => acc + parseFloat(r.amount_paid || 0), 0) * 100,
+  ) / 100;
+
+  // Cap enforcement. Legacy rows (no denominator) skip enforcement.
+  let capReached = false;
+  const denominator = adv.estimated_pd_denominator != null ? parseFloat(adv.estimated_pd_denominator) : null;
+  if (denominator != null && Number.isFinite(denominator) && denominator > 0) {
+    const claimService = _getClaimService();
+    const claim = await claimService.getClaim(adv.claim_id);
+    const policy = _resolveCapPolicy(claim, adv);
+    const effectiveCap = denominator * policy.pct;
+    const projected    = priorPaidTotal + amount;
+    if (projected > effectiveCap + 0.01) {
+      throw new Error('ADVANCE_CAP_EXCEEDED');
+    }
+    if (Math.abs(projected - effectiveCap) <= 1.0) {
+      capReached = true;
+    }
+  }
 
   const now = new Date().toISOString();
 
-  const { error } = await supabase.from('pd_advances')
-    .update({ first_payment_at: now, status: 'active' })
-    .eq('id', pdAdvanceId);
-  if (error) throw new Error(`pdService.recordPDAdvancePayment: ${error.message}`);
+  const { error: payErr } = await supabase.from('pd_advance_payments').insert({
+    pd_advance_id:   pdAdvanceId,
+    claim_id:        adv.claim_id,
+    week_start_date: weekStartDate,
+    week_end_date:   weekEndDate,
+    amount_paid:     amount,
+    paid_at:         now,
+    paid_by:         paidBy || null,
+    reference:       reference || null,
+    status:          'paid',
+    created_at:      now,
+  });
+  if (payErr) throw new Error(`pdService.recordPDAdvancePayment: payment insert failed — ${payErr.message}`);
+
+  // Update pd_advances: first_payment_at on the first paid row, status
+  // transitions pending → active, active → completed when cap reached.
+  const advUpdate = {};
+  if (!adv.first_payment_at) advUpdate.first_payment_at = now;
+  if (adv.status === 'pending') advUpdate.status = 'active';
+  if (capReached) advUpdate.status = 'completed';
+  if (Object.keys(advUpdate).length > 0) {
+    const { error: updErr } = await supabase.from('pd_advances')
+      .update(advUpdate).eq('id', pdAdvanceId);
+    if (updErr) throw new Error(`pdService.recordPDAdvancePayment: advance update failed — ${updErr.message}`);
+  }
 
   await _closeDiary(adv.claim_id, 'PD_ADVANCE_DUE');
 
   await _writeAuditLog(
     'pd_advance_payment', 'pd_advance', pdAdvanceId,
-    `PD advance first payment recorded. Rate: $${adv.weekly_rate}/wk`,
-    { firstPaymentAt: now },
+    `PD advance payment $${amount.toFixed(2)} for week ${weekStartDate}→${weekEndDate}. Prior paid $${priorPaidTotal.toFixed(2)}${capReached ? '. CAP REACHED — advance completed.' : ''}`,
+    { amountPaid: amount, weekStartDate, weekEndDate, priorPaidTotal, capReached, reference: reference || null },
   );
 
   await supabase.from('claim_events').insert({
     claim_id: adv.claim_id, type: 'pd_advance_payment', timestamp: now,
-    data: { pdAdvanceId, weeklyRate: adv.weekly_rate },
+    data: { pdAdvanceId, amountPaid: amount, weekStartDate, weekEndDate, capReached },
   });
 
-  logger.info({ msg: 'pdService.recordPDAdvancePayment: complete', pdAdvanceId });
+  logger.info({
+    msg: 'pdService.recordPDAdvancePayment: complete',
+    pdAdvanceId, amountPaid: amount, priorPaidTotal, capReached,
+  });
 
   const { data: updated } = await supabase.from('pd_advances').select('*').eq('id', pdAdvanceId).single();
   return updated;
