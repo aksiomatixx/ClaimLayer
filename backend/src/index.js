@@ -23,6 +23,12 @@ const mmiRouter          = require('./routes/mmi');
 const pdRouter           = require('./routes/pd');
 const settlementRouter   = require('./routes/settlement');
 const { offersRouter }   = require('./routes/settlement');
+const {
+  claimsRouter:        disbursementClaimsRouter,
+  disbursementsRouter,
+  pdAdvancesRouter,
+  stipulationsRouter,
+} = require('./routes/disbursement');
 
 const app = express();
 
@@ -50,6 +56,10 @@ app.use('/api/v1/mmi',          mmiRouter);
 app.use('/api/v1/pd',           pdRouter);
 app.use('/api/v1/claims',        settlementRouter);
 app.use('/api/v1/offers',        offersRouter);
+app.use('/api/v1/claims',        disbursementClaimsRouter);
+app.use('/api/v1/disbursements', disbursementsRouter);
+app.use('/api/v1/pd-advances',   pdAdvancesRouter);
+app.use('/api/v1/stipulations',  stipulationsRouter);
 app.use('/api/v1',               reportingRouter);
 app.use('/webhooks',             webhooksRouter);
 
