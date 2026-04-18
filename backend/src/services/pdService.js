@@ -432,9 +432,11 @@ async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
   let capReached = false;
   const denominator = adv.estimated_pd_denominator != null ? parseFloat(adv.estimated_pd_denominator) : null;
   if (denominator != null && Number.isFinite(denominator) && denominator > 0) {
-    const claimService = _getClaimService();
-    const claim = await claimService.getClaim(adv.claim_id);
-    const policy = _resolveCapPolicy(claim, adv);
+    // Read the raw claims row. claimService.getClaim's _toClaim mapping
+    // strips attorney_represented / attorney_name / representedBy, so the
+    // represented check must go against the unmapped row.
+    const { data: rawClaim } = await supabase.from('claims').select('*').eq('id', adv.claim_id).single();
+    const policy = _resolveCapPolicy(rawClaim, adv);
     const effectiveCap = denominator * policy.pct;
     const projected    = priorPaidTotal + amount;
     if (projected > effectiveCap + 0.01) {
