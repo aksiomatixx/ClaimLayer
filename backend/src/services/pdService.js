@@ -33,6 +33,44 @@ const PD_RATES_2026 = {
   high: { min: 240, max: 435, threshold: 70 },      // Ratings 70%+
 };
 
+// ── PD Advance Cap Policy (M14.5) ────────────────────────────────────────────
+// LC §4650(b)(1) "reasonable estimate" — administrative practice.
+// 15% represented reserve preserves AA fee at settlement.
+// 100% unrepresented because no AA fee to reserve.
+// Overridable per-advance via cap_overridden / cap_override_pct on pd_advances.
+const ADVANCE_CAP_POLICY = {
+  REPRESENTED_PCT:   0.85,
+  UNREPRESENTED_PCT: 1.00,
+};
+
+// ── Represented check ────────────────────────────────────────────────────────
+// Duplicated here because cnrService._isRepresented is its own private helper.
+// M17B Master-Context deferred task: consolidate attorney_represented into a
+// single claim column and replace this OR-chain + the twin in cnrService with
+// a shared helper.
+function _isRepresented(claim) {
+  if (!claim) return false;
+  return !!(
+    claim.attorney_represented ||
+    claim.attorneyName ||
+    claim.attorney_name ||
+    claim.representedBy
+  );
+}
+
+// ── Cap policy resolution ────────────────────────────────────────────────────
+// Per-advance override wins. Otherwise represented = 85%, unrepresented = 100%.
+// advanceRow may be null when initiating an advance (the row doesn't exist yet).
+function _resolveCapPolicy(claim, advanceRow) {
+  if (advanceRow && advanceRow.cap_overridden && advanceRow.cap_override_pct != null) {
+    return { pct: parseFloat(advanceRow.cap_override_pct), source: 'override' };
+  }
+  if (_isRepresented(claim)) {
+    return { pct: ADVANCE_CAP_POLICY.REPRESENTED_PCT, source: 'represented' };
+  }
+  return { pct: ADVANCE_CAP_POLICY.UNREPRESENTED_PCT, source: 'unrepresented' };
+}
+
 // ── PDF constants (match noticeService) ──────────────────────────────────────
 const DARK   = rgb(0.1, 0.1, 0.1);
 const GRAY   = rgb(0.4, 0.4, 0.4);
@@ -820,5 +858,8 @@ module.exports = {
   // Exported for tests
   _computePDWeeklyRate,
   _addCalendarDays,
+  _isRepresented,
+  _resolveCapPolicy,
   PD_RATES_2026,
+  ADVANCE_CAP_POLICY,
 };
