@@ -90,7 +90,16 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
   }
 
   // (11) Service-date missing flag (we used a fallback for the NOT NULL column).
-  if (!extraction.awardServiceDate) flags.push('SERVICE_DATE_MISSING');
+  // When the service date is unknown we must still persist the bundle (NOT NULL
+  // columns require a value), so we fall back to awardDate / accruedStartDate.
+  // Consequence: the §5814 statutory pay-by date is derived from the fallback
+  // and is UNRELIABLE for compliance until the adjuster corrects the service
+  // date via re-extraction or manual update. PAYMENT_DUE_PROVISIONAL marks
+  // that downstream consumers should treat pay-by as advisory, not binding.
+  if (!extraction.awardServiceDate) {
+    flags.push('SERVICE_DATE_MISSING');
+    flags.push('PAYMENT_DUE_PROVISIONAL');
+  }
 
   // (3) Statutory pay-by (not persisted on the row — recomputed at recordDisbursementPayment).
   // Intentional: the PAY_BY_DATE is derivable from (awardServiceDate, awardType).
@@ -539,6 +548,8 @@ function _isRepresented(claim) {
  * is used.
  */
 function _resolveCapContext(claim) {
+  // Fallback for test isolation — pdService.ADVANCE_CAP_POLICY is the
+  // authoritative source.
   let thresholdPct = 0.85;
   try {
     const pd = _getPdService();
