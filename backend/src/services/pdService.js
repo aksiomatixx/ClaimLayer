@@ -962,6 +962,132 @@ async function recordEAMSFiled(stipId, { filedDate, filedBy }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// setPAndSDate (M14.5 — promotes P&S to first-class claim column)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Write-through helper. Priority (highest → lowest):
+//   qme_report > pr_4 > treating_physician > award_document > adjuster_entry
+//
+// - Existing NULL         → write new.
+// - Same date, higher src → upgrade source silently.
+// - Same date, same src   → idempotent no-op.
+// - New date, higher src  → overwrite, audit-log old/new.
+// - New date, lower src   → DO NOT overwrite; create P_AND_S_CONFLICT_REVIEW
+//                           diary (HIGH; system@homecaretpa.com; M17B
+//                           reassignment to licensed adjuster).
+const P_AND_S_SOURCE_PRIORITY = {
+  qme_report:         5,
+  pr_4:               4,
+  treating_physician: 3,
+  award_document:     2,
+  adjuster_entry:     1,
+};
+
+function _psPriority(src) {
+  return P_AND_S_SOURCE_PRIORITY[src] || 0;
+}
+
+async function setPAndSDate(claimId, { date, source, confirmedBy }) {
+  if (!date)   throw new Error('date is required');
+  if (!source) throw new Error('source is required');
+  if (!(source in P_AND_S_SOURCE_PRIORITY)) {
+    throw new Error(`invalid P&S source: ${source}`);
+  }
+
+  const { data: claim, error: fetchErr } = await supabase
+    .from('claims').select('*').eq('id', claimId).single();
+  if (fetchErr || !claim) throw new Error(`Claim not found: ${claimId}`);
+
+  const now          = new Date().toISOString();
+  const priorDate    = claim.p_and_s_date   || null;
+  const priorSource  = claim.p_and_s_source || null;
+  const priorRank    = _psPriority(priorSource);
+  const newRank      = _psPriority(source);
+
+  // Case 1: nothing on file — write.
+  if (!priorDate) {
+    const { data: updated } = await supabase.from('claims')
+      .update({
+        p_and_s_date:         date,
+        p_and_s_source:       source,
+        p_and_s_confirmed_by: confirmedBy || null,
+        p_and_s_confirmed_at: now,
+        updated_at:           now,
+      })
+      .eq('id', claimId)
+      .select()
+      .single();
+    await _writeAuditLog(
+      'p_and_s_set', 'claim', claimId,
+      `P&S date set to ${date} (source=${source})`,
+      { date, source, confirmedBy },
+    );
+    return updated;
+  }
+
+  // Case 2: same date.
+  if (priorDate === date) {
+    if (newRank > priorRank) {
+      const { data: updated } = await supabase.from('claims')
+        .update({
+          p_and_s_source:       source,
+          p_and_s_confirmed_by: confirmedBy || null,
+          p_and_s_confirmed_at: now,
+          updated_at:           now,
+        })
+        .eq('id', claimId)
+        .select()
+        .single();
+      await _writeAuditLog(
+        'p_and_s_source_upgrade', 'claim', claimId,
+        `P&S source upgraded ${priorSource}→${source} for unchanged date ${date}`,
+        { date, priorSource, source, confirmedBy },
+      );
+      return updated;
+    }
+    return claim; // idempotent
+  }
+
+  // Case 3: different date.
+  if (newRank > priorRank) {
+    const { data: updated } = await supabase.from('claims')
+      .update({
+        p_and_s_date:         date,
+        p_and_s_source:       source,
+        p_and_s_confirmed_by: confirmedBy || null,
+        p_and_s_confirmed_at: now,
+        updated_at:           now,
+      })
+      .eq('id', claimId)
+      .select()
+      .single();
+    await _writeAuditLog(
+      'p_and_s_overwrite', 'claim', claimId,
+      `P&S overwritten: ${priorDate}(${priorSource}) → ${date}(${source})`,
+      { priorDate, priorSource, date, source, confirmedBy },
+    );
+    return updated;
+  }
+
+  // Lower-priority source disagrees with existing higher-priority value —
+  // do NOT overwrite. Flag for adjuster review.
+  // M17B TODO: reassign to licensed adjuster. Today the diary routes to
+  // system@homecaretpa.com like all other M14.5 license-level diaries.
+  await _createDiary(
+    claimId, 'P_AND_S_CONFLICT_REVIEW',
+    _addCalendarDays(now.split('T')[0], 5), 'HIGH',
+    `P&S conflict: incoming ${date}(${source}) vs existing ${priorDate}(${priorSource}). ` +
+    `Lower-priority source did not overwrite. Adjuster must reconcile.`,
+  );
+  await _writeAuditLog(
+    'p_and_s_conflict', 'claim', claimId,
+    `P&S conflict — incoming ${date}(${source}) did not overwrite ${priorDate}(${priorSource})`,
+    { incomingDate: date, incomingSource: source, priorDate, priorSource },
+  );
+  return claim;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Read operations
 // ═════════════════════════════════════════════════════════════════════════════
 async function getPDEvaluation(claimId) {
@@ -1025,6 +1151,7 @@ module.exports = {
   recordWorkerSignature,
   recordAdjusterSignature,
   recordEAMSFiled,
+  setPAndSDate,
   getPDEvaluation,
   getStipulation,
   getPDAdvances,
