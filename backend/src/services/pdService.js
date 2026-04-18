@@ -926,8 +926,8 @@ async function recordAdjusterSignature(stipId, adjusterId) {
 // M14.5 corrected behavior: record the filing only. Claim status transitions
 // when disbursement is paid — see disbursementService.recordDisbursementPayment.
 //
-// filedBy is accepted for audit but not persisted (stipulations has no
-// eams_filed_by column today; settlement_offers does, from M14).
+// filedBy is persisted on stipulations.eams_filed_by (added in M14.5 migration
+// to mirror the equivalent column on settlement_offers from M14).
 async function recordEAMSFiled(stipId, { filedDate, filedBy }) {
   const { data: stip, error: fetchErr } = await supabase
     .from('stipulations').select('*').eq('id', stipId).single();
@@ -939,7 +939,12 @@ async function recordEAMSFiled(stipId, { filedDate, filedBy }) {
   const now = new Date().toISOString();
 
   await supabase.from('stipulations')
-    .update({ eams_filed_at: filedDate, status: 'filed', updated_at: now })
+    .update({
+      eams_filed_at: filedDate,
+      eams_filed_by: filedBy || null,
+      status:        'filed',
+      updated_at:    now,
+    })
     .eq('id', stipId);
 
   await _closeDiary(stip.claim_id, 'EAMS_FILE');

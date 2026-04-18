@@ -85,6 +85,11 @@ ALTER TABLE pd_advances ADD COLUMN IF NOT EXISTS notes                    TEXT;
 ALTER TABLE stipulations ADD COLUMN IF NOT EXISTS award_service_date DATE;
 ALTER TABLE stipulations ADD COLUMN IF NOT EXISTS award_served_by    TEXT;
 
+-- eams_filed_by mirrors the equivalent column on settlement_offers (added
+-- in the M14 migration). pdService.recordEAMSFiled now persists the
+-- adjuster identity on filing for audit parity between stip and C&R flows.
+ALTER TABLE stipulations ADD COLUMN IF NOT EXISTS eams_filed_by UUID;
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- 1.4 ALTER claims — P&S date as first-class column
 -- ═════════════════════════════════════════════════════════════════════════════
