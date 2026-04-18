@@ -118,6 +118,49 @@ function _resolveCapContext(claim) {
 }
 
 /**
+ * Resolve AA fee from an extraction.
+ *
+ *   - If aaFeeAmount is present and >0, use it flat. aaFeePct may be null.
+ *   - Else if aaFeePct is present, derive aaFeeAmount = totalAward × pct / 100.
+ *   - Else both zero (no AA fee → unrepresented).
+ *
+ * Flags an unusual fee percent when aaFeePct falls outside
+ * [AA_FEE_UNUSUAL_LOW_PCT, AA_FEE_UNUSUAL_HIGH_PCT]. No flag when the pct
+ * is null (i.e. flat amount with no declared percent) or when there is
+ * no AA fee at all.
+ *
+ * Does NOT apply commutation. The caller decides whether commutation
+ * applies (represented + extraction.commutationOrdered) and delegates to
+ * commutationService.commutePdOffFarEnd separately.
+ */
+function _resolveAaFee({ totalAward, aaFeePct, aaFeeAmount }) {
+  const flags = [];
+  let pct = aaFeePct != null && aaFeePct !== '' ? parseFloat(aaFeePct) : null;
+  let amt = aaFeeAmount != null && aaFeeAmount !== '' ? parseFloat(aaFeeAmount) : null;
+
+  if (!Number.isFinite(pct)) pct = null;
+  if (!Number.isFinite(amt)) amt = null;
+
+  if (amt != null && amt > 0) {
+    // Flat amount provided — keep pct as-is (may be null).
+  } else if (pct != null && pct > 0) {
+    const award = parseFloat(totalAward) || 0;
+    amt = Math.round(award * pct / 100 * 100) / 100;
+  } else {
+    amt = 0;
+    pct = pct != null && pct >= 0 ? pct : null;
+  }
+
+  if (pct != null && amt > 0) {
+    if (pct < DISBURSEMENT_POLICY.AA_FEE_UNUSUAL_LOW_PCT || pct > DISBURSEMENT_POLICY.AA_FEE_UNUSUAL_HIGH_PCT) {
+      flags.push('AA_FEE_UNUSUAL');
+    }
+  }
+
+  return { aaFeePct: pct, aaFeeAmount: amt, flags };
+}
+
+/**
  * Statutory pay-by date for an award.
  *   stip_f_and_a: awardServiceDate + 10 calendar days (LC §5814).
  *   cnr_oacr:     awardServiceDate + 30 calendar days (CCR §10880).
@@ -164,6 +207,7 @@ module.exports = {
   _computeStatutoryPayBy,
   _isRepresented,
   _resolveCapContext,
+  _resolveAaFee,
   _writeAuditLog,
   _getPdService,
   _getCommutationService,
