@@ -316,16 +316,49 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
   const advanceDueDate = _addCalendarDays(tdEndDate, 14);
   const weeklyRate     = parseFloat(pdEval.pd_weekly_rate);
 
+  // M14.5 cap denominator: post-apportionment total PD dollars.
+  // Apportionment reduces weeks owed, NOT the weekly rate — so the
+  // dollar ceiling is pd_total_value × (1 - apport/100), which is what
+  // adjusted_total_value stores.
+  //
+  // Priority:
+  //   adjusted_total_value > 0 AND evaluation_type === 'qme'       → qme_rated
+  //   adjusted_total_value > 0                                     → pr_4
+  //   pd_total_value > 0                                           → pre_qme (recheck at QME)
+  //   neither                                                      → throw
+  //
+  // Note: pd_evaluations has no evaluation_type column today, so the
+  // qme_rated branch only fires when callers set pdEval.evaluation_type
+  // externally. Default is 'pr_4'.
+  const adjusted = parseFloat(pdEval.adjusted_total_value);
+  const pdTotal  = parseFloat(pdEval.pd_total_value);
+  let denominator       = null;
+  let denominatorSource = null;
+  let advanceNotes      = null;
+  if (Number.isFinite(adjusted) && adjusted > 0) {
+    denominator       = adjusted;
+    denominatorSource = pdEval.evaluation_type === 'qme' ? 'qme_rated' : 'pr_4';
+  } else if (Number.isFinite(pdTotal) && pdTotal > 0) {
+    denominator       = pdTotal;
+    denominatorSource = 'pre_qme';
+    advanceNotes      = 'PRE_QME_DENOMINATOR — recheck cap when QME lands';
+  } else {
+    throw new Error('PD_EVALUATION_REQUIRED_BEFORE_ADVANCE');
+  }
+
   const { data: advRow, error: advErr } = await supabase
     .from('pd_advances')
     .insert({
-      claim_id:         claimId,
-      pd_evaluation_id: pdEvaluationId,
-      td_end_date:      tdEndDate,
-      advance_due_date: advanceDueDate,
-      weekly_rate:      weeklyRate,
-      status:           'pending',
-      created_at:       new Date().toISOString(),
+      claim_id:                 claimId,
+      pd_evaluation_id:         pdEvaluationId,
+      td_end_date:              tdEndDate,
+      advance_due_date:         advanceDueDate,
+      weekly_rate:              weeklyRate,
+      status:                   'pending',
+      estimated_pd_denominator: denominator,
+      denominator_source:       denominatorSource,
+      notes:                    advanceNotes,
+      created_at:               new Date().toISOString(),
     })
     .select()
     .single();
