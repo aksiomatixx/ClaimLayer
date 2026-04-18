@@ -21,6 +21,7 @@ const logger       = require('../logger');
 // ── Lazy requires to break circular deps ─────────────────────────────────────
 function _getClaimService() { return require('./claimService'); }
 function _getAiService()    { return require('./aiService'); }
+function _getPdService()    { return require('./pdService'); }
 
 // ── PDF constants (match noticeService) ──────────────────────────────────────
 const DARK   = rgb(0.1, 0.1, 0.1);
@@ -396,7 +397,7 @@ async function _generatePR4Letter(claim, physicianName, responseDueDate) {
 // recordPR4Response
 // ═════════════════════════════════════════════════════════════════════════════
 
-async function recordPR4Response(pr4Id, { wpi, workRestrictions, futureMedical, apportionmentNoted }) {
+async function recordPR4Response(pr4Id, { wpi, workRestrictions, futureMedical, apportionmentNoted, pAndSDate, confirmedBy }) {
   const { data: pr4, error: fetchErr } = await supabase
     .from('pr4_solicitations')
     .select('*')
@@ -452,6 +453,24 @@ async function recordPR4Response(pr4Id, { wpi, workRestrictions, futureMedical, 
     timestamp: now,
     data:      { pr4Id, wpi, apportionmentNoted },
   });
+
+  // M14.5 P&S write-through. PR-4 is the physician's P&S declaration,
+  // so source is 'pr_4'. We write only when the caller supplied an
+  // explicit pAndSDate — we do NOT synthesize a P&S date from
+  // response_received_at (would pollute the claim with false dates).
+  // Priority: pr_4 overwrites treating_physician/award_document/adjuster_entry
+  // but defers to qme_report.
+  if (pAndSDate) {
+    try {
+      await _getPdService().setPAndSDate(pr4.claim_id, {
+        date:        pAndSDate,
+        source:      'pr_4',
+        confirmedBy: confirmedBy || null,
+      });
+    } catch (err) {
+      logger.error({ msg: 'mmiService.recordPR4Response: P&S write-through failed (non-fatal)', err: err.message, pr4Id });
+    }
+  }
 
   logger.info({ msg: 'mmiService.recordPR4Response: complete', pr4Id, wpi, apportionmentNoted });
 
