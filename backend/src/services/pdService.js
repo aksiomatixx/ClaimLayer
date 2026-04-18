@@ -916,9 +916,19 @@ async function recordAdjusterSignature(stipId, adjusterId) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// recordEAMSFiled
+// recordEAMSFiled (M14.5: bug fix — no longer transitions claim status)
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordEAMSFiled(stipId, { filedDate }) {
+//
+// M13 behavior closed the claim (or moved it to future_medical_only)
+// immediately on EAMS filing, BEFORE the WCAB served the award and BEFORE
+// any PD was paid. That skipped the entire M14.5 disbursement flow.
+//
+// M14.5 corrected behavior: record the filing only. Claim status transitions
+// when disbursement is paid — see disbursementService.recordDisbursementPayment.
+//
+// filedBy is accepted for audit but not persisted (stipulations has no
+// eams_filed_by column today; settlement_offers does, from M14).
+async function recordEAMSFiled(stipId, { filedDate, filedBy }) {
   const { data: stip, error: fetchErr } = await supabase
     .from('stipulations').select('*').eq('id', stipId).single();
   if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
@@ -934,30 +944,18 @@ async function recordEAMSFiled(stipId, { filedDate }) {
 
   await _closeDiary(stip.claim_id, 'EAMS_FILE');
 
-  // Update claim status based on future_medical flag
-  const newClaimStatus = stip.future_medical ? 'future_medical_only' : 'closed';
-
-  await supabase.from('claims')
-    .update({ status: newClaimStatus, updated_at: now })
-    .eq('id', stip.claim_id);
-
-  await supabase.from('claim_events').insert({
-    claim_id: stip.claim_id, type: 'status_changed', timestamp: now,
-    data: { from: 'pd_evaluation', to: newClaimStatus, changedBy: 'system', reason: 'EAMS filed' },
-  });
-
   await _writeAuditLog(
     'eams_filed', 'stipulation', stipId,
-    `EAMS filed on ${filedDate}. Claim status → ${newClaimStatus}`,
-    { filedDate, newClaimStatus, futureMedical: stip.future_medical },
+    `EAMS filed on ${filedDate}. Claim status unchanged — transitions at disbursement payment.`,
+    { filedDate, filedBy: filedBy || null, futureMedical: stip.future_medical },
   );
 
   await supabase.from('claim_events').insert({
     claim_id: stip.claim_id, type: 'eams_filed', timestamp: now,
-    data: { stipId, filedDate },
+    data: { stipId, filedDate, filedBy: filedBy || null },
   });
 
-  logger.info({ msg: 'pdService.recordEAMSFiled: complete', stipId, filedDate, newClaimStatus });
+  logger.info({ msg: 'pdService.recordEAMSFiled: complete', stipId, filedDate });
 
   const { data: updated } = await supabase.from('stipulations').select('*').eq('id', stipId).single();
   return updated;
