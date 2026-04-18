@@ -80,6 +80,24 @@ function _addCalendarDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
+/**
+ * Statutory pay-by date for an award.
+ *   stip_f_and_a: awardServiceDate + 10 calendar days (LC §5814).
+ *   cnr_oacr:     awardServiceDate + 30 calendar days (CCR §10880).
+ *
+ * Expects awardServiceDate as 'YYYY-MM-DD'. Returns 'YYYY-MM-DD'.
+ */
+function _computeStatutoryPayBy(awardType, awardServiceDate) {
+  if (!awardServiceDate) throw new Error('SERVICE_DATE_REQUIRED');
+  if (awardType === 'stip_f_and_a') {
+    return _addCalendarDays(awardServiceDate, DISBURSEMENT_POLICY.STIP_PAY_BY_DAYS);
+  }
+  if (awardType === 'cnr_oacr') {
+    return _addCalendarDays(awardServiceDate, DISBURSEMENT_POLICY.CNR_PAY_BY_DAYS);
+  }
+  throw new Error(`UNKNOWN_AWARD_TYPE: ${awardType}`);
+}
+
 async function _writeAuditLog(action, resourceId, description, newValue) {
   try {
     await supabase.from('audit_log').insert({
@@ -106,6 +124,7 @@ module.exports = {
   getPendingDisbursements,
   // Exported for tests
   _addCalendarDays,
+  _computeStatutoryPayBy,
   _writeAuditLog,
   _getPdService,
   _getCommutationService,
