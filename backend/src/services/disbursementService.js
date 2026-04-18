@@ -325,8 +325,45 @@ async function approveDisbursement(disbursementId, { adjusterId, notes }) {
   return updated;
 }
 
-async function rejectDisbursement(disbursementId, { adjusterId, reason }) { // eslint-disable-line no-unused-vars
-  throw new Error('NOT_IMPLEMENTED');
+async function rejectDisbursement(disbursementId, { adjusterId, reason }) {
+  if (!reason) throw new Error('reason is required');
+
+  const { data: row, error: fetchErr } = await supabase
+    .from('award_disbursements').select('*').eq('id', disbursementId).single();
+  if (fetchErr || !row) throw new Error(`Disbursement not found: ${disbursementId}`);
+  if (row.status !== 'proposed') {
+    throw new Error(`Cannot reject disbursement in status: ${row.status}`);
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase.from('award_disbursements')
+    .update({
+      status:          'rejected',
+      rejected_reason: reason,
+      updated_at:      now,
+    })
+    .eq('id', disbursementId)
+    .select()
+    .single();
+  if (error) throw new Error(`disbursementService.rejectDisbursement: ${error.message}`);
+
+  // Close the approval diary — no further action on this bundle.
+  await supabase.from('diaries')
+    .update({ status: 'completed', updated_at: now })
+    .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
+
+  await _writeAuditLog(
+    'disbursement_rejected', disbursementId,
+    `Disbursement rejected by ${adjusterId || 'unknown'}: ${reason}`,
+    { adjusterId, reason },
+  );
+  await supabase.from('claim_events').insert({
+    claim_id: row.claim_id, type: 'disbursement_rejected', timestamp: now,
+    data:     { disbursementId, adjusterId, reason },
+  });
+
+  logger.info({ msg: 'disbursementService.rejectDisbursement: complete', disbursementId });
+  return updated;
 }
 
 async function recordDisbursementPayment(disbursementId, { paidDate, reference }) { // eslint-disable-line no-unused-vars
