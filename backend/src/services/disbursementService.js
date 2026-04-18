@@ -49,8 +49,225 @@ const DISBURSEMENT_POLICY = {
 
 // ── Public exports (Pass 1 scaffolds — bodies filled in Pass 2) ──────────────
 
-async function proposeDisbursement({ claimId, awardType, stipulationId, settlementOfferId, extraction, awardDocumentId }) { // eslint-disable-line no-unused-vars
-  throw new Error('NOT_IMPLEMENTED');
+async function proposeDisbursement({ claimId, awardType, stipulationId, settlementOfferId, extraction, awardDocumentId }) {
+  if (!claimId) throw new Error('claimId is required');
+  if (!['stip_f_and_a', 'cnr_oacr'].includes(awardType)) {
+    throw new Error(`UNKNOWN_AWARD_TYPE: ${awardType}`);
+  }
+  if (!extraction || typeof extraction !== 'object') {
+    throw new Error('extraction is required');
+  }
+
+  // (1) XOR link validation — matches award_disbursements_xor_link_chk.
+  const hasStip  = !!stipulationId;
+  const hasOffer = !!settlementOfferId;
+  if (hasStip === hasOffer) {
+    throw new Error('stipulationId XOR settlementOfferId required');
+  }
+
+  const flags = [];
+
+  // (2) Lien check — M20 not built. Always flag for adjuster review.
+  flags.push('LIEN_PRESENT_ADJUSTER_REVIEW');
+
+  // (4) weeklyRate required.
+  const weeklyRate = parseFloat(extraction.weeklyRate);
+  if (!Number.isFinite(weeklyRate) || weeklyRate <= 0) {
+    throw new Error('WEEKLY_RATE_REQUIRED');
+  }
+
+  const totalAward = parseFloat(extraction.totalAward);
+  if (!Number.isFinite(totalAward) || totalAward <= 0) {
+    throw new Error('TOTAL_AWARD_REQUIRED');
+  }
+
+  // Resolve dates with fallbacks; NOT NULL columns require values.
+  const awardDate          = extraction.awardDate        || extraction.awardServiceDate || extraction.accruedStartDate || null;
+  const awardServiceDate   = extraction.awardServiceDate || awardDate;
+  const accruedStartDate   = extraction.accruedStartDate || awardServiceDate;
+  if (!awardDate || !awardServiceDate || !accruedStartDate) {
+    throw new Error('AWARD_DATES_REQUIRED');
+  }
+
+  // (11) Service-date missing flag (we used a fallback for the NOT NULL column).
+  if (!extraction.awardServiceDate) flags.push('SERVICE_DATE_MISSING');
+
+  // (3) Statutory pay-by (not persisted on the row — recomputed at recordDisbursementPayment).
+  // Intentional: the PAY_BY_DATE is derivable from (awardServiceDate, awardType).
+
+  // (5) Week arithmetic. Apportionment is ALREADY baked into totalAward by the judge;
+  // weekly rate is invariant under apportionment.
+  const totalAwardWeeks = totalAward / weeklyRate;
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const daysElapsed = Math.max(
+    0,
+    (new Date(awardServiceDate + 'T00:00:00').getTime() -
+     new Date(accruedStartDate + 'T00:00:00').getTime()) / msPerDay,
+  );
+  const weeksElapsed = daysElapsed / 7;
+
+  const accruedWeeks      = Math.min(weeksElapsed, totalAwardWeeks);
+  const accruedAmount     = Math.round(accruedWeeks * weeklyRate * 100) / 100;
+  const scheduledWeeksRaw = Math.max(0, totalAwardWeeks - accruedWeeks);
+  const scheduledWeeks    = Math.round(scheduledWeeksRaw * 10000) / 10000;
+  const scheduledAmount   = Math.round(scheduledWeeks * weeklyRate * 100) / 100;
+
+  // (6) DEU range check — if remaining PD exceeds Table 1, we can't commute.
+  const deuRangeExceeded = scheduledWeeksRaw > _getCommutationService().DEU_POLICY.TABLE_1_MAX_WEEKS;
+  if (deuRangeExceeded) flags.push('DEU_RANGE_EXCEEDED');
+
+  // Load claim + cap context once.
+  const { data: claim } = await supabase.from('claims').select('*').eq('id', claimId).single();
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  const capContext = _resolveCapContext(claim);
+
+  // (7) AA fee — resolve flat vs percent, then maybe commute off far end.
+  const feeResult = _resolveAaFee({
+    totalAward,
+    aaFeePct:    extraction.aaFeePct,
+    aaFeeAmount: extraction.aaFeeAmount,
+  });
+  flags.push(...feeResult.flags);
+
+  let aaFeeCommuted         = false;
+  let aaFeeWeeksEliminated  = null;
+  let aaFeePvAtCommutation  = null;
+
+  if (
+    extraction.commutationOrdered &&
+    capContext.represented &&
+    feeResult.aaFeeAmount > 0 &&
+    !deuRangeExceeded &&
+    scheduledWeeksRaw > 0
+  ) {
+    try {
+      const comm = _getCommutationService().commutePdOffFarEnd({
+        weeklyRate,
+        weeksRemainingAtDoc: scheduledWeeksRaw,
+        amountToCommute:     feeResult.aaFeeAmount,
+        docDate:             awardServiceDate,
+        actualPayDate:       awardServiceDate, // placeholder; interest recomputed at recordPayment
+      });
+      aaFeeCommuted         = true;
+      aaFeeWeeksEliminated  = comm.weeksEliminated;
+      aaFeePvAtCommutation  = comm.pvOfAmountToCommute;
+    } catch (err) {
+      logger.warn({ msg: 'disbursementService: commutation skipped', err: err.message, claimId });
+    }
+  }
+
+  // (8) Offset paid advances.
+  const adv = await _offsetAdvances(claimId, totalAward, capContext);
+  flags.push(...adv.flags);
+
+  // (9) Apportionment sanity check against latest pd_evaluations row.
+  let apportionmentPct = extraction.apportionmentPct != null ? parseFloat(extraction.apportionmentPct) : null;
+  try {
+    const { data: pdEvals } = await supabase
+      .from('pd_evaluations').select('*').eq('claim_id', claimId)
+      .order('calculated_at', { ascending: false });
+    if (pdEvals && pdEvals.length > 0) {
+      const stored = parseFloat(pdEvals[0].apportionment_percent);
+      if (apportionmentPct != null && Number.isFinite(stored)) {
+        const diff = Math.abs(apportionmentPct - stored);
+        if (diff > DISBURSEMENT_POLICY.APPORTIONMENT_MISMATCH_THRESHOLD_PCT) {
+          flags.push('APPORTIONMENT_MISMATCH');
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ msg: 'disbursementService: apportionment check failed (non-fatal)', err: err.message });
+  }
+
+  // (10) P_AND_S_DISCREPANCY bubble-up from extraction warnings.
+  if (Array.isArray(extraction.warnings) && extraction.warnings.includes('P_AND_S_DISCREPANCY')) {
+    flags.push('P_AND_S_DISCREPANCY');
+  }
+
+  // (12) Net computations.
+  const netNowRaw      = accruedAmount - adv.advancesOffsetApplied - (aaFeeCommuted ? feeResult.aaFeeAmount : 0);
+  const netToWorkerNow = Math.round(Math.max(0, netNowRaw) * 100) / 100;
+  if (netNowRaw < 0 && !flags.includes('OVERPAYMENT_RECOVERABLE')) {
+    flags.push('OVERPAYMENT_RECOVERABLE');
+  }
+  const netToWorkerScheduled = Math.round(
+    (scheduledAmount - (aaFeeCommuted ? 0 : feeResult.aaFeeAmount)) * 100,
+  ) / 100;
+
+  // (13) interest_owed = 0 at propose time.
+  // (14) INSERT award_disbursements row.
+  const now = new Date().toISOString();
+  const insertRow = {
+    claim_id:                 claimId,
+    stipulation_id:           stipulationId      || null,
+    settlement_offer_id:      settlementOfferId  || null,
+    award_type:               awardType,
+    award_document_id:        awardDocumentId    || null,
+    award_date:               awardDate,
+    award_service_date:       awardServiceDate,
+    accrued_start_date:       accruedStartDate,
+    total_award:              totalAward,
+    apportionment_pct:        apportionmentPct,
+    weekly_rate:              weeklyRate,
+    accrued_weeks:            Math.round(accruedWeeks * 10000) / 10000,
+    accrued_amount:           accruedAmount,
+    scheduled_weeks:          scheduledWeeks,
+    scheduled_amount:         scheduledAmount,
+    aa_fee_pct:               feeResult.aaFeePct,
+    aa_fee_amount:            feeResult.aaFeeAmount,
+    aa_fee_commuted:          aaFeeCommuted,
+    aa_fee_weeks_eliminated:  aaFeeWeeksEliminated,
+    aa_fee_pv_at_commutation: aaFeePvAtCommutation,
+    advances_paid_to_date:    adv.advancesPaidToDate,
+    advances_offset_applied:  adv.advancesOffsetApplied,
+    net_to_worker_now:        netToWorkerNow,
+    net_to_worker_scheduled:  netToWorkerScheduled,
+    interest_owed:            0,
+    flags,
+    status:                   'proposed',
+    created_at:                now,
+    updated_at:                now,
+  };
+
+  const { data: row, error } = await supabase
+    .from('award_disbursements').insert(insertRow).select().single();
+  if (error) throw new Error(`disbursementService.proposeDisbursement: insert failed — ${error.message}`);
+
+  // (15) CRITICAL approval diary.
+  // M17B TODO: reassign to licensed adjuster — this is a license-level action
+  // (authorizes a WC payment). For now routed to system@homecaretpa.com.
+  const payBy       = _computeStatutoryPayBy(awardType, awardServiceDate);
+  const diaryDue    = _addCalendarDays(payBy, -DISBURSEMENT_POLICY.APPROVAL_DIARY_LEAD_DAYS);
+  await supabase.from('diaries').insert({
+    claim_id:    claimId,
+    diary_type:  'DISBURSEMENT_APPROVAL',
+    due_date:    diaryDue,
+    assigned_to: 'system@homecaretpa.com',
+    priority:    'CRITICAL',
+    notes:       `Disbursement bundle ready for approval. Pay-by ${payBy}. Net-now $${netToWorkerNow.toLocaleString()}. Flags: ${flags.join(', ') || 'none'}.`,
+    status:      'open',
+    no_snooze:   true,
+    fh_diary_id: `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    created_at:  now,
+  });
+
+  await _writeAuditLog(
+    'disbursement_proposed', row.id,
+    `Disbursement proposed: ${awardType}, $${totalAward.toLocaleString()} award, net-now $${netToWorkerNow.toLocaleString()}`,
+    { awardType, totalAward, netToWorkerNow, flags },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: claimId, type: 'disbursement_proposed', timestamp: now,
+    data:     { disbursementId: row.id, awardType, totalAward, flags },
+  });
+
+  logger.info({
+    msg: 'disbursementService.proposeDisbursement: complete',
+    claimId, disbursementId: row.id, totalAward, netToWorkerNow, flags,
+  });
+
+  return row;
 }
 
 async function approveDisbursement(disbursementId, { adjusterId, notes }) { // eslint-disable-line no-unused-vars
