@@ -271,8 +271,13 @@ describe('PATCH /api/v1/pd/stip/:stipId/eams-filed — recordEAMSFiled', () => {
     return { claim, stipId: stipRes.body.id };
   }
 
-  it('with future_medical = false → claim status = closed', async () => {
+  // M14.5: recordEAMSFiled NO LONGER transitions claim status. The
+  // transition happens at disbursementService.recordDisbursementPayment
+  // after the WCAB serves the award and the disbursement bundle is paid.
+  it('with future_medical = false → claim status UNCHANGED (M14.5)', async () => {
     const { claim, stipId } = await setupStipToEamsReady({}, { futureMedical: false });
+    const { data: preClaim } = await supabase.from('claims').select('*').eq('id', claim.id).single();
+    const priorStatus = preClaim.status;
 
     const res = await request(app)
       .patch(`/api/v1/pd/stip/${stipId}/eams-filed`)
@@ -284,11 +289,13 @@ describe('PATCH /api/v1/pd/stip/:stipId/eams-filed — recordEAMSFiled', () => {
     expect(res.body.eams_filed_at).toBe('2026-06-15');
 
     const { data: updated } = await supabase.from('claims').select('*').eq('id', claim.id).single();
-    expect(updated.status).toBe('closed');
+    expect(updated.status).toBe(priorStatus);
   });
 
-  it('with future_medical = true → claim status = future_medical_only', async () => {
+  it('with future_medical = true → claim status UNCHANGED (M14.5)', async () => {
     const { claim, stipId } = await setupStipToEamsReady({}, { futureMedical: true });
+    const { data: preClaim } = await supabase.from('claims').select('*').eq('id', claim.id).single();
+    const priorStatus = preClaim.status;
 
     const res = await request(app)
       .patch(`/api/v1/pd/stip/${stipId}/eams-filed`)
@@ -298,7 +305,7 @@ describe('PATCH /api/v1/pd/stip/:stipId/eams-filed — recordEAMSFiled', () => {
     expect(res.status).toBe(200);
 
     const { data: updated } = await supabase.from('claims').select('*').eq('id', claim.id).single();
-    expect(updated.status).toBe('future_medical_only');
+    expect(updated.status).toBe(priorStatus);
   });
 });
 
