@@ -118,6 +118,46 @@ function _resolveCapContext(claim) {
 }
 
 /**
+ * Sum all paid pd_advance_payments rows for a claim and report the offset
+ * to apply against totalAward.
+ *
+ *   advances_paid_to_date  = Σ amount_paid WHERE status='paid'
+ *   advances_offset_applied = min(advances_paid_to_date, totalAward)
+ *
+ * Flags:
+ *   OVERPAYMENT_RECOVERABLE              when paid > totalAward
+ *   ADVANCE_CAP_RETROACTIVELY_EXCEEDED   when represented AND paid > threshold × totalAward
+ */
+async function _offsetAdvances(claimId, totalAward, capContext) {
+  const { data: rows } = await supabase
+    .from('pd_advance_payments')
+    .select('*')
+    .eq('claim_id', claimId);
+
+  const paidRows = (rows || []).filter(r => r.status === 'paid');
+  const advancesPaidToDate = Math.round(
+    paidRows.reduce((acc, r) => acc + parseFloat(r.amount_paid || 0), 0) * 100,
+  ) / 100;
+
+  const award = parseFloat(totalAward) || 0;
+  const advancesOffsetApplied = Math.min(advancesPaidToDate, award);
+
+  const flags = [];
+  if (advancesPaidToDate > award && award > 0) {
+    flags.push('OVERPAYMENT_RECOVERABLE');
+  }
+  if (
+    capContext.represented &&
+    award > 0 &&
+    advancesPaidToDate > capContext.retroCapThresholdPct * award
+  ) {
+    flags.push('ADVANCE_CAP_RETROACTIVELY_EXCEEDED');
+  }
+
+  return { advancesPaidToDate, advancesOffsetApplied, flags };
+}
+
+/**
  * Resolve AA fee from an extraction.
  *
  *   - If aaFeeAmount is present and >0, use it flat. aaFeePct may be null.
@@ -208,6 +248,7 @@ module.exports = {
   _isRepresented,
   _resolveCapContext,
   _resolveAaFee,
+  _offsetAdvances,
   _writeAuditLog,
   _getPdService,
   _getCommutationService,
