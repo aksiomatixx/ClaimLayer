@@ -495,6 +495,77 @@ async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// overrideAdvanceCap (M14.5)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Adjuster-authorized override of the PD advance cap (0.85 represented /
+// 1.00 unrepresented). Writes to pd_advances.cap_overridden / cap_override_pct
+// and logs the decision into ai_decisions for audit.
+//
+// overridePct is a fraction (e.g. 0.90 for 90%). Must be in (0, 1].
+async function overrideAdvanceCap(pdAdvanceId, { overridePct, reason, overrideBy }) {
+  const pct = parseFloat(overridePct);
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 1) {
+    throw new Error('overridePct must be a fraction in (0, 1]');
+  }
+  if (!reason) throw new Error('reason is required');
+
+  const { data: adv, error: fetchErr } = await supabase
+    .from('pd_advances').select('*').eq('id', pdAdvanceId).single();
+  if (fetchErr || !adv) throw new Error(`PD advance not found: ${pdAdvanceId}`);
+
+  const now = new Date().toISOString();
+  const priorSnapshot = {
+    cap_overridden:      adv.cap_overridden || false,
+    cap_override_pct:    adv.cap_override_pct,
+    cap_override_reason: adv.cap_override_reason,
+  };
+
+  const { data: updated, error } = await supabase.from('pd_advances')
+    .update({
+      cap_overridden:      true,
+      cap_override_pct:    pct,
+      cap_override_by:     overrideBy || null,
+      cap_override_reason: reason,
+    })
+    .eq('id', pdAdvanceId)
+    .select()
+    .single();
+  if (error) throw new Error(`pdService.overrideAdvanceCap: ${error.message}`);
+
+  try {
+    await supabase.from('ai_decisions').insert({
+      claim_id:       adv.claim_id,
+      decision_type:  'pd_advance_cap_override',
+      input_snapshot: { pdAdvanceId, priorSnapshot, denominator: adv.estimated_pd_denominator },
+      output_raw:     JSON.stringify({ overridePct: pct, reason, overrideBy }),
+      output_parsed:  { overridePct: pct, reason, overrideBy },
+      review_action:  'approved',
+      reviewed_by:    overrideBy || null,
+      review_notes:   reason,
+      reviewed_at:    now,
+      created_at:     now,
+    });
+  } catch (err) {
+    logger.error({ msg: 'pdService.overrideAdvanceCap: ai_decisions write failed (non-fatal)', err: err.message });
+  }
+
+  await _writeAuditLog(
+    'pd_advance_cap_override', 'pd_advance', pdAdvanceId,
+    `PD advance cap overridden to ${(pct * 100).toFixed(1)}% by ${overrideBy || 'unknown'}: ${reason}`,
+    { overridePct: pct, reason, overrideBy, priorSnapshot },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: adv.claim_id, type: 'pd_advance_cap_override', timestamp: now,
+    data: { pdAdvanceId, overridePct: pct, overrideBy, reason },
+  });
+
+  logger.info({ msg: 'pdService.overrideAdvanceCap: complete', pdAdvanceId, overridePct: pct });
+  return updated;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // waivePDAdvance
 // ═════════════════════════════════════════════════════════════════════════════
 async function waivePDAdvance(pdAdvanceId, adjusterId, reason) {
@@ -949,6 +1020,7 @@ module.exports = {
   calculatePD,
   initiatePDAdvances,
   recordPDAdvancePayment,
+  overrideAdvanceCap,
   waivePDAdvance,
   createStipulation,
   sendStipToWorker,
