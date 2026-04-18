@@ -498,8 +498,13 @@ async function getDisbursementsForClaim(claimId) {
   return data || [];
 }
 
-async function getPendingDisbursements(limit = 50) { // eslint-disable-line no-unused-vars
-  throw new Error('NOT_IMPLEMENTED');
+async function getPendingDisbursements(limit = 50) {
+  const { data, error } = await supabase
+    .from('award_disbursements').select('*').eq('status', 'proposed')
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 // ── Private helper seats (filled in Pass 2) ──────────────────────────────────
