@@ -81,6 +81,43 @@ function _addCalendarDays(dateStr, days) {
 }
 
 /**
+ * Represented check. Duplicates the 4-field OR-chain used by cnrService
+ * and pdService. M17B will consolidate attorney_represented into a single
+ * claim column and replace all three sites with a shared helper.
+ */
+function _isRepresented(claim) {
+  if (!claim) return false;
+  return !!(
+    claim.attorney_represented ||
+    claim.attorneyName ||
+    claim.attorney_name ||
+    claim.representedBy
+  );
+}
+
+/**
+ * Resolve the retro-advance cap context for a claim.
+ * Returns { represented: boolean, retroCapThresholdPct: number }.
+ *
+ * The threshold comes from pdService.ADVANCE_CAP_POLICY.REPRESENTED_PCT
+ * (0.85). We read it via lazy require so the constant stays single-source.
+ * Before pdService exports the constant (M14.5 TODO #7) a literal fallback
+ * is used.
+ */
+function _resolveCapContext(claim) {
+  let thresholdPct = 0.85;
+  try {
+    const pd = _getPdService();
+    if (pd.ADVANCE_CAP_POLICY && typeof pd.ADVANCE_CAP_POLICY.REPRESENTED_PCT === 'number') {
+      thresholdPct = pd.ADVANCE_CAP_POLICY.REPRESENTED_PCT;
+    }
+  } catch {
+    // pdService unavailable — fall through to literal.
+  }
+  return { represented: _isRepresented(claim), retroCapThresholdPct: thresholdPct };
+}
+
+/**
  * Statutory pay-by date for an award.
  *   stip_f_and_a: awardServiceDate + 10 calendar days (LC §5814).
  *   cnr_oacr:     awardServiceDate + 30 calendar days (CCR §10880).
@@ -125,6 +162,8 @@ module.exports = {
   // Exported for tests
   _addCalendarDays,
   _computeStatutoryPayBy,
+  _isRepresented,
+  _resolveCapContext,
   _writeAuditLog,
   _getPdService,
   _getCommutationService,
