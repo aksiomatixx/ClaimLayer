@@ -490,8 +490,12 @@ async function recordDisbursementPayment(disbursementId, { paidDate, reference }
   return updated;
 }
 
-async function getDisbursementsForClaim(claimId) { // eslint-disable-line no-unused-vars
-  throw new Error('NOT_IMPLEMENTED');
+async function getDisbursementsForClaim(claimId) {
+  const { data, error } = await supabase
+    .from('award_disbursements').select('*').eq('claim_id', claimId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 async function getPendingDisbursements(limit = 50) { // eslint-disable-line no-unused-vars
