@@ -366,8 +366,128 @@ async function rejectDisbursement(disbursementId, { adjusterId, reason }) {
   return updated;
 }
 
-async function recordDisbursementPayment(disbursementId, { paidDate, reference }) { // eslint-disable-line no-unused-vars
-  throw new Error('NOT_IMPLEMENTED');
+async function recordDisbursementPayment(disbursementId, { paidDate, reference }) {
+  if (!paidDate) throw new Error('paidDate is required');
+
+  const { data: row, error: fetchErr } = await supabase
+    .from('award_disbursements').select('*').eq('id', disbursementId).single();
+  if (fetchErr || !row) throw new Error(`Disbursement not found: ${disbursementId}`);
+  if (row.status !== 'approved') {
+    throw new Error(`Cannot record payment on disbursement in status: ${row.status}`);
+  }
+
+  const now          = new Date().toISOString();
+  const commutation  = _getCommutationService();
+  const payBy        = _computeStatutoryPayBy(row.award_type, row.award_service_date);
+  const totalAward   = parseFloat(row.total_award);
+  const interestOwed = commutation.computeLateInterest(totalAward, payBy, paidDate);
+
+  // Merge new flags into existing ones (preserve propose-time flags).
+  const mergedFlags = Array.isArray(row.flags) ? row.flags.slice() : [];
+  if (interestOwed > 0 && !mergedFlags.includes('INTEREST_OWED_LATE_PAYMENT')) {
+    mergedFlags.push('INTEREST_OWED_LATE_PAYMENT');
+  }
+
+  // CNR ordering guard — cnrService.recordPayment must fire first for C&R bundles.
+  if (row.award_type === 'cnr_oacr') {
+    if (!row.settlement_offer_id) throw new Error('CNR_OFFER_LINK_MISSING');
+    const { data: offer } = await supabase
+      .from('settlement_offers').select('*').eq('id', row.settlement_offer_id).single();
+    if (!offer || offer.status !== 'paid' || !offer.paid_at) {
+      throw new Error('CNR_PAYMENT_ORDER_VIOLATION');
+    }
+    const windowMs = DISBURSEMENT_POLICY.CNR_PAYMENT_ORDER_WINDOW_MINUTES * 60 * 1000;
+    const updatedAtMs = new Date(offer.updated_at || offer.created_at || now).getTime();
+    if (Date.now() - updatedAtMs > windowMs) {
+      throw new Error('CNR_PAYMENT_ORDER_VIOLATION');
+    }
+  }
+
+  // Finalize the row.
+  const { data: updated, error } = await supabase.from('award_disbursements')
+    .update({
+      status:        'disbursed',
+      disbursed_at:  now,
+      interest_owed: interestOwed,
+      flags:         mergedFlags,
+      updated_at:    now,
+    })
+    .eq('id', disbursementId)
+    .select()
+    .single();
+  if (error) throw new Error(`disbursementService.recordDisbursementPayment: ${error.message}`);
+
+  // Close the approval diary.
+  await supabase.from('diaries')
+    .update({ status: 'completed', updated_at: now })
+    .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
+
+  // Penalty bridge row — M17A will consume these into penalty_exposures and
+  // drop the deferred_penalty_flags table. Do not build new features against
+  // this table beyond M14.5.
+  if (interestOwed > 0) {
+    const penaltyEstimate = Math.min(
+      Math.round(totalAward * DISBURSEMENT_POLICY.PENALTY_ESTIMATE_PCT * 100) / 100,
+      DISBURSEMENT_POLICY.PENALTY_ESTIMATE_CAP,
+    );
+    await supabase.from('deferred_penalty_flags').insert({
+      claim_id:         row.claim_id,
+      source_type:      'award_disbursement',
+      source_id:        disbursementId,
+      statute:          'LC_5814',
+      event_date:       paidDate,
+      deadline_date:    payBy,
+      amount_at_risk:   totalAward,
+      penalty_estimate: penaltyEstimate,
+      notes:            `Late payment — paid ${paidDate} vs pay-by ${payBy}; interest $${interestOwed.toFixed(2)}. ${reference ? `Ref: ${reference}. ` : ''}Estimate clamped at $${DISBURSEMENT_POLICY.PENALTY_ESTIMATE_CAP.toLocaleString()}.`,
+      created_at:       now,
+    });
+  }
+
+  // Claim status transitions.
+  if (row.award_type === 'stip_f_and_a') {
+    // Look up the stipulation to determine future_medical.
+    let futureMedical = false;
+    if (row.stipulation_id) {
+      const { data: stip } = await supabase
+        .from('stipulations').select('*').eq('id', row.stipulation_id).single();
+      if (stip) futureMedical = !!stip.future_medical;
+    }
+    const newClaimStatus = futureMedical ? 'future_medical_only' : 'closed';
+
+    const { data: claim } = await supabase.from('claims').select('*').eq('id', row.claim_id).single();
+    const priorStatus = claim ? claim.status : null;
+    await supabase.from('claims')
+      .update({ status: newClaimStatus, updated_at: now })
+      .eq('id', row.claim_id);
+
+    await _writeAuditLog(
+      'claim_status_changed', disbursementId,
+      `Claim ${row.claim_id}: ${priorStatus} → ${newClaimStatus} (stip paid, future_medical=${futureMedical})`,
+      { priorStatus, newClaimStatus, futureMedical, disbursementId },
+    );
+    await supabase.from('claim_events').insert({
+      claim_id: row.claim_id, type: 'status_changed', timestamp: now,
+      data:     { from: priorStatus, to: newClaimStatus, changedBy: 'system', reason: 'stip disbursement paid', disbursementId },
+    });
+  }
+  // cnr_oacr: cnrService.recordPayment already transitioned claim → closed.
+
+  await _writeAuditLog(
+    'disbursement_paid', disbursementId,
+    `Disbursement paid on ${paidDate}. Interest owed: $${interestOwed.toFixed(2)}.`,
+    { paidDate, reference, interestOwed, flags: mergedFlags },
+  );
+  await supabase.from('claim_events').insert({
+    claim_id: row.claim_id, type: 'disbursement_paid', timestamp: now,
+    data:     { disbursementId, paidDate, interestOwed, reference: reference || null },
+  });
+
+  logger.info({
+    msg: 'disbursementService.recordDisbursementPayment: complete',
+    disbursementId, paidDate, interestOwed, flags: mergedFlags,
+  });
+  return updated;
 }
 
 async function getDisbursementsForClaim(claimId) { // eslint-disable-line no-unused-vars
