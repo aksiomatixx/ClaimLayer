@@ -327,9 +327,10 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
   //   pd_total_value > 0                                           → pre_qme (recheck at QME)
   //   neither                                                      → throw
   //
-  // Note: pd_evaluations has no evaluation_type column today, so the
-  // qme_rated branch only fires when callers set pdEval.evaluation_type
-  // externally. Default is 'pr_4'.
+  // TODO(M17B): pd_evaluations has no evaluation_type column.
+  // Branch defaults to 'pr_4' when adjusted_total_value > 0.
+  // Future: add evaluation_type column to distinguish qme_rated
+  // from pr_4 so denominator_source is correct.
   const adjusted = parseFloat(pdEval.adjusted_total_value);
   const pdTotal  = parseFloat(pdEval.pd_total_value);
   let denominator       = null;
