@@ -962,6 +962,60 @@ async function recordEAMSFiled(stipId, { filedDate, filedBy }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// recordStipAwardServed (M14.5)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Called when the WCAB serves the Findings & Award on the parties. Starts
+// the LC §5814 10-day clock on accrued PD.
+async function recordStipAwardServed(stipId, { serviceDate, servedBy }) {
+  if (!serviceDate) throw new Error('serviceDate is required');
+
+  const { data: stip, error: fetchErr } = await supabase
+    .from('stipulations').select('*').eq('id', stipId).single();
+  if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
+
+  const now = new Date().toISOString();
+
+  const { data: updated, error } = await supabase.from('stipulations')
+    .update({
+      award_service_date: serviceDate,
+      award_served_by:    servedBy || null,
+      updated_at:         now,
+    })
+    .eq('id', stipId)
+    .select()
+    .single();
+  if (error) throw new Error(`pdService.recordStipAwardServed: ${error.message}`);
+
+  // Close the EAMS_FILE diary if still open (adjuster typically already
+  // recorded the filing, but be defensive).
+  await _closeDiary(stip.claim_id, 'EAMS_FILE');
+
+  // CRITICAL §5814 clock diary — accrued PD pay-by = service + 10 calendar days.
+  // M17B TODO: reassign to licensed adjuster — this is a license-level diary.
+  await _createDiary(
+    stip.claim_id, 'STIP_AWARD_FOLLOWUP',
+    _addCalendarDays(serviceDate, 10), 'CRITICAL',
+    `WCAB served F&A on ${serviceDate}. Accrued PD pay-by ${_addCalendarDays(serviceDate, 10)} (LC §5814). Extract award and propose disbursement.`,
+    { noSnooze: true },
+  );
+
+  await _writeAuditLog(
+    'stip_award_served', 'stipulation', stipId,
+    `Stip F&A served on ${serviceDate} by ${servedBy || 'unknown'}. §5814 clock started.`,
+    { serviceDate, servedBy },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'stip_award_served', timestamp: now,
+    data: { stipId, serviceDate, servedBy: servedBy || null },
+  });
+
+  logger.info({ msg: 'pdService.recordStipAwardServed: complete', stipId, serviceDate });
+  return updated;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // setPAndSDate (M14.5 — promotes P&S to first-class claim column)
 // ═════════════════════════════════════════════════════════════════════════════
 //
@@ -1151,6 +1205,7 @@ module.exports = {
   recordWorkerSignature,
   recordAdjusterSignature,
   recordEAMSFiled,
+  recordStipAwardServed,
   setPAndSDate,
   getPDEvaluation,
   getStipulation,
