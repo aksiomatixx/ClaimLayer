@@ -270,8 +270,59 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
   return row;
 }
 
-async function approveDisbursement(disbursementId, { adjusterId, notes }) { // eslint-disable-line no-unused-vars
-  throw new Error('NOT_IMPLEMENTED');
+async function approveDisbursement(disbursementId, { adjusterId, notes }) {
+  const { data: row, error: fetchErr } = await supabase
+    .from('award_disbursements').select('*').eq('id', disbursementId).single();
+  if (fetchErr || !row) throw new Error(`Disbursement not found: ${disbursementId}`);
+  if (row.status !== 'proposed') {
+    throw new Error(`Cannot approve disbursement in status: ${row.status}`);
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase.from('award_disbursements')
+    .update({
+      status:         'approved',
+      approved_by:    adjusterId || null,
+      approved_at:    now,
+      approval_notes: notes || null,
+      updated_at:     now,
+    })
+    .eq('id', disbursementId)
+    .select()
+    .single();
+  if (error) throw new Error(`disbursementService.approveDisbursement: ${error.message}`);
+
+  // ai_decisions audit row — M14.5 disbursement approvals land here so the
+  // human-review of the AI-extracted award is captured alongside the extract.
+  try {
+    await supabase.from('ai_decisions').insert({
+      claim_id:       row.claim_id,
+      decision_type:  'disbursement_approval',
+      input_snapshot: { disbursementId, priorStatus: 'proposed', flags: row.flags || [] },
+      output_raw:     JSON.stringify({ approvedBy: adjusterId, notes }),
+      output_parsed:  { approvedBy: adjusterId, notes },
+      review_action:  'approved',
+      reviewed_by:    adjusterId || null,
+      review_notes:   notes || null,
+      reviewed_at:    now,
+      created_at:     now,
+    });
+  } catch (err) {
+    logger.error({ msg: 'disbursementService: ai_decisions approval write failed (non-fatal)', err: err.message });
+  }
+
+  await _writeAuditLog(
+    'disbursement_approved', disbursementId,
+    `Disbursement approved by ${adjusterId || 'unknown'}`,
+    { adjusterId, notes },
+  );
+  await supabase.from('claim_events').insert({
+    claim_id: row.claim_id, type: 'disbursement_approved', timestamp: now,
+    data:     { disbursementId, adjusterId },
+  });
+
+  logger.info({ msg: 'disbursementService.approveDisbursement: complete', disbursementId });
+  return updated;
 }
 
 async function rejectDisbursement(disbursementId, { adjusterId, reason }) { // eslint-disable-line no-unused-vars
