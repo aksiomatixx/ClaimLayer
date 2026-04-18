@@ -33,6 +33,44 @@ const PD_RATES_2026 = {
   high: { min: 240, max: 435, threshold: 70 },      // Ratings 70%+
 };
 
+// ── PD Advance Cap Policy (M14.5) ────────────────────────────────────────────
+// LC §4650(b)(1) "reasonable estimate" — administrative practice.
+// 15% represented reserve preserves AA fee at settlement.
+// 100% unrepresented because no AA fee to reserve.
+// Overridable per-advance via cap_overridden / cap_override_pct on pd_advances.
+const ADVANCE_CAP_POLICY = {
+  REPRESENTED_PCT:   0.85,
+  UNREPRESENTED_PCT: 1.00,
+};
+
+// ── Represented check ────────────────────────────────────────────────────────
+// Duplicated here because cnrService._isRepresented is its own private helper.
+// M17B Master-Context deferred task: consolidate attorney_represented into a
+// single claim column and replace this OR-chain + the twin in cnrService with
+// a shared helper.
+function _isRepresented(claim) {
+  if (!claim) return false;
+  return !!(
+    claim.attorney_represented ||
+    claim.attorneyName ||
+    claim.attorney_name ||
+    claim.representedBy
+  );
+}
+
+// ── Cap policy resolution ────────────────────────────────────────────────────
+// Per-advance override wins. Otherwise represented = 85%, unrepresented = 100%.
+// advanceRow may be null when initiating an advance (the row doesn't exist yet).
+function _resolveCapPolicy(claim, advanceRow) {
+  if (advanceRow && advanceRow.cap_overridden && advanceRow.cap_override_pct != null) {
+    return { pct: parseFloat(advanceRow.cap_override_pct), source: 'override' };
+  }
+  if (_isRepresented(claim)) {
+    return { pct: ADVANCE_CAP_POLICY.REPRESENTED_PCT, source: 'represented' };
+  }
+  return { pct: ADVANCE_CAP_POLICY.UNREPRESENTED_PCT, source: 'unrepresented' };
+}
+
 // ── PDF constants (match noticeService) ──────────────────────────────────────
 const DARK   = rgb(0.1, 0.1, 0.1);
 const GRAY   = rgb(0.4, 0.4, 0.4);
@@ -278,16 +316,50 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
   const advanceDueDate = _addCalendarDays(tdEndDate, 14);
   const weeklyRate     = parseFloat(pdEval.pd_weekly_rate);
 
+  // M14.5 cap denominator: post-apportionment total PD dollars.
+  // Apportionment reduces weeks owed, NOT the weekly rate — so the
+  // dollar ceiling is pd_total_value × (1 - apport/100), which is what
+  // adjusted_total_value stores.
+  //
+  // Priority:
+  //   adjusted_total_value > 0 AND evaluation_type === 'qme'       → qme_rated
+  //   adjusted_total_value > 0                                     → pr_4
+  //   pd_total_value > 0                                           → pre_qme (recheck at QME)
+  //   neither                                                      → throw
+  //
+  // TODO(M17B): pd_evaluations has no evaluation_type column.
+  // Branch defaults to 'pr_4' when adjusted_total_value > 0.
+  // Future: add evaluation_type column to distinguish qme_rated
+  // from pr_4 so denominator_source is correct.
+  const adjusted = parseFloat(pdEval.adjusted_total_value);
+  const pdTotal  = parseFloat(pdEval.pd_total_value);
+  let denominator       = null;
+  let denominatorSource = null;
+  let advanceNotes      = null;
+  if (Number.isFinite(adjusted) && adjusted > 0) {
+    denominator       = adjusted;
+    denominatorSource = pdEval.evaluation_type === 'qme' ? 'qme_rated' : 'pr_4';
+  } else if (Number.isFinite(pdTotal) && pdTotal > 0) {
+    denominator       = pdTotal;
+    denominatorSource = 'pre_qme';
+    advanceNotes      = 'PRE_QME_DENOMINATOR — recheck cap when QME lands';
+  } else {
+    throw new Error('PD_EVALUATION_REQUIRED_BEFORE_ADVANCE');
+  }
+
   const { data: advRow, error: advErr } = await supabase
     .from('pd_advances')
     .insert({
-      claim_id:         claimId,
-      pd_evaluation_id: pdEvaluationId,
-      td_end_date:      tdEndDate,
-      advance_due_date: advanceDueDate,
-      weekly_rate:      weeklyRate,
-      status:           'pending',
-      created_at:       new Date().toISOString(),
+      claim_id:                 claimId,
+      pd_evaluation_id:         pdEvaluationId,
+      td_end_date:              tdEndDate,
+      advance_due_date:         advanceDueDate,
+      weekly_rate:              weeklyRate,
+      status:                   'pending',
+      estimated_pd_denominator: denominator,
+      denominator_source:       denominatorSource,
+      notes:                    advanceNotes,
+      created_at:               new Date().toISOString(),
     })
     .select()
     .single();
@@ -318,37 +390,181 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// recordPDAdvancePayment
+// recordPDAdvancePayment (M14.5 — per-week disbursement)
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordPDAdvancePayment(pdAdvanceId) {
+//
+// M14.5 breaking change: now accepts { weekStartDate, weekEndDate, amountPaid,
+// paidBy, reference } and writes a row to pd_advance_payments. Enforces the
+// represented/unrepresented cap unless the advance has a cap override or was
+// created pre-M14.5 (estimated_pd_denominator IS NULL — legacy rows skip
+// enforcement for back-compat).
+//
+// OLD signature: recordPDAdvancePayment(pdAdvanceId)
+// NEW signature: recordPDAdvancePayment(pdAdvanceId, { weekStartDate, weekEndDate,
+//                  amountPaid, paidBy, reference })
+async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
+  const { weekStartDate, weekEndDate, amountPaid, paidBy, reference } = opts;
+  if (!weekStartDate || !weekEndDate) {
+    throw new Error('weekStartDate and weekEndDate are required');
+  }
+  const amount = parseFloat(amountPaid);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('amountPaid must be a positive number');
+  }
+
   const { data: adv, error: fetchErr } = await supabase
     .from('pd_advances').select('*').eq('id', pdAdvanceId).single();
   if (fetchErr || !adv) throw new Error(`PD advance not found: ${pdAdvanceId}`);
-  if (adv.status !== 'pending') throw new Error(`PD advance is not pending: ${adv.status}`);
+  if (!['pending', 'active'].includes(adv.status)) {
+    throw new Error(`PD advance is not accepting payments: ${adv.status}`);
+  }
+
+  // Sum prior paid payments on this advance.
+  const { data: priorRows } = await supabase
+    .from('pd_advance_payments').select('*').eq('pd_advance_id', pdAdvanceId);
+  const priorPaidTotal = Math.round(
+    (priorRows || [])
+      .filter(r => r.status === 'paid')
+      .reduce((acc, r) => acc + parseFloat(r.amount_paid || 0), 0) * 100,
+  ) / 100;
+
+  // Cap enforcement. Legacy rows (no denominator) skip enforcement.
+  let capReached = false;
+  const denominator = adv.estimated_pd_denominator != null ? parseFloat(adv.estimated_pd_denominator) : null;
+  if (denominator != null && Number.isFinite(denominator) && denominator > 0) {
+    // Read the raw claims row. claimService.getClaim's _toClaim mapping
+    // strips attorney_represented / attorney_name / representedBy, so the
+    // represented check must go against the unmapped row.
+    const { data: rawClaim } = await supabase.from('claims').select('*').eq('id', adv.claim_id).single();
+    const policy = _resolveCapPolicy(rawClaim, adv);
+    const effectiveCap = denominator * policy.pct;
+    const projected    = priorPaidTotal + amount;
+    if (projected > effectiveCap + 0.01) {
+      throw new Error('ADVANCE_CAP_EXCEEDED');
+    }
+    if (Math.abs(projected - effectiveCap) <= 1.0) {
+      capReached = true;
+    }
+  }
 
   const now = new Date().toISOString();
 
-  const { error } = await supabase.from('pd_advances')
-    .update({ first_payment_at: now, status: 'active' })
-    .eq('id', pdAdvanceId);
-  if (error) throw new Error(`pdService.recordPDAdvancePayment: ${error.message}`);
+  const { error: payErr } = await supabase.from('pd_advance_payments').insert({
+    pd_advance_id:   pdAdvanceId,
+    claim_id:        adv.claim_id,
+    week_start_date: weekStartDate,
+    week_end_date:   weekEndDate,
+    amount_paid:     amount,
+    paid_at:         now,
+    paid_by:         paidBy || null,
+    reference:       reference || null,
+    status:          'paid',
+    created_at:      now,
+  });
+  if (payErr) throw new Error(`pdService.recordPDAdvancePayment: payment insert failed — ${payErr.message}`);
+
+  // Update pd_advances: first_payment_at on the first paid row, status
+  // transitions pending → active, active → completed when cap reached.
+  const advUpdate = {};
+  if (!adv.first_payment_at) advUpdate.first_payment_at = now;
+  if (adv.status === 'pending') advUpdate.status = 'active';
+  if (capReached) advUpdate.status = 'completed';
+  if (Object.keys(advUpdate).length > 0) {
+    const { error: updErr } = await supabase.from('pd_advances')
+      .update(advUpdate).eq('id', pdAdvanceId);
+    if (updErr) throw new Error(`pdService.recordPDAdvancePayment: advance update failed — ${updErr.message}`);
+  }
 
   await _closeDiary(adv.claim_id, 'PD_ADVANCE_DUE');
 
   await _writeAuditLog(
     'pd_advance_payment', 'pd_advance', pdAdvanceId,
-    `PD advance first payment recorded. Rate: $${adv.weekly_rate}/wk`,
-    { firstPaymentAt: now },
+    `PD advance payment $${amount.toFixed(2)} for week ${weekStartDate}→${weekEndDate}. Prior paid $${priorPaidTotal.toFixed(2)}${capReached ? '. CAP REACHED — advance completed.' : ''}`,
+    { amountPaid: amount, weekStartDate, weekEndDate, priorPaidTotal, capReached, reference: reference || null },
   );
 
   await supabase.from('claim_events').insert({
     claim_id: adv.claim_id, type: 'pd_advance_payment', timestamp: now,
-    data: { pdAdvanceId, weeklyRate: adv.weekly_rate },
+    data: { pdAdvanceId, amountPaid: amount, weekStartDate, weekEndDate, capReached },
   });
 
-  logger.info({ msg: 'pdService.recordPDAdvancePayment: complete', pdAdvanceId });
+  logger.info({
+    msg: 'pdService.recordPDAdvancePayment: complete',
+    pdAdvanceId, amountPaid: amount, priorPaidTotal, capReached,
+  });
 
   const { data: updated } = await supabase.from('pd_advances').select('*').eq('id', pdAdvanceId).single();
+  return updated;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// overrideAdvanceCap (M14.5)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Adjuster-authorized override of the PD advance cap (0.85 represented /
+// 1.00 unrepresented). Writes to pd_advances.cap_overridden / cap_override_pct
+// and logs the decision into ai_decisions for audit.
+//
+// overridePct is a fraction (e.g. 0.90 for 90%). Must be in (0, 1].
+async function overrideAdvanceCap(pdAdvanceId, { overridePct, reason, overrideBy }) {
+  const pct = parseFloat(overridePct);
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 1) {
+    throw new Error('overridePct must be a fraction in (0, 1]');
+  }
+  if (!reason) throw new Error('reason is required');
+
+  const { data: adv, error: fetchErr } = await supabase
+    .from('pd_advances').select('*').eq('id', pdAdvanceId).single();
+  if (fetchErr || !adv) throw new Error(`PD advance not found: ${pdAdvanceId}`);
+
+  const now = new Date().toISOString();
+  const priorSnapshot = {
+    cap_overridden:      adv.cap_overridden || false,
+    cap_override_pct:    adv.cap_override_pct,
+    cap_override_reason: adv.cap_override_reason,
+  };
+
+  const { data: updated, error } = await supabase.from('pd_advances')
+    .update({
+      cap_overridden:      true,
+      cap_override_pct:    pct,
+      cap_override_by:     overrideBy || null,
+      cap_override_reason: reason,
+    })
+    .eq('id', pdAdvanceId)
+    .select()
+    .single();
+  if (error) throw new Error(`pdService.overrideAdvanceCap: ${error.message}`);
+
+  try {
+    await supabase.from('ai_decisions').insert({
+      claim_id:       adv.claim_id,
+      decision_type:  'pd_advance_cap_override',
+      input_snapshot: { pdAdvanceId, priorSnapshot, denominator: adv.estimated_pd_denominator },
+      output_raw:     JSON.stringify({ overridePct: pct, reason, overrideBy }),
+      output_parsed:  { overridePct: pct, reason, overrideBy },
+      review_action:  'approved',
+      reviewed_by:    overrideBy || null,
+      review_notes:   reason,
+      reviewed_at:    now,
+      created_at:     now,
+    });
+  } catch (err) {
+    logger.error({ msg: 'pdService.overrideAdvanceCap: ai_decisions write failed (non-fatal)', err: err.message });
+  }
+
+  await _writeAuditLog(
+    'pd_advance_cap_override', 'pd_advance', pdAdvanceId,
+    `PD advance cap overridden to ${(pct * 100).toFixed(1)}% by ${overrideBy || 'unknown'}: ${reason}`,
+    { overridePct: pct, reason, overrideBy, priorSnapshot },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: adv.claim_id, type: 'pd_advance_cap_override', timestamp: now,
+    data: { pdAdvanceId, overridePct: pct, overrideBy, reason },
+  });
+
+  logger.info({ msg: 'pdService.overrideAdvanceCap: complete', pdAdvanceId, overridePct: pct });
   return updated;
 }
 
@@ -703,9 +919,19 @@ async function recordAdjusterSignature(stipId, adjusterId) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// recordEAMSFiled
+// recordEAMSFiled (M14.5: bug fix — no longer transitions claim status)
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordEAMSFiled(stipId, { filedDate }) {
+//
+// M13 behavior closed the claim (or moved it to future_medical_only)
+// immediately on EAMS filing, BEFORE the WCAB served the award and BEFORE
+// any PD was paid. That skipped the entire M14.5 disbursement flow.
+//
+// M14.5 corrected behavior: record the filing only. Claim status transitions
+// when disbursement is paid — see disbursementService.recordDisbursementPayment.
+//
+// filedBy is persisted on stipulations.eams_filed_by (added in M14.5 migration
+// to mirror the equivalent column on settlement_offers from M14).
+async function recordEAMSFiled(stipId, { filedDate, filedBy }) {
   const { data: stip, error: fetchErr } = await supabase
     .from('stipulations').select('*').eq('id', stipId).single();
   if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
@@ -716,38 +942,211 @@ async function recordEAMSFiled(stipId, { filedDate }) {
   const now = new Date().toISOString();
 
   await supabase.from('stipulations')
-    .update({ eams_filed_at: filedDate, status: 'filed', updated_at: now })
+    .update({
+      eams_filed_at: filedDate,
+      eams_filed_by: filedBy || null,
+      status:        'filed',
+      updated_at:    now,
+    })
     .eq('id', stipId);
 
   await _closeDiary(stip.claim_id, 'EAMS_FILE');
 
-  // Update claim status based on future_medical flag
-  const newClaimStatus = stip.future_medical ? 'future_medical_only' : 'closed';
-
-  await supabase.from('claims')
-    .update({ status: newClaimStatus, updated_at: now })
-    .eq('id', stip.claim_id);
-
-  await supabase.from('claim_events').insert({
-    claim_id: stip.claim_id, type: 'status_changed', timestamp: now,
-    data: { from: 'pd_evaluation', to: newClaimStatus, changedBy: 'system', reason: 'EAMS filed' },
-  });
-
   await _writeAuditLog(
     'eams_filed', 'stipulation', stipId,
-    `EAMS filed on ${filedDate}. Claim status → ${newClaimStatus}`,
-    { filedDate, newClaimStatus, futureMedical: stip.future_medical },
+    `EAMS filed on ${filedDate}. Claim status unchanged — transitions at disbursement payment.`,
+    { filedDate, filedBy: filedBy || null, futureMedical: stip.future_medical },
   );
 
   await supabase.from('claim_events').insert({
     claim_id: stip.claim_id, type: 'eams_filed', timestamp: now,
-    data: { stipId, filedDate },
+    data: { stipId, filedDate, filedBy: filedBy || null },
   });
 
-  logger.info({ msg: 'pdService.recordEAMSFiled: complete', stipId, filedDate, newClaimStatus });
+  logger.info({ msg: 'pdService.recordEAMSFiled: complete', stipId, filedDate });
 
   const { data: updated } = await supabase.from('stipulations').select('*').eq('id', stipId).single();
   return updated;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// recordStipAwardServed (M14.5)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Called when the WCAB serves the Findings & Award on the parties. Starts
+// the LC §5814 10-day clock on accrued PD.
+async function recordStipAwardServed(stipId, { serviceDate, servedBy }) {
+  if (!serviceDate) throw new Error('serviceDate is required');
+
+  const { data: stip, error: fetchErr } = await supabase
+    .from('stipulations').select('*').eq('id', stipId).single();
+  if (fetchErr || !stip) throw new Error(`Stipulation not found: ${stipId}`);
+
+  const now = new Date().toISOString();
+
+  const { data: updated, error } = await supabase.from('stipulations')
+    .update({
+      award_service_date: serviceDate,
+      award_served_by:    servedBy || null,
+      updated_at:         now,
+    })
+    .eq('id', stipId)
+    .select()
+    .single();
+  if (error) throw new Error(`pdService.recordStipAwardServed: ${error.message}`);
+
+  // Close the EAMS_FILE diary if still open (adjuster typically already
+  // recorded the filing, but be defensive).
+  await _closeDiary(stip.claim_id, 'EAMS_FILE');
+
+  // CRITICAL §5814 clock diary — accrued PD pay-by = service + 10 calendar days.
+  // M17B TODO: reassign to licensed adjuster — this is a license-level diary.
+  await _createDiary(
+    stip.claim_id, 'STIP_AWARD_FOLLOWUP',
+    _addCalendarDays(serviceDate, 10), 'CRITICAL',
+    `WCAB served F&A on ${serviceDate}. Accrued PD pay-by ${_addCalendarDays(serviceDate, 10)} (LC §5814). Extract award and propose disbursement.`,
+    { noSnooze: true },
+  );
+
+  await _writeAuditLog(
+    'stip_award_served', 'stipulation', stipId,
+    `Stip F&A served on ${serviceDate} by ${servedBy || 'unknown'}. §5814 clock started.`,
+    { serviceDate, servedBy },
+  );
+
+  await supabase.from('claim_events').insert({
+    claim_id: stip.claim_id, type: 'stip_award_served', timestamp: now,
+    data: { stipId, serviceDate, servedBy: servedBy || null },
+  });
+
+  logger.info({ msg: 'pdService.recordStipAwardServed: complete', stipId, serviceDate });
+  return updated;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// setPAndSDate (M14.5 — promotes P&S to first-class claim column)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Write-through helper. Priority (highest → lowest):
+//   qme_report > pr_4 > treating_physician > award_document > adjuster_entry
+//
+// - Existing NULL         → write new.
+// - Same date, higher src → upgrade source silently.
+// - Same date, same src   → idempotent no-op.
+// - New date, higher src  → overwrite, audit-log old/new.
+// - New date, lower src   → DO NOT overwrite; create P_AND_S_CONFLICT_REVIEW
+//                           diary (HIGH; system@homecaretpa.com; M17B
+//                           reassignment to licensed adjuster).
+const P_AND_S_SOURCE_PRIORITY = {
+  qme_report:         5,
+  pr_4:               4,
+  treating_physician: 3,
+  award_document:     2,
+  adjuster_entry:     1,
+};
+
+function _psPriority(src) {
+  return P_AND_S_SOURCE_PRIORITY[src] || 0;
+}
+
+async function setPAndSDate(claimId, { date, source, confirmedBy }) {
+  if (!date)   throw new Error('date is required');
+  if (!source) throw new Error('source is required');
+  if (!(source in P_AND_S_SOURCE_PRIORITY)) {
+    throw new Error(`invalid P&S source: ${source}`);
+  }
+
+  const { data: claim, error: fetchErr } = await supabase
+    .from('claims').select('*').eq('id', claimId).single();
+  if (fetchErr || !claim) throw new Error(`Claim not found: ${claimId}`);
+
+  const now          = new Date().toISOString();
+  const priorDate    = claim.p_and_s_date   || null;
+  const priorSource  = claim.p_and_s_source || null;
+  const priorRank    = _psPriority(priorSource);
+  const newRank      = _psPriority(source);
+
+  // Case 1: nothing on file — write.
+  if (!priorDate) {
+    const { data: updated } = await supabase.from('claims')
+      .update({
+        p_and_s_date:         date,
+        p_and_s_source:       source,
+        p_and_s_confirmed_by: confirmedBy || null,
+        p_and_s_confirmed_at: now,
+        updated_at:           now,
+      })
+      .eq('id', claimId)
+      .select()
+      .single();
+    await _writeAuditLog(
+      'p_and_s_set', 'claim', claimId,
+      `P&S date set to ${date} (source=${source})`,
+      { date, source, confirmedBy },
+    );
+    return updated;
+  }
+
+  // Case 2: same date.
+  if (priorDate === date) {
+    if (newRank > priorRank) {
+      const { data: updated } = await supabase.from('claims')
+        .update({
+          p_and_s_source:       source,
+          p_and_s_confirmed_by: confirmedBy || null,
+          p_and_s_confirmed_at: now,
+          updated_at:           now,
+        })
+        .eq('id', claimId)
+        .select()
+        .single();
+      await _writeAuditLog(
+        'p_and_s_source_upgrade', 'claim', claimId,
+        `P&S source upgraded ${priorSource}→${source} for unchanged date ${date}`,
+        { date, priorSource, source, confirmedBy },
+      );
+      return updated;
+    }
+    return claim; // idempotent
+  }
+
+  // Case 3: different date.
+  if (newRank > priorRank) {
+    const { data: updated } = await supabase.from('claims')
+      .update({
+        p_and_s_date:         date,
+        p_and_s_source:       source,
+        p_and_s_confirmed_by: confirmedBy || null,
+        p_and_s_confirmed_at: now,
+        updated_at:           now,
+      })
+      .eq('id', claimId)
+      .select()
+      .single();
+    await _writeAuditLog(
+      'p_and_s_overwrite', 'claim', claimId,
+      `P&S overwritten: ${priorDate}(${priorSource}) → ${date}(${source})`,
+      { priorDate, priorSource, date, source, confirmedBy },
+    );
+    return updated;
+  }
+
+  // Lower-priority source disagrees with existing higher-priority value —
+  // do NOT overwrite. Flag for adjuster review.
+  // M17B TODO: reassign to licensed adjuster. Today the diary routes to
+  // system@homecaretpa.com like all other M14.5 license-level diaries.
+  await _createDiary(
+    claimId, 'P_AND_S_CONFLICT_REVIEW',
+    _addCalendarDays(now.split('T')[0], 5), 'HIGH',
+    `P&S conflict: incoming ${date}(${source}) vs existing ${priorDate}(${priorSource}). ` +
+    `Lower-priority source did not overwrite. Adjuster must reconcile.`,
+  );
+  await _writeAuditLog(
+    'p_and_s_conflict', 'claim', claimId,
+    `P&S conflict — incoming ${date}(${source}) did not overwrite ${priorDate}(${priorSource})`,
+    { incomingDate: date, incomingSource: source, priorDate, priorSource },
+  );
+  return claim;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -807,12 +1206,15 @@ module.exports = {
   calculatePD,
   initiatePDAdvances,
   recordPDAdvancePayment,
+  overrideAdvanceCap,
   waivePDAdvance,
   createStipulation,
   sendStipToWorker,
   recordWorkerSignature,
   recordAdjusterSignature,
   recordEAMSFiled,
+  recordStipAwardServed,
+  setPAndSDate,
   getPDEvaluation,
   getStipulation,
   getPDAdvances,
@@ -820,5 +1222,8 @@ module.exports = {
   // Exported for tests
   _computePDWeeklyRate,
   _addCalendarDays,
+  _isRepresented,
+  _resolveCapPolicy,
   PD_RATES_2026,
+  ADVANCE_CAP_POLICY,
 };

@@ -159,8 +159,79 @@ async function evaluateRFA(rfa, claim) {
   return result;
 }
 
+// ── Claude call with PDF document block (M14.5 award extraction) ─────────────
+
+/**
+ * Send a PDF document plus a text instruction to Claude and return parsed JSON.
+ * Used by awardExtractionService for WCAB Findings & Award / OACR PDFs.
+ *
+ * Does NOT change the existing callClaude signature.
+ */
+async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, maxTokens = 2000) {
+  if (!config.anthropic.apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is not set — AI analysis unavailable');
+  }
+  if (!Buffer.isBuffer(pdfBuffer)) {
+    throw new Error('callClaudeWithDocument: pdfBuffer must be a Buffer');
+  }
+
+  const start = Date.now();
+
+  const res = await axios.post(
+    'https://api.anthropic.com/v1/messages',
+    {
+      model:      config.anthropic.model,
+      max_tokens: maxTokens,
+      system:     systemPrompt,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type:   'document',
+            source: {
+              type:       'base64',
+              media_type: 'application/pdf',
+              data:       pdfBuffer.toString('base64'),
+            },
+          },
+          { type: 'text', text: userInstruction },
+        ],
+      }],
+    },
+    {
+      timeout: 60_000,
+      headers: {
+        'Content-Type':      'application/json',
+        'x-api-key':         config.anthropic.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    }
+  );
+
+  const raw = res.data.content?.find(b => b.type === 'text')?.text || '';
+
+  logger.info({
+    integration:  'anthropic',
+    mode:         'document',
+    model:        config.anthropic.model,
+    latencyMs:    Date.now() - start,
+    inputTokens:  res.data.usage?.input_tokens,
+    outputTokens: res.data.usage?.output_tokens,
+  });
+
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (parseErr) {
+    logger.error({ msg: 'Claude: document JSON parse failed — manual review required', raw });
+    throw new Error('Claude returned invalid JSON — task queued for manual review');
+  }
+}
+
 module.exports = {
   analyzeCompensability,
   evaluateRFA,
-  _callClaude: callClaude, // exported for voiceService structured extraction
+  _callClaude:             callClaude,             // exported for voiceService structured extraction
+  _callClaudeWithDocument: callClaudeWithDocument, // exported for awardExtractionService (M14.5)
 };

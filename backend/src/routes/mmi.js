@@ -81,6 +81,8 @@ router.patch(
         workRestrictions:   req.body.workRestrictions || null,
         futureMedical:      req.body.futureMedical || null,
         apportionmentNoted: req.body.apportionmentNoted || false,
+        pAndSDate:          req.body.pAndSDate || null,
+        confirmedBy:        req.user && req.user.sub ? req.user.sub : null,
       });
       res.json(result);
     } catch (err) {
