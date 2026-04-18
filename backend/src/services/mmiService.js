@@ -468,7 +468,21 @@ async function recordPR4Response(pr4Id, { wpi, workRestrictions, futureMedical, 
         confirmedBy: confirmedBy || null,
       });
     } catch (err) {
-      logger.error({ msg: 'mmiService.recordPR4Response: P&S write-through failed (non-fatal)', err: err.message, pr4Id });
+      // Silent failure here would leave claims.p_and_s_date null when it
+      // should have been set, desynchronizing TD termination / PD advance
+      // start / MMI workflow. Surface on BOTH logger.error (structured) and
+      // console.error (raw stderr) so the signal survives any log routing
+      // misconfiguration.
+      const payload = {
+        msg:      'mmiService.recordPR4Response: P&S write-through failed (non-fatal)',
+        err:      err.message,
+        stack:    err.stack,
+        claim_id: pr4.claim_id,
+        pr4Id,
+        pAndSDate,
+      };
+      logger.error(payload);
+      console.error('P&S_WRITE_THROUGH_FAILED', payload, err);
     }
   }
 
