@@ -107,3 +107,42 @@ requires:
 **Never overwrite an old regulatory file in place.** Claims with DOI
 before a regulatory change remain subject to the regulations in effect
 at the DOI. Retain every version that was ever in force.
+
+## Pending authoritative sources
+
+The following regulatory data is required by M22 (WCIS EDI) but is
+not yet committed. Main-build payload validation operates in
+format-only mode for the affected DN fields until sources land.
+
+### WCIO InjuryDescriptionTable (DN35, DN36, DN37)
+- **Authority:** Workers Compensation Insurance Organizations (WCIO)
+- **Source URL:** http://www.wcio.org/Document%20Library/InjuryDescriptionTablePage.aspx
+- **Scope:** Nature of Injury codes, Part of Body codes, Cause of
+  Injury codes. Single workbook covers all three.
+- **Status:** PENDING acquisition. Acquire as Excel or PDF from WCIO
+  site. Commit as wcio_injury_description_table_v{YYYY-MM-DD} plus
+  three derived CSVs in a single commit.
+
+### IAIABC Release 1 EDI Implementation Guide (DN73 and others)
+- **Authority:** International Association of Industrial Accident
+  Boards and Commissions
+- **Source:** Paid document, requires IAIABC membership or per-copy
+  purchase
+- **Scope:** DN73 Claim Status full code list. Other IAIABC-standard
+  data element definitions not enumerated in the CA guide.
+- **Status:** PENDING purchase. When acquired, commit as
+  iaiabc_edi_impl_guide_r1_v{version}.pdf with derived CSVs.
+
+### WCIRB Class Codes (DN59)
+- **Authority:** Workers' Compensation Insurance Rating Bureau of
+  California
+- **Source URL:** https://wcirbonline.org/wcirb/Answer_center/classification_information.html
+- **Scope:** ~500 class codes for California.
+- **Status:** DEFERRED. DN59 is optional per WCIS guide. Not blocking.
+
+### Census NAICS industry codes (DN25)
+- **Authority:** U.S. Census Bureau
+- **Source:** census.gov/naics
+- **Scope:** Employer-level industry classification.
+- **Status:** DEFERRED. DN25 is employer-level, not per-claim.
+  Low priority.
