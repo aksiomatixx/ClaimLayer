@@ -1,0 +1,49 @@
+# Regulatory code list for DN85 Payment/Adjustment Benefit Type Codes
+# Source: California EDI Implementation Guide for FROI/SROI v3.1
+#   (March 27, 2018), Section N, page 92
+#
+# Layout in guide:
+#   - Top table: "Payment/Adjustment (DN85) Benefit Type Codes Used in the WCIS"
+#     → active codes (deprecated=false). Left column = standard BTCs;
+#       right column = compromised (5xx) twins.
+#   - Bottom table: "Payment/Adjustment (DN85) Benefit Type Codes that,
+#     in most cases, should NOT be sent to the WCIS on recent claims"
+#     → deprecated codes (deprecated=true).
+#
+# Deprecation rationale (from guide notes, Section N pg 92):
+#   - 040/540 "Permanent Partial Unscheduled" — deprecated for injuries
+#     P&S on or after 2005-01-01 (superseded by 2005 PDRS schedule).
+#   - 410/541 "Vocational Rehabilitation Maintenance" — voc rehab
+#     program ended 2009-01-01; SJDB payments go to DN95 BTC 390.
+#   - 021/521, 051/551, 080/580 — supplemental / catastrophic /
+#     employer-liability variants marked "in most cases, should NOT be
+#     sent to the WCIS on recent claims".
+#
+# Used by: wcisPayloadService.js (M22A)
+code,description,category,deprecated
+010,Fatal,standard,false
+020,Permanent Total,standard,false
+030,Permanent Partial Scheduled,standard,false
+050,Temporary Total,standard,false
+070,Temporary Partial,standard,false
+090,Permanent Partial Disfigurement,standard,false
+240,Employer Paid,standard,false
+500,Unspecified,compromised,false
+501,Medical,compromised,false
+510,Fatal,compromised,false
+520,Compromised Permanent Total,compromised,false
+524,Compromised Employer Paid,compromised,false
+530,Compromised Permanent Partial Scheduled,compromised,false
+550,Compromised Temporary Total,compromised,false
+570,Compromised Temporary Partial,compromised,false
+590,Compromised Permanent Partial Disfigurement,compromised,false
+021,Permanent Total Supplemental,standard,true
+040,Permanent Partial Unscheduled,standard,true
+051,Temporary Total Catastrophic,standard,true
+080,Employer Liability,standard,true
+410,Vocational Rehabilitation Maintenance,standard,true
+521,Compromised Permanent Total Supplemental,compromised,true
+540,Compromised Permanent Partial Unscheduled,compromised,true
+541,Compromised Vocational Rehabilitation Maintenance,compromised,true
+551,Compromised Temporary Total Catastrophic,compromised,true
+580,Compromised Employer Liability,compromised,true
