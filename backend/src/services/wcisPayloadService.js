@@ -484,6 +484,195 @@ async function _assembleSroiSuspension(base, triggerRow) {
   };
 }
 
+// ─── _assembleSroiPy — settlement & advance payments ─────────────
+//
+// Three source variants per revised M22A spec §4:
+//   source='cnr_settlement' — settlement_offers breakdown per §4.1
+//   source='stip_disbursement' — award_disbursements breakdown per §4.2
+//   source='pd_advance' (default) — single-line DN85 030 for PD advance
+//
+// Breakdown-available path for C&R:
+//   Line 1: DN85 530 (compromised PD) = cnr_pd_amount
+//   Line 2: DN85 501 (compromised medical) = cnr_medical_amount
+//   Line 3: DN85 500 (compromised unspecified) = aa_fee + other
+//
+// Breakdown-unavailable / sum-mismatch path:
+//   Line 1: DN85 500 (compromised unspecified) = cnr_value (full)
+//   Warning: WCIS_CNR_BREAKDOWN_MISSING
+//
+async function _assembleSroiPy(base, triggerRow) {
+  const ctx = triggerRow.payload_context || {};
+  const source = ctx.source || 'pd_advance';
+
+  if (source === 'cnr_settlement') {
+    return _assembleSroiPyCnr(base, triggerRow, ctx);
+  }
+  if (source === 'stip_disbursement') {
+    return _assembleSroiPyStip(base, triggerRow, ctx);
+  }
+  // Default: PD advance (single-line, scheduled BTC 030)
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'PY',
+    benefit_lines: [{
+      DN85_benefit_type_code:        REPORTABLE_BENEFIT_CODES.PD_SCHEDULED,
+      DN87_benefit_period_start:     ctx.period_start || triggerRow.event_date,
+      DN88_benefit_period_end:       ctx.period_end   || triggerRow.event_date,
+      DN89_gross_weekly_amount_paid: ctx.amount_paid != null ? String(ctx.amount_paid) : null,
+    }],
+    payload_context: ctx,
+    _assembler_warnings: [],
+  };
+}
+
+async function _assembleSroiPyCnr(base, triggerRow, ctx) {
+  const { data: offer, error } = await supabase
+    .from('settlement_offers')
+    .select('*')
+    .eq('id', ctx.offer_id)
+    .single();
+  if (error || !offer) {
+    throw new Error(`wcisPayloadService._assembleSroiPyCnr: offer not found: ${ctx.offer_id}`);
+  }
+
+  const total = parseFloat(offer.cnr_value || '0');
+  const pd    = offer.cnr_pd_amount != null ? parseFloat(offer.cnr_pd_amount) : null;
+  const med   = offer.cnr_medical_amount != null ? parseFloat(offer.cnr_medical_amount) : null;
+  const aa    = offer.cnr_attorney_fee_amount != null
+    ? parseFloat(offer.cnr_attorney_fee_amount) : null;
+  const other = offer.cnr_other_amount != null
+    ? parseFloat(offer.cnr_other_amount) : null;
+
+  const haveAll = [pd, med, aa, other].every((x) => x != null && Number.isFinite(x));
+  const sum = haveAll ? (pd + med + aa + other) : null;
+  const sumMatches = sum != null && Math.abs(sum - total) <= 1.00;
+
+  const warnings = [];
+  const paidDate = ctx.paid_date || triggerRow.event_date;
+
+  if (haveAll && sumMatches) {
+    // Breakdown-available: three lines
+    if (offer.cnr_breakdown_source === 'estimate') {
+      warnings.push({
+        code: WARNINGS.CNR_BREAKDOWN_PRE_OACR,
+        note: 'cnr breakdown flagged as estimate; OACR-final values not confirmed',
+      });
+    }
+    return {
+      ...base,
+      _mtc_family: 'SROI',
+      _mtc_code: 'PY',
+      benefit_lines: [
+        {
+          DN85_benefit_type_code:        COMPROMISED_PD_SCHEDULED,
+          DN87_benefit_period_start:     paidDate,
+          DN88_benefit_period_end:       paidDate,
+          DN89_gross_weekly_amount_paid: pd.toFixed(2),
+        },
+        {
+          DN85_benefit_type_code:        COMPROMISED_MEDICAL,
+          DN87_benefit_period_start:     paidDate,
+          DN88_benefit_period_end:       paidDate,
+          DN89_gross_weekly_amount_paid: med.toFixed(2),
+        },
+        {
+          DN85_benefit_type_code:        COMPROMISED_UNSPECIFIED,
+          DN87_benefit_period_start:     paidDate,
+          DN88_benefit_period_end:       paidDate,
+          DN89_gross_weekly_amount_paid: (aa + other).toFixed(2),
+        },
+      ],
+      payload_context: ctx,
+      _assembler_warnings: warnings,
+    };
+  }
+
+  // Breakdown-missing / sum-mismatch fallback
+  warnings.push({
+    code: WARNINGS.CNR_BREAKDOWN_MISSING,
+    note: haveAll
+      ? `breakdown sum $${sum?.toFixed(2)} does not match cnr_value $${total.toFixed(2)}`
+      : 'cnr breakdown columns not populated on settlement_offers',
+    total, sum,
+  });
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'PY',
+    benefit_lines: [{
+      DN85_benefit_type_code:        COMPROMISED_UNSPECIFIED,
+      DN87_benefit_period_start:     paidDate,
+      DN88_benefit_period_end:       paidDate,
+      DN89_gross_weekly_amount_paid: total.toFixed(2),
+    }],
+    payload_context: ctx,
+    _assembler_warnings: warnings,
+  };
+}
+
+async function _assembleSroiPyStip(base, triggerRow, ctx) {
+  const { data: disb, error } = await supabase
+    .from('award_disbursements')
+    .select('*')
+    .eq('id', ctx.disbursement_id)
+    .single();
+  if (error || !disb) {
+    throw new Error(
+      `wcisPayloadService._assembleSroiPyStip: disbursement not found: ${ctx.disbursement_id}`,
+    );
+  }
+
+  // Read the linked stipulation for future_medical flag.
+  let futureMedical = null;
+  if (disb.stipulation_id) {
+    const { data: stip } = await supabase
+      .from('stipulations')
+      .select('future_medical')
+      .eq('id', disb.stipulation_id)
+      .single();
+    futureMedical = stip ? !!stip.future_medical : null;
+  }
+
+  const accrued   = parseFloat(disb.accrued_amount || '0');
+  const scheduled = parseFloat(disb.scheduled_amount || '0');
+  const aaFee     = parseFloat(disb.aa_fee_amount || '0');
+  const paidDate  = ctx.paid_date || triggerRow.event_date;
+
+  const lines = [];
+  // Line 1: compromised PD scheduled = accrued + scheduled
+  lines.push({
+    DN85_benefit_type_code:        COMPROMISED_PD_SCHEDULED,
+    DN87_benefit_period_start:     paidDate,
+    DN88_benefit_period_end:       paidDate,
+    DN89_gross_weekly_amount_paid: (accrued + scheduled).toFixed(2),
+  });
+  // Line 2: compromised unspecified = attorney fee
+  if (aaFee > 0) {
+    lines.push({
+      DN85_benefit_type_code:        COMPROMISED_UNSPECIFIED,
+      DN87_benefit_period_start:     paidDate,
+      DN88_benefit_period_end:       paidDate,
+      DN89_gross_weekly_amount_paid: aaFee.toFixed(2),
+    });
+  }
+
+  const warnings = [];
+  if (futureMedical === true) {
+    // No FN will follow — signal data consumer.
+    warnings.push({ code: WARNINGS.STIP_FUTURE_MEDICAL_NO_FN });
+  }
+
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'PY',
+    benefit_lines: lines,
+    payload_context: { ...ctx, future_medical: futureMedical },
+    _assembler_warnings: warnings,
+  };
+}
+
 // ─── VALIDATION — Layer 1: structural ────────────────────────────
 //
 // Checks that every required DN is present and format-valid per
@@ -791,6 +980,9 @@ module.exports = {
   _assembleSroiRe,
   _assembleSroiFs,
   _assembleSroiSuspension,
+  _assembleSroiPy,
+  _assembleSroiPyCnr,
+  _assembleSroiPyStip,
   SUSPENSION_REASON_TO_MTC,
   _loaders: { DN77_CODES, DN85_CODES, DN95_CODES, DN85_DEPRECATED },
   _internal: { _loadCsv, _parseCsvLine, _expandDn95Ranges,
