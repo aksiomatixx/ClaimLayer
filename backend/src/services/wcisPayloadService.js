@@ -342,6 +342,148 @@ async function _assembleFroiCo(base, triggerRow) {
   };
 }
 
+// ─── SROI ASSEMBLERS — core (non-PY) ─────────────────────────────
+// Guide Section N pg 87 — SROI MTC catalogue.
+
+async function _assembleSroiIp(base, triggerRow) {
+  // SROI IP Initial Payment — first indemnity on a claim.
+  // Benefit type depends on payload_context.benefit_code (default
+  // to PD_SCHEDULED since that's the M22A-wired source from
+  // pdService.recordPDAdvancePayment).
+  const ctx = triggerRow.payload_context || {};
+  const benefitCode = ctx.benefit_code || REPORTABLE_BENEFIT_CODES.PD_SCHEDULED;
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'IP',
+    DN34_date_disability_began: ctx.disability_begin_date || null,
+    benefit_lines: [{
+      DN85_benefit_type_code:       benefitCode,
+      DN87_benefit_period_start:    ctx.period_start || triggerRow.event_date,
+      DN88_benefit_period_end:      ctx.period_end || null,
+      DN86_benefit_weekly_amount:   ctx.weekly_rate != null ? String(ctx.weekly_rate) : null,
+      DN89_gross_weekly_amount_paid: ctx.amount_paid != null ? String(ctx.amount_paid) : null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiAp(base, triggerRow) {
+  // SROI AP Acquired / First Payment — first payment on an
+  // acquired claim that already has prior payment history.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'AP',
+    benefit_lines: [{
+      DN85_benefit_type_code:    ctx.benefit_code || REPORTABLE_BENEFIT_CODES.TT,
+      DN87_benefit_period_start: ctx.period_start || triggerRow.event_date,
+      DN89_gross_weekly_amount_paid: ctx.amount_paid != null ? String(ctx.amount_paid) : null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiCa(base, triggerRow) {
+  // SROI CA Change in Benefit Amount — rate change (typically
+  // annual COLA or retroactive correction).
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'CA',
+    benefit_lines: [{
+      DN85_benefit_type_code:     ctx.benefit_code || REPORTABLE_BENEFIT_CODES.TT,
+      DN86_benefit_weekly_amount: ctx.new_weekly_rate != null ? String(ctx.new_weekly_rate) : null,
+      DN_previous_weekly_amount:  ctx.prior_weekly_rate != null ? String(ctx.prior_weekly_rate) : null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiCb(base, triggerRow) {
+  // SROI CB Change in Benefit Type — e.g., TT→PD when TD ends
+  // and PD advances begin.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'CB',
+    benefit_lines: [{
+      DN85_benefit_type_code:    ctx.to_benefit_code || REPORTABLE_BENEFIT_CODES.PD_SCHEDULED,
+      DN_previous_benefit_type:  ctx.from_benefit_code || null,
+      DN87_benefit_period_start: ctx.period_start || triggerRow.event_date,
+      DN86_benefit_weekly_amount: ctx.weekly_rate != null ? String(ctx.weekly_rate) : null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiRe(base, triggerRow) {
+  // SROI RE Reduced Earnings — worker returned to modified duty
+  // with lower wages; DN95 600-624/650-674 range reporting.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'RE',
+    benefit_lines: [{
+      DN85_benefit_type_code:     ctx.benefit_code || REPORTABLE_BENEFIT_CODES.TP,
+      DN86_benefit_weekly_amount: ctx.weekly_rate != null ? String(ctx.weekly_rate) : null,
+      DN_reduced_earnings_code:   ctx.reduced_earnings_code || null,
+      DN_reduced_earnings_amount: ctx.reduced_earnings_amount != null
+        ? String(ctx.reduced_earnings_amount) : null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiFs(base, triggerRow) {
+  // SROI FS Full Salary Continuation — employer pays full salary
+  // in lieu of TD. Worker receives nothing from insurer for the
+  // FS period.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'FS',
+    benefit_lines: [{
+      DN85_benefit_type_code:    REPORTABLE_BENEFIT_CODES.EMPLOYER_PAID,
+      DN87_benefit_period_start: ctx.period_start || triggerRow.event_date,
+      DN88_benefit_period_end:   ctx.period_end || null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+// SUSPENSION_REASON_TO_MTC — maps payload_context.reason_code to the
+// full suspension MTC. Guide Section N pg 87.
+const SUSPENSION_REASON_TO_MTC = Object.freeze({
+  rtw:                 { full: 'S1', partial: 'P1' }, // Return to Work
+  med_noncomp:         { full: 'S2', partial: 'P2' }, // Medical noncompliance
+  admin_noncomp:       { full: 'S3', partial: 'P3' }, // Admin noncompliance
+  benefits_exhausted:  { full: 'S7', partial: 'P7' }, // Benefits exhausted
+});
+
+async function _assembleSroiSuspension(base, triggerRow) {
+  // Sx/Px MTC family — triggerRow.mtc_code is already resolved
+  // from trigger_event. We carry the reason and period in payload.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: triggerRow.mtc_code,
+    DN57_date_return_to_work: ctx.rtw_date || null,
+    benefit_lines: [{
+      DN85_benefit_type_code: ctx.benefit_code || REPORTABLE_BENEFIT_CODES.TT,
+      DN_suspension_reason_code: ctx.reason_code || null,
+      DN_suspension_effective_date: ctx.effective_date || triggerRow.event_date,
+    }],
+    payload_context: ctx,
+  };
+}
+
 // ─── VALIDATION — Layer 1: structural ────────────────────────────
 //
 // Checks that every required DN is present and format-valid per
@@ -642,6 +784,14 @@ module.exports = {
   _assembleFroi01,
   _assembleFroi02,
   _assembleFroiCo,
+  _assembleSroiIp,
+  _assembleSroiAp,
+  _assembleSroiCa,
+  _assembleSroiCb,
+  _assembleSroiRe,
+  _assembleSroiFs,
+  _assembleSroiSuspension,
+  SUSPENSION_REASON_TO_MTC,
   _loaders: { DN77_CODES, DN85_CODES, DN95_CODES, DN85_DEPRECATED },
   _internal: { _loadCsv, _parseCsvLine, _expandDn95Ranges,
     _validateStructural, _validateCaEdits, _validateReferential },
