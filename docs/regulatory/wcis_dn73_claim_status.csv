@@ -1,0 +1,21 @@
+# Regulatory code list for DN73 Claim Status
+# NOT ENUMERATED in CA EDI Implementation Guide v3.1
+# Authoritative source: IAIABC EDI Implementation Guide Release 1 (paid document)
+# URL: http://www.iaiabc.org
+# Source citation: guide Section N, page 90
+# Status: PENDING — authoritative source document must be committed
+#   to docs/regulatory/ before this CSV can be populated. Do not
+#   fabricate code values. See Master Context deferred tasks.
+#
+# CA-specific rule (extractable from guide Section L without the full
+# IAIABC code list): FN transactions must have DN73 = 'C' or 'X'.
+# This narrow rule IS enforced in wcisPayloadService regardless of
+# whether the full code list is populated.
+#
+# Until populated, wcisPayloadService validates DN73 fields as
+# "non-empty, format-valid, no blocklist strings" only (plus the
+# FN=C/X rule) — does NOT validate that the value is a known code.
+# Validation warning WCIS_CODE_LIST_NOT_VALIDATED attached to every
+# transaction using this DN.
+
+code,description
