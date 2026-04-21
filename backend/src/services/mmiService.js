@@ -1,5 +1,15 @@
 'use strict';
 
+// ── M22A WCIS NOTE ────────────────────────────────────────────────
+// mmiService intentionally has NO WCIS triggers. MMI / P&S is a
+// medical determination, not a directly reportable benefit event.
+// The P&S date drives downstream transitions that ARE reportable —
+// specifically pdService.initiatePDAdvances which fires SROI CB
+// (TD → PD benefit transition) or SROI RB (PD after prior
+// suspension). See pdService WCIS hooks for the actual trigger
+// wire-up. Do not add WCIS triggers here.
+// ─────────────────────────────────────────────────────────────────
+
 /**
  * mmiService.js — M12 MMI Management + PR-4 Solicitation.
  *
