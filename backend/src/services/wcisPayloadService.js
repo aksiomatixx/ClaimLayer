@@ -673,6 +673,131 @@ async function _assembleSroiPyStip(base, triggerRow, ctx) {
   };
 }
 
+// ─── SROI ASSEMBLERS — remaining (04, 4P, CD, 02, FN, CO) ────────
+
+async function _assembleSroi04(base, triggerRow) {
+  // SROI 04 Denial after payment — claim denied but TD/med already paid.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: '04',
+    DN289_denial_reason_code:      ctx.denial_reason_code || null,
+    DN290_denial_reason_narrative: ctx.denial_reason || null,
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroi4p(base, triggerRow) {
+  // SROI 4P Specific Benefit Denied — one benefit line denied
+  // (e.g., specific RFA denied) while claim otherwise open.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: '4P',
+    DN_denied_benefit_codes:       ctx.denied_benefit_codes || [],
+    DN289_denial_reason_code:      ctx.denial_reason_code || null,
+    DN290_denial_reason_narrative: ctx.denial_reason || null,
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiCd(base, triggerRow) {
+  // SROI CD Compensable Death. Guide Section N pg 87.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'CD',
+    DN_date_of_death:              ctx.date_of_death || null,
+    DN_death_cause:                ctx.death_cause || null,
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroi02(base, triggerRow) {
+  // SROI 02 Change — representation change or other non-amount
+  // claim-data change after FROI 00 accept.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: '02',
+    DN_changed_fields: ctx.changed_fields || [],
+    DN_employee_represented: ctx.employee_represented != null
+      ? (ctx.employee_represented ? 'Y' : 'N') : null,
+    DN_representative_name: ctx.representative_name || null,
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiFn(base, triggerRow) {
+  // SROI FN Final — claim closed. Per C7 (guide Section L), DN73
+  // Claim Status must be 'C' (closed, no future benefits) or 'X'
+  // (closed, future-medical-only). This rule is enforced here
+  // BEFORE handing off to the referential validator — callers
+  // rely on the assembler providing a usable DN73.
+  const ctx = triggerRow.payload_context || {};
+  const dn73 = ctx.claim_status_code
+    || (ctx.future_medical_only ? 'X' : 'C');
+  if (!['C', 'X'].includes(dn73)) {
+    throw new WcisValidationError([{
+      dn: 'DN73_claim_status_code', severity: 'fatal',
+      code: 'FN_REQUIRES_DN73_C_OR_X', got: dn73,
+    }]);
+  }
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'FN',
+    DN73_claim_status_code: dn73,
+    DN_final_closure_date: ctx.closed_date || triggerRow.event_date,
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiCo(base, triggerRow) {
+  // SROI CO Correction — corrects a prior SROI that ack'd with TE.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'CO',
+    DN_correction_of_transaction_id: ctx.correcting_transaction_id || null,
+    DN_correction_narrative:         ctx.correction_narrative || null,
+    payload_context: ctx,
+  };
+}
+
+// ─── SROI ASSEMBLERS — scaffolded (not triggered in M22A) ────────
+
+async function _assembleSroiRb(base, triggerRow) {
+  // SROI RB Reinstatement of Benefits — pdService hook emits
+  // this when PD advance begins after a prior suspension.
+  const ctx = triggerRow.payload_context || {};
+  return {
+    ...base,
+    _mtc_family: 'SROI',
+    _mtc_code: 'RB',
+    benefit_lines: [{
+      DN85_benefit_type_code:    ctx.benefit_code || REPORTABLE_BENEFIT_CODES.PD_SCHEDULED,
+      DN87_benefit_period_start: ctx.period_start || triggerRow.event_date,
+      DN_reinstating_after_mtc:  ctx.reinstating_after_mtc || null,
+    }],
+    payload_context: ctx,
+  };
+}
+
+async function _assembleSroiUr(_base, _triggerRow) {
+  // SROI UR Upon Request — responds to a WCIS UR query. Not
+  // triggered by any internal event; requires adjuster-initiated
+  // entry point that is out of scope for M22A.
+  throw new Error(
+    'wcisPayloadService._assembleSroiUr: NOT_IMPLEMENTED — UR is manual-only, deferred',
+  );
+}
+
 // ─── VALIDATION — Layer 1: structural ────────────────────────────
 //
 // Checks that every required DN is present and format-valid per
@@ -983,6 +1108,14 @@ module.exports = {
   _assembleSroiPy,
   _assembleSroiPyCnr,
   _assembleSroiPyStip,
+  _assembleSroi04,
+  _assembleSroi4p,
+  _assembleSroiCd,
+  _assembleSroi02,
+  _assembleSroiFn,
+  _assembleSroiCo,
+  _assembleSroiRb,
+  _assembleSroiUr,
   SUSPENSION_REASON_TO_MTC,
   _loaders: { DN77_CODES, DN85_CODES, DN95_CODES, DN85_DEPRECATED },
   _internal: { _loadCsv, _parseCsvLine, _expandDn95Ranges,
