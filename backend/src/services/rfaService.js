@@ -24,6 +24,24 @@ const enlyte              = require('./enlyteService');
 const logger              = require('../logger');
 const { addBusinessDays } = require('../utils/businessDays');
 
+// ── M22A WCIS SROI 4P hook — DEFERRED ────────────────────────────
+// The revised M22A spec calls for a hook on "rfaService.denyRfa"
+// that enqueues SROI 4P (Specific Benefit Denied) when
+// payload_context.denies_benefit === true. That function does not
+// exist in the current rfaService — the RFA lifecycle today is
+// createRFA → evaluateRFA → (auto_approve | adjuster_review |
+// route_to_uro), with URO handling denial determinations via
+// Enlyte asynchronously.
+//
+// No WCIS trigger is wired from rfaService in M22A. When the URO
+// decision return path is implemented (separate milestone), that
+// is the natural hook point for SROI 4P:
+//   On URO denial return → enqueueIfReportable('specific_benefit_denied',
+//     ..., payload_context: { denied_benefit_codes: [...], source: 'uro' })
+// The TRIGGER_EVENT_TO_MTC entry 'specific_benefit_denied' remains
+// wired in wcisConstants so the wire-up in the URO-return milestone
+// is drop-in.
+
 // Lazy require to break circular dependency: rfaService ↔ claimService
 function getClaimService() {
   return require('./claimService');
