@@ -83,8 +83,42 @@ async function checkWcisEnabled(claim_id) {
   return data.wcis_enabled !== false;
 }
 
+// ─── suppressPending ─────────────────────────────────────────────
+//
+// Mark all pending/processing trigger rows matching
+// (claim_id, trigger_event) as suppressed with the given reason.
+// Used when a superseding event cancels an earlier enqueue
+// (e.g., FROI 00 rejected → supersede pending SROIs).
+//
+async function suppressPending({ claim_id, trigger_event, reason }) {
+  const { data, error } = await supabase
+    .from('wcis_trigger_queue')
+    .update({
+      status:             'suppressed',
+      suppression_reason: reason,
+      processed_at:       new Date().toISOString(),
+    })
+    .eq('claim_id',      claim_id)
+    .eq('trigger_event', trigger_event);
+
+  if (error) {
+    logger.error({
+      msg: 'wcisTriggerService.suppressPending: update failed',
+      err: error.message, claim_id, trigger_event,
+    });
+    return { suppressed_count: 0, error: error.message };
+  }
+  const count = Array.isArray(data) ? data.length : 0;
+  logger.info({
+    msg: 'wcisTriggerService.suppressPending',
+    claim_id, trigger_event, reason, suppressed_count: count,
+  });
+  return { suppressed_count: count };
+}
+
 module.exports = {
   resolveMtc,
   checkWcisEnabled,
+  suppressPending,
   SUPPRESSION_REASONS,
 };
