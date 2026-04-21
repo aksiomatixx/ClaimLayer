@@ -18,6 +18,7 @@ const authRouter         = require('./routes/auth');
 const employerRouter     = require('./routes/employer');
 const rfasRouter         = require('./routes/rfas');
 const reportingRouter    = require('./routes/reporting');
+const wcisRouter         = require('./routes/wcis');
 const qmeRouter          = require('./routes/qme');
 const mmiRouter          = require('./routes/mmi');
 const pdRouter           = require('./routes/pd');
@@ -61,6 +62,7 @@ app.use('/api/v1/disbursements', disbursementsRouter);
 app.use('/api/v1/pd-advances',   pdAdvancesRouter);
 app.use('/api/v1/stipulations',  stipulationsRouter);
 app.use('/api/v1',               reportingRouter);
+app.use('/api/v1/wcis',          wcisRouter);
 app.use('/webhooks',             webhooksRouter);
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────
