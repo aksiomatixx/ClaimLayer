@@ -1,0 +1,15 @@
+# Regulatory code list for DN36 Part of Body Injured (and SROI DN83)
+# NOT ENUMERATED in CA EDI Implementation Guide v3.1
+# Authoritative source: http://www.wcio.org/Document%20Library/InjuryDescriptionTablePage.aspx
+# Source citation: guide Section N, page 90
+# Status: PENDING — authoritative source document must be committed
+#   to docs/regulatory/ before this CSV can be populated. Do not
+#   fabricate code values. See Master Context deferred tasks.
+#
+# Until populated, wcisPayloadService validates DN36 fields as
+# "non-empty, format-valid, no blocklist strings" only — does NOT
+# validate that the value is a known code. Validation warning
+# WCIS_CODE_LIST_NOT_VALIDATED attached to every transaction using
+# this DN.
+
+code,description
