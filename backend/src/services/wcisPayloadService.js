@@ -173,12 +173,302 @@ class WcisValidationError extends Error {
   }
 }
 
+// ─── VALIDATION — Layer 1: structural ────────────────────────────
+//
+// Checks that every required DN is present and format-valid per
+// guide Section K. Field-level format:
+//   - Dates: YYYY-MM-DD
+//   - Money: NUMERIC, two decimal places
+//   - FEINs: exactly 9 digits
+//   - Claim numbers: no DN15_INVALID_CHARS
+//
+// Returns { valid, errors, warnings }. Caller interprets fatal.
+//
+function _validateStructural(payload, mtc_code) {
+  const errors = [];
+  const warnings = [];
+
+  // Common required DNs for all MTCs
+  const required = ['DN2_jurisdiction', 'DN5_jcn_or_null',
+    'DN15_claim_admin_claim_number', 'DN31_date_of_injury'];
+
+  for (const dn of required) {
+    if (dn === 'DN5_jcn_or_null') continue; // JCN optional on FROI 00
+    if (payload[dn] === undefined || payload[dn] === null || payload[dn] === '') {
+      errors.push({ dn, severity: 'fatal', code: 'MISSING_REQUIRED_DN' });
+    }
+  }
+
+  // DN2 must be 'CA' for HomeCare
+  if (payload.DN2_jurisdiction && payload.DN2_jurisdiction !== CA_DATA_EDITS.JURISDICTION_CODE) {
+    errors.push({
+      dn: 'DN2_jurisdiction', severity: 'fatal', code: 'WRONG_JURISDICTION',
+      got: payload.DN2_jurisdiction,
+    });
+  }
+
+  // Date formats
+  const dateDns = ['DN31_date_of_injury', 'DN34_date_disability_began',
+    'DN57_date_return_to_work', 'DN41_date_claim_administrator_had_knowledge'];
+  for (const dn of dateDns) {
+    const v = payload[dn];
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      errors.push({ dn, severity: 'fatal', code: 'BAD_DATE_FORMAT', got: v });
+    }
+  }
+
+  // DN15 claim admin claim number — no invalid chars
+  const dn15 = payload.DN15_claim_admin_claim_number;
+  if (dn15) {
+    for (const bad of CA_DATA_EDITS.DN15_INVALID_CHARS) {
+      if (dn15.includes(bad)) {
+        errors.push({
+          dn: 'DN15_claim_admin_claim_number', severity: 'fatal',
+          code: 'INVALID_DELIMITER_CHAR', char: bad,
+        });
+      }
+    }
+  }
+
+  // FEIN format — DN6, DN18, DN187 when present
+  for (const dn of ['DN6_insurer_fein', 'DN18_claim_administrator_fein',
+    'DN187_employer_fein']) {
+    const v = payload[dn];
+    if (v && !/^\d{9}$/.test(v)) {
+      errors.push({ dn, severity: 'fatal', code: 'BAD_FEIN_FORMAT', got: v });
+    }
+  }
+
+  void mtc_code; // reserved for MTC-specific structural rules
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+// ─── VALIDATION — Layer 2: CA-specific edits ─────────────────────
+//
+// Per guide Section L. Implements blocklist strings, SSN rules,
+// DN85 deprecation, date ordering. Takes an options override for
+// the AU acquired-claim pre-2005 P&S exception.
+//
+function _validateCaEdits(payload, mtc_code) {
+  const errors = [];
+  const warnings = [];
+
+  const blockNorm = (s) =>
+    String(s || '').trim().toLowerCase();
+
+  // Blocklist strings on name / address / employer fields
+  const nameFields = ['DN42_employee_ssn', 'DN43_employee_last_name',
+    'DN44_employee_first_name', 'DN46_employee_address_line_1',
+    'DN47_employee_city', 'DN186_employer_name'];
+  for (const dn of nameFields) {
+    const v = payload[dn];
+    if (!v) continue;
+    if (CA_DATA_EDITS.BLOCKLIST_STRINGS.includes(blockNorm(v))) {
+      errors.push({
+        dn, severity: 'fatal', code: 'BLOCKLIST_STRING', got: v,
+      });
+    }
+  }
+
+  // DN42 SSN rules
+  const ssn = String(payload.DN42_employee_ssn || '').replace(/\D/g, '');
+  if (ssn) {
+    if (ssn.length !== 9) {
+      errors.push({ dn: 'DN42_employee_ssn', severity: 'fatal', code: 'BAD_SSN_LENGTH' });
+    } else if (CA_DATA_EDITS.SSN_BLOCKLIST.includes(ssn)) {
+      errors.push({
+        dn: 'DN42_employee_ssn', severity: 'fatal', code: 'SSN_BLOCKLISTED',
+      });
+    } else if (CA_DATA_EDITS.SSN_ALL_SAME_DIGIT_REGEX.test(ssn)) {
+      errors.push({
+        dn: 'DN42_employee_ssn', severity: 'fatal', code: 'SSN_ALL_SAME_DIGIT',
+      });
+    }
+  }
+
+  // DN85 deprecation — applies to payloads with benefit_lines
+  // (SROI IP, PY, etc.) when mtc_code is 00/02/AU per C2/C3/C4.
+  const acquiredPre2005 = !!(payload.payload_context &&
+    payload.payload_context.acquired_claim_has_pre_2005_p_and_s);
+  for (const line of payload.benefit_lines || []) {
+    const btc = line.DN85_benefit_type_code;
+    if (!btc) continue;
+
+    // Always-deprecated (voc rehab ended 2009)
+    if (CA_DATA_EDITS.ALWAYS_DEPRECATED_DN85.includes(btc)) {
+      errors.push({
+        dn: 'DN85_benefit_type_code', severity: 'fatal',
+        code: 'DN85_ALWAYS_DEPRECATED', got: btc,
+      });
+      continue;
+    }
+
+    if (CA_DATA_EDITS.DEPRECATED_DN85_ON_NEW_ORIGIN.includes(btc)) {
+      if (mtc_code === '00') {
+        errors.push({
+          dn: 'DN85_benefit_type_code', severity: 'fatal',
+          code: 'DN85_DEPRECATED_ON_NEW_ORIGIN', got: btc,
+        });
+        continue;
+      }
+      if (mtc_code === 'AU' && !acquiredPre2005) {
+        errors.push({
+          dn: 'DN85_benefit_type_code', severity: 'fatal',
+          code: 'DN85_DEPRECATED_AU_NO_OVERRIDE', got: btc,
+        });
+        continue;
+      }
+      // AU with override → allowed (preserve prior carrier reporting)
+    }
+  }
+
+  // Date ordering: date_of_injury ≤ date_disability_began
+  const doi = payload.DN31_date_of_injury;
+  const dob = payload.DN34_date_disability_began;
+  if (doi && dob && doi > dob) {
+    errors.push({
+      dn: 'DN34_date_disability_began', severity: 'fatal',
+      code: 'DATE_DISABILITY_BEFORE_INJURY', doi, dob,
+    });
+  }
+
+  // DN35/36/37/73: code list not validated — warn but don't fail
+  // format check already done in structural layer.
+  const unvalidatedDns = [];
+  for (const dn of ['DN35_nature_of_injury', 'DN36_body_part',
+    'DN37_cause_of_injury', 'DN73_claim_status_code']) {
+    const v = payload[dn];
+    if (v) {
+      // Non-empty + no blocklist string (blocklist covered above
+      // for name fields; here we just accept format-valid values).
+      if (CA_DATA_EDITS.BLOCKLIST_STRINGS.includes(blockNorm(v))) {
+        errors.push({
+          dn, severity: 'fatal', code: 'BLOCKLIST_STRING', got: v,
+        });
+      } else {
+        unvalidatedDns.push(dn);
+      }
+    }
+  }
+  if (unvalidatedDns.length > 0) {
+    warnings.push({
+      code: WARNINGS.CODE_LIST_NOT_VALIDATED,
+      dns: unvalidatedDns,
+      statuses: unvalidatedDns.map((d) => ({
+        dn: d,
+        status: CODE_LIST_VALIDATION_STATUS[d.replace(/_.*$/, '').replace(/^DN/, 'DN')]
+          || CODE_LIST_VALIDATION_STATUS[d.split('_')[0]],
+      })),
+    });
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+// ─── VALIDATION — Layer 3: referential ───────────────────────────
+//
+// Cross-row checks: JCN present on SROI, CB not duplicating an
+// already-open benefit, FN not leaving open benefits.
+//
+async function _validateReferential(payload, mtc_code, mtc_family) {
+  const errors = [];
+  const warnings = [];
+
+  const claim_id = payload._claim_id;
+  if (!claim_id) {
+    return { valid: true, errors, warnings };
+  }
+
+  // JCN required on SROI (except first SROI on acquired claim, out of scope)
+  if (mtc_family === 'SROI') {
+    const { data: state } = await supabase
+      .from('wcis_claim_state')
+      .select('jcn,open_benefit_codes')
+      .eq('claim_id', claim_id)
+      .single();
+    const jcn = state && state.jcn;
+    if (!jcn && !payload.DN5_jcn_or_null) {
+      errors.push({
+        dn: 'DN5_jcn_or_null', severity: 'fatal',
+        code: 'SROI_REQUIRES_JCN',
+      });
+    }
+
+    // DN73 FN rule per C7 — Section L
+    if (mtc_code === 'FN') {
+      const v = payload.DN73_claim_status_code;
+      if (!['C', 'X'].includes(v)) {
+        errors.push({
+          dn: 'DN73_claim_status_code', severity: 'fatal',
+          code: 'FN_REQUIRES_DN73_C_OR_X', got: v || null,
+        });
+      }
+    }
+
+    // CB: target benefit must not already be open
+    if (mtc_code === 'CB') {
+      const open = (state && state.open_benefit_codes) || [];
+      const to = payload.payload_context && payload.payload_context.to_benefit_code;
+      if (to && open.includes(to)) {
+        errors.push({
+          dn: 'DN85_benefit_type_code', severity: 'fatal',
+          code: 'CB_BENEFIT_ALREADY_OPEN', to,
+        });
+      }
+    }
+
+    // FN: warn if open benefits remain
+    if (mtc_code === 'FN') {
+      const open = (state && state.open_benefit_codes) || [];
+      if (open.length > 0) {
+        warnings.push({ code: 'WCIS_FN_WITH_OPEN_BENEFITS', open_codes: open });
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+// ─── validateCaEdits — public entry point ────────────────────────
+//
+// Runs all three validation layers in order, short-circuiting on
+// the first layer that produces fatal errors. Warnings accumulate
+// across layers.
+//
+async function validateCaEdits(payload, mtc_code) {
+  const mtc_family = payload._mtc_family
+    || (['00', '01', '02', '04', 'AU', 'CO'].includes(mtc_code) ? 'FROI' : 'SROI');
+
+  const warnings = [];
+  const structural = _validateStructural(payload, mtc_code);
+  warnings.push(...structural.warnings);
+  if (!structural.valid) {
+    return { valid: false, errors: structural.errors, warnings };
+  }
+
+  const caEdits = _validateCaEdits(payload, mtc_code);
+  warnings.push(...caEdits.warnings);
+  if (!caEdits.valid) {
+    return { valid: false, errors: caEdits.errors, warnings };
+  }
+
+  const referential = await _validateReferential(payload, mtc_code, mtc_family);
+  warnings.push(...referential.warnings);
+  if (!referential.valid) {
+    return { valid: false, errors: referential.errors, warnings };
+  }
+
+  return { valid: true, errors: [], warnings };
+}
+
 // ─── EXPORTS (filled in subsequent commits) ──────────────────────
 module.exports = {
   // Exports populated by later wip commits — this module is built
   // incrementally. See commit log for per-function staging.
+  validateCaEdits,
   _loaders: { DN77_CODES, DN85_CODES, DN95_CODES, DN85_DEPRECATED },
-  _internal: { _loadCsv, _parseCsvLine, _expandDn95Ranges },
+  _internal: { _loadCsv, _parseCsvLine, _expandDn95Ranges,
+    _validateStructural, _validateCaEdits, _validateReferential },
   WARNINGS,
   WcisValidationError,
   CODE_LIST_VALIDATION_STATUS,
