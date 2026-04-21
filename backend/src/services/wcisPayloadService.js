@@ -173,6 +173,175 @@ class WcisValidationError extends Error {
   }
 }
 
+// ─── _buildBasePayload ───────────────────────────────────────────
+//
+// Common DNs shared across all MTCs. Returns a payload skeleton
+// with claim demographics, employer, injury facts. MTC-specific
+// assemblers extend this with their own DNs and benefit lines.
+//
+async function _buildBasePayload(claim_id, environment) {
+  const { data: claim, error } = await supabase
+    .from('claims')
+    .select('*')
+    .eq('id', claim_id)
+    .single();
+  if (error || !claim) {
+    throw new Error(`wcisPayloadService: claim not found: ${claim_id}`);
+  }
+
+  // FEINs: prefer claim-level override, fall back to employer table.
+  let insurerFein = claim.insurer_fein;
+  let claimAdminFein = claim.claim_administrator_fein;
+  let employerFein = claim.employer_fein;
+  if (!insurerFein || !claimAdminFein || !employerFein) {
+    const { data: employer } = await supabase
+      .from('employers')
+      .select('insurer_fein,fein,self_insured,name')
+      .eq('id', claim.employer_id)
+      .single();
+    if (employer) {
+      insurerFein = insurerFein || employer.insurer_fein;
+      employerFein = employerFein || employer.fein;
+      // If self-insured, employer is claim administrator.
+      claimAdminFein = claimAdminFein || (employer.self_insured ? employer.fein : null);
+    }
+  }
+
+  // wcis_claim_state carries JCN after FROI 00 accept.
+  const { data: state } = await supabase
+    .from('wcis_claim_state')
+    .select('*')
+    .eq('claim_id', claim_id)
+    .single();
+
+  const employee = claim.employee || {};
+
+  return {
+    _claim_id: claim_id,
+    _environment: environment || 'production',
+
+    // Jurisdiction + IDs (guide Section K)
+    DN2_jurisdiction: CA_DATA_EDITS.JURISDICTION_CODE,
+    DN5_jcn_or_null: (state && state.jcn) || null,
+    DN6_insurer_fein: insurerFein || null,
+    DN15_claim_admin_claim_number: claim.claim_number || claim_id,
+    DN18_claim_administrator_fein: claimAdminFein || null,
+
+    // Employee demographics
+    DN42_employee_ssn: employee.ssn || null,
+    DN43_employee_last_name: employee.last_name || employee.lastName || null,
+    DN44_employee_first_name: employee.first_name || employee.firstName || null,
+    DN46_employee_address_line_1: employee.address_line1 || null,
+    DN47_employee_city: employee.city || null,
+    DN48_employee_state: employee.state || 'CA',
+    DN49_employee_postal_code: employee.postal_code || employee.zip || null,
+    DN52_employee_date_of_birth: employee.dob || null,
+
+    // Employer
+    DN186_employer_name: claim.employer_name || null,
+    DN187_employer_fein: employerFein || null,
+
+    // Injury facts
+    DN31_date_of_injury: claim.date_of_injury || null,
+    DN35_nature_of_injury: claim.injury_type || null,
+    DN36_body_part: claim.body_part || null,
+    DN37_cause_of_injury: (claim.ai_analysis && claim.ai_analysis.cause) || null,
+
+    // Financial (TD-rate / AWW — informational on FROI)
+    DN64_average_weekly_wage: claim.aww != null ? String(claim.aww) : null,
+    DN65_initial_temporary_disability_rate: claim.td_rate != null ? String(claim.td_rate) : null,
+  };
+}
+
+// ─── FROI ASSEMBLERS ─────────────────────────────────────────────
+//
+// Each FROI assembler extends the base payload with MTC-specific
+// DNs. Returns a payload object ready for validation.
+// Guide Section N pg 86 — FROI MTC catalogue.
+//
+
+async function _assembleFroi00(base, triggerRow) {
+  // FROI 00 Original — first notice of injury to WCIS.
+  return {
+    ...base,
+    _mtc_family: 'FROI',
+    _mtc_code: '00',
+    DN41_date_claim_administrator_had_knowledge:
+      triggerRow.event_date || base.DN31_date_of_injury,
+    DN38_injury_description: (triggerRow.payload_context && triggerRow.payload_context.description) || null,
+    payload_context: triggerRow.payload_context || {},
+  };
+}
+
+async function _assembleFroi04(base, triggerRow) {
+  // FROI 04 Denial (no payment made).
+  return {
+    ...base,
+    _mtc_family: 'FROI',
+    _mtc_code: '04',
+    DN41_date_claim_administrator_had_knowledge:
+      triggerRow.event_date || base.DN31_date_of_injury,
+    DN289_denial_reason_code:
+      (triggerRow.payload_context && triggerRow.payload_context.denial_reason_code) || null,
+    DN290_denial_reason_narrative:
+      (triggerRow.payload_context && triggerRow.payload_context.denial_reason) || null,
+    payload_context: triggerRow.payload_context || {},
+  };
+}
+
+async function _assembleFroiAu(base, triggerRow) {
+  // FROI AU Acquired — book of business transfer from prior TPA.
+  return {
+    ...base,
+    _mtc_family: 'FROI',
+    _mtc_code: 'AU',
+    DN41_date_claim_administrator_had_knowledge:
+      triggerRow.event_date,
+    DN258_acquired_claim_original_insurer_fein:
+      (triggerRow.payload_context && triggerRow.payload_context.original_insurer_fein) || null,
+    payload_context: triggerRow.payload_context || {},
+  };
+}
+
+async function _assembleFroi01(base, triggerRow) {
+  // FROI 01 Cancel — claim withdrawn (e.g., duplicate reported,
+  // worker never filed).
+  return {
+    ...base,
+    _mtc_family: 'FROI',
+    _mtc_code: '01',
+    DN82_cancel_reason_narrative:
+      (triggerRow.payload_context && triggerRow.payload_context.cancel_reason) || null,
+    payload_context: triggerRow.payload_context || {},
+  };
+}
+
+async function _assembleFroi02(base, triggerRow) {
+  // FROI 02 Change — changed claim data per FROI_DATA_CHANGE_FIELDS.
+  return {
+    ...base,
+    _mtc_family: 'FROI',
+    _mtc_code: '02',
+    DN_changed_fields:
+      (triggerRow.payload_context && triggerRow.payload_context.changed_fields) || [],
+    payload_context: triggerRow.payload_context || {},
+  };
+}
+
+async function _assembleFroiCo(base, triggerRow) {
+  // FROI CO Correction — corrects a prior FROI that ack'd with TE.
+  return {
+    ...base,
+    _mtc_family: 'FROI',
+    _mtc_code: 'CO',
+    DN_correction_of_transaction_id:
+      (triggerRow.payload_context && triggerRow.payload_context.correcting_transaction_id) || null,
+    DN_correction_narrative:
+      (triggerRow.payload_context && triggerRow.payload_context.correction_narrative) || null,
+    payload_context: triggerRow.payload_context || {},
+  };
+}
+
 // ─── VALIDATION — Layer 1: structural ────────────────────────────
 //
 // Checks that every required DN is present and format-valid per
@@ -466,6 +635,13 @@ module.exports = {
   // Exports populated by later wip commits — this module is built
   // incrementally. See commit log for per-function staging.
   validateCaEdits,
+  _buildBasePayload,
+  _assembleFroi00,
+  _assembleFroi04,
+  _assembleFroiAu,
+  _assembleFroi01,
+  _assembleFroi02,
+  _assembleFroiCo,
   _loaders: { DN77_CODES, DN85_CODES, DN95_CODES, DN85_DEPRECATED },
   _internal: { _loadCsv, _parseCsvLine, _expandDn95Ranges,
     _validateStructural, _validateCaEdits, _validateReferential },
