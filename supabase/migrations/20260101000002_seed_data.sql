@@ -9,17 +9,20 @@
 -- ============================================================
 
 -- ── Employers ─────────────────────────────────────────────────────────────────
-INSERT INTO employers (id, name, address_line1, address_city, address_state, address_zip, phone, primary_contact_email)
+INSERT INTO employers (id, name, address_line1, address_city, address_state, address_zip, phone, primary_contact_email, fein, self_insured, insurer_name, insurer_fein)
 VALUES
     ('a1b2c3d4-e5f6-7890-abcd-ef1234567801', 'BrightCare Home Health',
      '1200 W 7th St, Suite 300', 'Los Angeles', 'CA', '90017', '(213) 555-2000',
-     'hr@brightcarehh.com'),
+     'hr@brightcarehh.com',
+     '111111111', TRUE, 'BrightCare Home Health', '111111111'),
     ('a1b2c3d4-e5f6-7890-abcd-ef1234567802', 'CareWell Services',
      '500 N Brand Blvd, Suite 700', 'Glendale', 'CA', '91203', '(818) 555-3000',
-     'hr@carewellservices.com'),
+     'hr@carewellservices.com',
+     '222222222', FALSE, 'TEST CARRIER A', '555555555'),
     ('a1b2c3d4-e5f6-7890-abcd-ef1234567803', 'SunRise Home Care',
      '22700 Ventura Blvd, Suite 200', 'Woodland Hills', 'CA', '91364', '(818) 555-4000',
-     'hr@sunrisehomecare.com')
+     'hr@sunrisehomecare.com',
+     '333333333', FALSE, 'TEST CARRIER B', '666666666')
 ON CONFLICT (id) DO NOTHING;
 
 -- ── MPN Providers (15 LA-area providers) ──────────────────────────────────────
