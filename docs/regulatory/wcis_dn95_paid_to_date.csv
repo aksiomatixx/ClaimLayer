@@ -1,0 +1,47 @@
+# Regulatory code list for DN95 Paid-to-Date / Reduced Earnings / Recoveries Benefit Type Codes
+# Source: California EDI Implementation Guide for FROI/SROI v3.1
+#   (March 27, 2018), Section N, page 92
+#
+# Guide section title: "Paid to Date/Reduced Earnings/Recoveries (DN95)
+#   Benefit Type Codes Used in the WCIS"
+#
+# Category taxonomy mirrors the guide's own section title:
+#   paid_to_date     — 300-460 range (medical, legal, voc rehab, etc.)
+#   reduced_earnings — 600-624 and 650-674 ranges (per-period reporting)
+#   recovery         — 800-840 range (recoveries)
+#
+# Ranges (600-624, 650-674) are preserved verbatim from the guide. Each
+# individual code within a range carries the same description as the
+# range label per IAIABC Release 1 convention. wcisPayloadService
+# expands ranges at load time for validation.
+#
+# Voc-rehab-to-SJDB note (from guide pg 92): "As of 1/1/2009, the
+# vocational rehabilitation program was ended… Payments for the
+# California Supplemental Job Displacement Benefit (SJDB) Program
+# should be sent under DN95, BTC 390."
+#
+# Used by: wcisPayloadService.js (M22A)
+code,description,category
+300,Funeral Expenses PTD,paid_to_date
+310,Penalties PTD,paid_to_date
+320,Interest PTD,paid_to_date
+330,Employer's Legal Expense PTD,paid_to_date
+340,Claimant's Legal Expense PTD,paid_to_date
+350,Total Payments to Physician PTD,paid_to_date
+360,Hospital Costs PTD,paid_to_date
+370,Other Medical PTD,paid_to_date
+380,Vocational Rehabilitation Evaluation PTD,paid_to_date
+390,Vocational Rehabilitation Education PTD or Supplemental Job Displacement Benefit (SJDB) PTD,paid_to_date
+400,Other Vocational Rehabilitation PTD,paid_to_date
+420,Expert Witness Fees PTD,paid_to_date
+430,Unallocated Prior Indemnity Benefits PTD,paid_to_date
+440,Unallocated Prior Medical PTD,paid_to_date
+450,Pharmaceutical PTD,paid_to_date
+460,Physical Therapy PTD,paid_to_date
+600-624,Actual Reduced Earnings,reduced_earnings
+650-674,Deemed Reduced Earnings,reduced_earnings
+800,Special Fund Recovery,recovery
+810,Deductibles Recovery,recovery
+820,Subrogation Recovery,recovery
+830,Overpayment Recovery,recovery
+840,Unspecified Recovery,recovery
