@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS wcis_transmissions (
         CONSTRAINT wcis_transmissions_status_chk
         CHECK (status IN ('queued','building','transmitting','transmitted',
             'ack_997_received','ack_824_received','completed',
-            'failed','stub_transmitted')),
+            'failed','stub_transmitted','superseded')),
     ack_997_received_at     TIMESTAMPTZ,
     ack_824_received_at     TIMESTAMPTZ,
     ack_summary             JSONB,
