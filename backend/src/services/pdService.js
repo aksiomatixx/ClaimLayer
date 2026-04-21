@@ -384,6 +384,90 @@ async function initiatePDAdvances(claimId, pdEvaluationId, { tdEndDate }) {
     data: { pdAdvanceId: advRow.id, advanceDueDate, weeklyRate },
   });
 
+  // ── WCIS hook — M22A ──────────────────────────────────────────
+  // initiatePDAdvances is the transition point where TD ends and
+  // PD advances begin. Three branches based on wcis_claim_state:
+  //   open TD ('050' or '070')  → SROI CB (benefit transition)
+  //   prior suspension (Sx/Px)  → SROI RB (reinstatement)
+  //   no prior SROI             → no enqueue (first payment fires IP)
+  setImmediate(async () => {
+    try {
+      const { supabase: sb } = require('./supabase');
+      const { REPORTABLE_BENEFIT_CODES } = require('../constants/wcisConstants');
+      const wcis = require('./wcisTriggerService');
+      const { data: state } = await sb
+        .from('wcis_claim_state')
+        .select('open_benefit_codes,last_sroi_mtc')
+        .eq('claim_id', claimId)
+        .single();
+
+      const open = (state && state.open_benefit_codes) || [];
+      const lastMtc = state && state.last_sroi_mtc;
+      const now = new Date().toISOString().slice(0, 10);
+
+      if (open.includes(REPORTABLE_BENEFIT_CODES.TT) ||
+          open.includes(REPORTABLE_BENEFIT_CODES.TP)) {
+        const fromCode = open.includes(REPORTABLE_BENEFIT_CODES.TT)
+          ? REPORTABLE_BENEFIT_CODES.TT : REPORTABLE_BENEFIT_CODES.TP;
+        await wcis.enqueueIfReportable({
+          claim_id:       claimId,
+          trigger_event:  'pd_advance_benefit_transition',
+          source_service: 'pdService',
+          source_record_id: advRow.id,
+          event_date:     now,
+          payload_context: {
+            from_benefit_code: fromCode,
+            to_benefit_code:   REPORTABLE_BENEFIT_CODES.PD_SCHEDULED,
+            weekly_rate:       weeklyRate,
+            source:            'initiate_advances',
+          },
+        });
+      } else if (lastMtc && (/^S[1-9]$/.test(lastMtc) || /^P[1-9]$/.test(lastMtc))) {
+        // Option C per advisor — RB reinstates indemnity generally.
+        // DWC trading partner contact pending if WCIS rejects.
+        await wcis.enqueueIfReportable({
+          claim_id:       claimId,
+          trigger_event:  'pd_advance_after_suspended_td',
+          source_service: 'pdService',
+          source_record_id: advRow.id,
+          event_date:     now,
+          payload_context: {
+            benefit_code:          REPORTABLE_BENEFIT_CODES.PD_SCHEDULED,
+            reinstating_after_mtc: lastMtc,
+            weekly_rate:           weeklyRate,
+            source:                'initiate_advances',
+          },
+        });
+      } else if (!lastMtc) {
+        // No prior SROI — first payment will fire IP.
+        logger.info({
+          msg: 'pdService.initiatePDAdvances: no prior SROI; first payment will fire IP',
+          claimId,
+        });
+      } else {
+        // Unexpected prior state — raise for adjuster review via diary.
+        const err = new Error(
+          `WCIS_PD_ADVANCE_UNKNOWN_PRIOR_STATE: last_sroi_mtc=${lastMtc}, ` +
+          `open_benefit_codes=${JSON.stringify(open)}`,
+        );
+        logger.warn({
+          msg: 'pdService.initiatePDAdvances: unknown prior WCIS state',
+          claimId, last_sroi_mtc: lastMtc, open_benefit_codes: open,
+        });
+        // Raise a diary so this doesn't go unnoticed.
+        await _createDiary(
+          claimId, 'WCIS_PD_ADVANCE_AMBIGUOUS_STATE', now, 'CRITICAL',
+          err.message, { noSnooze: false },
+        );
+      }
+    } catch (err) {
+      logger.error({
+        msg: 'pdService.initiatePDAdvances: WCIS hook failed',
+        claimId, err: err.message,
+      });
+    }
+  });
+
   logger.info({ msg: 'pdService.initiatePDAdvances: complete', claimId, advanceDueDate, weeklyRate });
 
   return advRow;
@@ -486,6 +570,58 @@ async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
   await supabase.from('claim_events').insert({
     claim_id: adv.claim_id, type: 'pd_advance_payment', timestamp: now,
     data: { pdAdvanceId, amountPaid: amount, weekStartDate, weekEndDate, capReached },
+  });
+
+  // ── WCIS hook — M22A ──────────────────────────────────────────
+  // recordPDAdvancePayment fires per-week. Three branches:
+  //   '030' already in open_benefit_codes → SROI PY (routine)
+  //   no prior SROI on claim → SROI IP (first indemnity)
+  //   otherwise → SROI PY (conservative default)
+  setImmediate(async () => {
+    try {
+      const wcis = require('./wcisTriggerService');
+      const { REPORTABLE_BENEFIT_CODES } = require('../constants/wcisConstants');
+      const { data: state } = await supabase
+        .from('wcis_claim_state')
+        .select('open_benefit_codes')
+        .eq('claim_id', adv.claim_id)
+        .single();
+      const open = (state && state.open_benefit_codes) || [];
+
+      let triggerEvent;
+      if (open.includes(REPORTABLE_BENEFIT_CODES.PD_SCHEDULED)) {
+        triggerEvent = 'pd_advance_paid';
+      } else {
+        const { data: priorSroi } = await supabase
+          .from('wcis_transactions')
+          .select('id')
+          .eq('claim_id', adv.claim_id)
+          .eq('mtc_family', 'SROI');
+        const hasPriorSroi = (priorSroi || []).length > 0;
+        triggerEvent = hasPriorSroi ? 'pd_advance_paid' : 'pd_first_advance_as_initial';
+      }
+
+      await wcis.enqueueIfReportable({
+        claim_id:       adv.claim_id,
+        trigger_event:  triggerEvent,
+        source_service: 'pdService',
+        source_record_id: pdAdvanceId,
+        event_date:     weekStartDate,
+        payload_context: {
+          benefit_code: REPORTABLE_BENEFIT_CODES.PD_SCHEDULED,
+          amount_paid:  amount,
+          period_start: weekStartDate,
+          period_end:   weekEndDate,
+          weekly_rate:  parseFloat(adv.weekly_rate),
+          source:       'pd_advance_payment',
+        },
+      });
+    } catch (err) {
+      logger.error({
+        msg: 'pdService.recordPDAdvancePayment: WCIS hook failed',
+        pdAdvanceId, err: err.message,
+      });
+    }
   });
 
   logger.info({

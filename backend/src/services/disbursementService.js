@@ -492,6 +492,65 @@ async function recordDisbursementPayment(disbursementId, { paidDate, reference }
     data:     { disbursementId, paidDate, interestOwed, reference: reference || null },
   });
 
+  // ── WCIS hook — M22A ──────────────────────────────────────────
+  // Fire SROI PY with stip breakdown payload. If stipulation
+  // future_medical = false, follow with SROI FN. If true, no FN
+  // (claim stays future-medical-only).
+  setImmediate(async () => {
+    try {
+      const wcis = require('./wcisTriggerService');
+
+      await wcis.enqueueIfReportable({
+        claim_id:         row.claim_id,
+        trigger_event:    'stip_disbursement_paid',
+        source_service:   'disbursementService',
+        source_record_id: disbursementId,
+        event_date:       paidDate,
+        payload_context: {
+          source:          'stip_disbursement',
+          disbursement_id: disbursementId,
+          paid_date:       paidDate,
+        },
+      });
+
+      let futureMedical = null;
+      if (row.stipulation_id) {
+        const { data: stip } = await supabase
+          .from('stipulations')
+          .select('future_medical')
+          .eq('id', row.stipulation_id)
+          .single();
+        futureMedical = stip ? !!stip.future_medical : null;
+      }
+
+      if (futureMedical === false) {
+        await wcis.enqueueIfReportable({
+          claim_id:         row.claim_id,
+          trigger_event:    'claim_closed',
+          source_service:   'disbursementService',
+          source_record_id: disbursementId,
+          event_date:       paidDate,
+          payload_context: {
+            source:             'stip_disbursement',
+            disbursement_id:    disbursementId,
+            closed_date:        paidDate,
+            claim_status_code:  'C',
+          },
+        });
+      } else if (futureMedical === true) {
+        logger.info({
+          msg: 'disbursementService.recordDisbursementPayment: future_medical=true, no FN',
+          disbursementId,
+        });
+      }
+    } catch (err) {
+      logger.error({
+        msg: 'disbursementService.recordDisbursementPayment: WCIS hook failed',
+        disbursementId, err: err.message,
+      });
+    }
+  });
+
   logger.info({
     msg: 'disbursementService.recordDisbursementPayment: complete',
     disbursementId, paidDate, interestOwed, flags: mergedFlags,

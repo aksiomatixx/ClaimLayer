@@ -440,6 +440,48 @@ async function recordPayment(offerId, { paidDate }) {
   );
   await _writeEvent(offer.claim_id, 'cnr_paid', { offerId, paidDate });
 
+  // ── WCIS hook — M22A ──────────────────────────────────────────
+  // Fire SROI PY with C&R breakdown payload, then SROI FN.
+  // Both enqueued atomically; scanner batches them together.
+  // Note: _transitionClaimStatus above directly updates claims.status
+  // without going through claimService.updateStatus, so no
+  // suppressWcisClose flag is needed — there's no competing enqueue.
+  setImmediate(async () => {
+    try {
+      const wcis = require('./wcisTriggerService');
+      await wcis.enqueueIfReportable({
+        claim_id:         offer.claim_id,
+        trigger_event:    'cnr_settlement_paid',
+        source_service:   'cnrService',
+        source_record_id: offerId,
+        event_date:       paidDate,
+        payload_context: {
+          source:     'cnr_settlement',
+          offer_id:   offerId,
+          paid_date:  paidDate,
+        },
+      });
+      await wcis.enqueueIfReportable({
+        claim_id:         offer.claim_id,
+        trigger_event:    'claim_closed',
+        source_service:   'cnrService',
+        source_record_id: offerId,
+        event_date:       paidDate,
+        payload_context: {
+          source:             'cnr_settlement',
+          offer_id:           offerId,
+          closed_date:        paidDate,
+          claim_status_code:  'C',
+        },
+      });
+    } catch (err) {
+      logger.error({
+        msg: 'cnrService.recordPayment: WCIS hooks failed',
+        offerId, err: err.message,
+      });
+    }
+  });
+
   logger.info({ msg: 'cnrService.recordPayment: complete', offerId, paidDate });
   return updated;
 }

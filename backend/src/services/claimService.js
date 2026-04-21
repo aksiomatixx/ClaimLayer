@@ -275,6 +275,29 @@ async function createClaim(froiData, employerId) {
     );
   });
 
+  // ── Step 9: WCIS FROI 00 enqueue — fire-and-forget ────────────────────────
+  // M22A: claim-creation hook. Enqueues FROI 00 in wcis_trigger_queue.
+  // wcisTriggerService handles all gating (wcis_enabled, DOI cutoff,
+  // duplicate detection). Errors are logged, never rethrown.
+  setImmediate(() => {
+    const wcis = require('./wcisTriggerService');
+    wcis.enqueueIfReportable({
+      claim_id:         claimId,
+      trigger_event:    'claim_created',
+      source_service:   'claimService',
+      source_record_id: null,
+      event_date:       froiData.dateOfInjury,
+      payload_context: {
+        doi:         froiData.dateOfInjury,
+        employer_id: employerId,
+        employee_id: froiData.employeeId || null,
+        source:      'intake',
+      },
+    }).catch((err) =>
+      logger.error({ msg: 'createClaim: WCIS FROI 00 enqueue failed', claimId, err: err.message }),
+    );
+  });
+
   logger.info({ msg: 'createClaim: complete', claimNumber, claimId });
 
   // Return the fully assembled claim object
@@ -551,7 +574,7 @@ const VALID_TRANSITIONS = {
   closed:                 [],
 };
 
-async function updateStatus(claimId, newStatus, changedBy) {
+async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
   const claim = await getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
@@ -581,9 +604,55 @@ async function updateStatus(claimId, newStatus, changedBy) {
     c.updatedAt = now;
     c.events = c.events || [];
     c.events.push({ type: 'status_changed', timestamp: now, data: { from: prev, to: newStatus, changedBy } });
-    return c;
   }
 
+  // ── WCIS hook — M22A ──────────────────────────────────────────
+  // Intercept status transitions that are reportable to WCIS.
+  //   denied   → FROI 04 or SROI 04 (depends on prior FROI accept)
+  //   closed   → SROI FN (unless suppressed by settlement path)
+  //
+  // opts.suppressWcisClose=true is passed by cnrService.recordPayment
+  // and disbursementService.recordDisbursementPayment to avoid
+  // duplicate enqueue on settlement-driven closures.
+  setImmediate(() => {
+    const wcis = require('./wcisTriggerService');
+    const doi = claim.dateOfInjury;
+
+    if (newStatus === 'denied') {
+      // wcisTriggerService handles FROI 04 vs SROI 04 routing by
+      // inspecting wcis_claim_state.first_froi_accepted_at.
+      wcis.enqueueIfReportable({
+        claim_id:       claimId,
+        trigger_event:  'claim_denied_no_payment',
+        source_service: 'claimService',
+        event_date:     now.slice(0, 10),
+        payload_context: { doi, changedBy, from_status: prev },
+      }).catch((err) => logger.error({
+        msg: 'updateStatus WCIS denial enqueue failed', claimId, err: err.message,
+      }));
+    }
+
+    if (newStatus === 'closed' && !opts.suppressWcisClose) {
+      wcis.enqueueIfReportable({
+        claim_id:       claimId,
+        trigger_event:  'claim_closed',
+        source_service: 'claimService',
+        event_date:     now.slice(0, 10),
+        payload_context: {
+          doi,
+          closed_date: now.slice(0, 10),
+          source: 'updateStatus',
+          claim_status_code: opts.futureMedicalOnly ? 'X' : 'C',
+        },
+      }).catch((err) => logger.error({
+        msg: 'updateStatus WCIS close enqueue failed', claimId, err: err.message,
+      }));
+    }
+  });
+
+  if (_testStore.has(claimId)) {
+    return _testStore.get(claimId);
+  }
   return getClaim(claimId);
 }
 
