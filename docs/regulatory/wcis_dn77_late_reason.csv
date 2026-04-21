@@ -1,0 +1,30 @@
+# Regulatory code list for DN77 Late Reason Codes
+# Source: California EDI Implementation Guide for FROI/SROI v3.1
+#   (March 27, 2018), Section N, page 90
+# Authority: IAIABC, ANSI A9 (as cited by guide)
+# Categories: Delays (L1-LA), Coverage (C1), Errors (E1-E6), Disputes (D1-D6)
+# Used by: wcisPayloadService.js (M22A)
+code,description
+L1,No excuse
+L2,"Late Notification, Employer"
+L3,"Late Notification, Employee"
+L4,"Late Notification, State"
+L5,"Late Notification, Health Care Provider"
+L6,"Late Notification, Assigned Risk"
+L7,Late Investigation
+L8,Technical Processing Delay/Computer Failure
+L9,Manual Processing Delay
+LA,Intermittent Lost Time Prior to First Payment
+C1,Coverage Lack of Information
+E1,Wrongful Determination of No Coverage
+E2,Errors from Employer
+E3,Errors from Employee
+E4,Errors from State
+E5,Errors from Health Care Provider
+E6,Errors from Other Claim Administrator/IA/TPA
+D1,Dispute Concerning Coverage
+D2,Dispute Concerning Compensability in Whole
+D3,Dispute Concerning Compensability in Part
+D4,Dispute Concerning Disability in Whole
+D5,Dispute Concerning Disability in Part
+D6,Dispute Concerning Impairment
