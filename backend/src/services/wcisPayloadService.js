@@ -1086,11 +1086,311 @@ async function validateCaEdits(payload, mtc_code) {
   return { valid: true, errors: [], warnings };
 }
 
+// ─── ASSEMBLER DISPATCH ──────────────────────────────────────────
+const ASSEMBLERS = Object.freeze({
+  FROI: {
+    '00': _assembleFroi00,
+    '04': _assembleFroi04,
+    'AU': _assembleFroiAu,
+    '01': _assembleFroi01,
+    '02': _assembleFroi02,
+    'CO': _assembleFroiCo,
+  },
+  SROI: {
+    'IP': _assembleSroiIp,
+    'AP': _assembleSroiAp,
+    'CA': _assembleSroiCa,
+    'CB': _assembleSroiCb,
+    'RE': _assembleSroiRe,
+    'FS': _assembleSroiFs,
+    'S1': _assembleSroiSuspension,
+    'S2': _assembleSroiSuspension,
+    'S3': _assembleSroiSuspension,
+    'S7': _assembleSroiSuspension,
+    'P1': _assembleSroiSuspension,
+    'P2': _assembleSroiSuspension,
+    'P3': _assembleSroiSuspension,
+    'P7': _assembleSroiSuspension,
+    'PY': _assembleSroiPy,
+    '04': _assembleSroi04,
+    '4P': _assembleSroi4p,
+    'CD': _assembleSroiCd,
+    '02': _assembleSroi02,
+    'FN': _assembleSroiFn,
+    'CO': _assembleSroiCo,
+    'RB': _assembleSroiRb,
+    'UR': _assembleSroiUr,
+  },
+});
+
+// ─── buildPayload ────────────────────────────────────────────────
+//
+// Drain-one-trigger entry point. Consumes a wcis_trigger_queue row,
+// assembles the MTC payload, validates, inserts a wcis_transactions
+// row, marks the trigger as 'generated' with the new transaction id.
+//
+async function buildPayload(trigger_queue_id) {
+  const { data: triggerRow, error: trigErr } = await supabase
+    .from('wcis_trigger_queue')
+    .select('*')
+    .eq('id', trigger_queue_id)
+    .single();
+  if (trigErr || !triggerRow) {
+    throw new Error(`wcisPayloadService.buildPayload: trigger not found: ${trigger_queue_id}`);
+  }
+  if (triggerRow.status !== 'pending' && triggerRow.status !== 'processing') {
+    throw new Error(
+      `wcisPayloadService.buildPayload: trigger status is '${triggerRow.status}', ` +
+      `expected 'pending' or 'processing'`,
+    );
+  }
+
+  // Mark as processing (best-effort — mock Supabase does not
+  // support SELECT FOR UPDATE SKIP LOCKED).
+  await supabase.from('wcis_trigger_queue')
+    .update({ status: 'processing' })
+    .eq('id', trigger_queue_id);
+
+  const environment = (triggerRow.payload_context && triggerRow.payload_context.environment)
+    || process.env.WCIS_ENVIRONMENT
+    || 'production';
+
+  const base = await _buildBasePayload(triggerRow.claim_id, environment);
+
+  const bucket = ASSEMBLERS[triggerRow.mtc_family];
+  if (!bucket) {
+    throw new Error(`wcisPayloadService.buildPayload: unknown mtc_family ${triggerRow.mtc_family}`);
+  }
+  const assembler = bucket[triggerRow.mtc_code];
+  if (!assembler) {
+    throw new Error(
+      `wcisPayloadService.buildPayload: no assembler for ` +
+      `${triggerRow.mtc_family} ${triggerRow.mtc_code}`,
+    );
+  }
+
+  const payload = await assembler(base, triggerRow);
+  const assemblerWarnings = payload._assembler_warnings || [];
+  delete payload._assembler_warnings;
+
+  const validation = await validateCaEdits(payload, triggerRow.mtc_code);
+  if (!validation.valid) {
+    // Persist the failure state on the trigger row for visibility.
+    await supabase.from('wcis_trigger_queue')
+      .update({
+        status: 'failed',
+        notes: JSON.stringify(validation.errors).slice(0, 4000),
+        processed_at: new Date().toISOString(),
+      })
+      .eq('id', trigger_queue_id);
+    throw new WcisValidationError(validation.errors);
+  }
+
+  const allWarnings = [...assemblerWarnings, ...validation.warnings];
+
+  // Hash payload for audit / duplicate detection.
+  const payloadHash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload))
+    .digest('hex');
+
+  const flatfile = _renderFlatFileFromPayload(payload);
+
+  const { data: txn, error: txErr } = await supabase
+    .from('wcis_transactions')
+    .insert({
+      claim_id:            triggerRow.claim_id,
+      trigger_queue_id:    triggerRow.id,
+      mtc_family:          triggerRow.mtc_family,
+      mtc_code:            triggerRow.mtc_code,
+      mtc_date:            triggerRow.event_date,
+      jcn_at_submission:   payload.DN5_jcn_or_null || null,
+      environment,
+      payload,
+      payload_hash:        payloadHash,
+      flatfile_rendered:   flatfile,
+      validation_warnings: allWarnings,
+      status:              'generated',
+      adapter_used:        process.env.WCIS_ADAPTER || 'stub',
+    })
+    .select()
+    .single();
+
+  if (txErr || !txn) {
+    throw new Error(
+      `wcisPayloadService.buildPayload: insert failed — ${txErr && txErr.message}`,
+    );
+  }
+
+  await supabase.from('wcis_trigger_queue')
+    .update({
+      status: 'generated',
+      processed_at: new Date().toISOString(),
+      generated_transaction_id: txn.id,
+    })
+    .eq('id', trigger_queue_id);
+
+  logger.info({
+    msg: 'wcisPayloadService.buildPayload: generated',
+    trigger_queue_id, transaction_id: txn.id,
+    mtc_family: triggerRow.mtc_family, mtc_code: triggerRow.mtc_code,
+    warnings: allWarnings.length,
+  });
+
+  return txn;
+}
+
+// ─── renderFlatFile ──────────────────────────────────────────────
+//
+// IAIABC Release 1 pipe-delimited flat-file. One "transaction" per
+// row with pipe-separated DN values; benefit_lines become a
+// subsegment. This is a minimal renderer — exact DN ordering will
+// be fine-tuned against WCIS test acks.
+//
+async function renderFlatFile(transaction_id) {
+  const { data: txn, error } = await supabase
+    .from('wcis_transactions')
+    .select('payload')
+    .eq('id', transaction_id)
+    .single();
+  if (error || !txn) {
+    throw new Error(`wcisPayloadService.renderFlatFile: transaction not found: ${transaction_id}`);
+  }
+  return _renderFlatFileFromPayload(txn.payload);
+}
+
+function _renderFlatFileFromPayload(payload) {
+  const header = [
+    'IAIABC_R1',
+    payload._mtc_family,
+    payload._mtc_code,
+    payload.DN2_jurisdiction,
+    payload.DN5_jcn_or_null || '',
+    payload.DN15_claim_admin_claim_number || '',
+  ].join('|');
+
+  const body = [];
+  const dnOrder = [
+    'DN6_insurer_fein', 'DN18_claim_administrator_fein',
+    'DN42_employee_ssn', 'DN43_employee_last_name', 'DN44_employee_first_name',
+    'DN46_employee_address_line_1', 'DN47_employee_city', 'DN48_employee_state',
+    'DN49_employee_postal_code', 'DN52_employee_date_of_birth',
+    'DN186_employer_name', 'DN187_employer_fein',
+    'DN31_date_of_injury', 'DN34_date_disability_began',
+    'DN35_nature_of_injury', 'DN36_body_part', 'DN37_cause_of_injury',
+    'DN64_average_weekly_wage', 'DN65_initial_temporary_disability_rate',
+    'DN41_date_claim_administrator_had_knowledge',
+    'DN57_date_return_to_work',
+    'DN73_claim_status_code',
+    'DN289_denial_reason_code', 'DN290_denial_reason_narrative',
+  ];
+  for (const dn of dnOrder) {
+    if (payload[dn] !== undefined && payload[dn] !== null) {
+      body.push(`${dn}=${payload[dn]}`);
+    }
+  }
+
+  const lines = (payload.benefit_lines || []).map((bl, i) => {
+    const parts = [`BL${i + 1}`];
+    for (const [k, v] of Object.entries(bl)) {
+      if (v == null) continue;
+      parts.push(`${k}=${v}`);
+    }
+    return parts.join('|');
+  });
+
+  return [header, body.join('|'), ...lines, 'END'].join('\n');
+}
+
+// ─── regeneratePayload ───────────────────────────────────────────
+//
+// Produce a new SROI CO (or FROI CO) transaction that corrects a
+// prior transaction that ack'd with TE. Original is marked
+// 'superseded'. New transaction carries
+// payload_context.correcting_transaction_id back-reference.
+//
+async function regeneratePayload(transaction_id, { reason, corrected_payload }) {
+  const { data: orig, error } = await supabase
+    .from('wcis_transactions')
+    .select('*')
+    .eq('id', transaction_id)
+    .single();
+  if (error || !orig) {
+    throw new Error(`wcisPayloadService.regeneratePayload: transaction not found: ${transaction_id}`);
+  }
+
+  const correctionMtc = orig.mtc_family === 'FROI' ? 'CO' : 'CO';
+  const assembler = ASSEMBLERS[orig.mtc_family][correctionMtc];
+
+  // Build an ephemeral trigger row for the assembler contract.
+  const ephemeralTrigger = {
+    claim_id: orig.claim_id,
+    mtc_family: orig.mtc_family,
+    mtc_code: correctionMtc,
+    event_date: new Date().toISOString().slice(0, 10),
+    payload_context: {
+      correcting_transaction_id: transaction_id,
+      correction_narrative: reason || null,
+      corrected_payload: corrected_payload || null,
+    },
+  };
+  const base = await _buildBasePayload(orig.claim_id, orig.environment);
+  const payload = await assembler(base, ephemeralTrigger);
+
+  const validation = await validateCaEdits(payload, correctionMtc);
+  if (!validation.valid) {
+    throw new WcisValidationError(validation.errors);
+  }
+
+  const payloadHash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload))
+    .digest('hex');
+
+  const flatfile = _renderFlatFileFromPayload(payload);
+
+  const { data: newTxn } = await supabase
+    .from('wcis_transactions')
+    .insert({
+      claim_id:            orig.claim_id,
+      mtc_family:          orig.mtc_family,
+      mtc_code:            correctionMtc,
+      mtc_date:            ephemeralTrigger.event_date,
+      jcn_at_submission:   payload.DN5_jcn_or_null || null,
+      environment:         orig.environment,
+      payload,
+      payload_hash:        payloadHash,
+      flatfile_rendered:   flatfile,
+      validation_warnings: validation.warnings,
+      status:              'generated',
+      adapter_used:        process.env.WCIS_ADAPTER || 'stub',
+    })
+    .select()
+    .single();
+
+  // Mark the original as superseded.
+  await supabase.from('wcis_transactions')
+    .update({ status: 'superseded', updated_at: new Date().toISOString() })
+    .eq('id', transaction_id);
+
+  logger.info({
+    msg: 'wcisPayloadService.regeneratePayload: complete',
+    original_id: transaction_id, new_id: newTxn.id, reason,
+  });
+
+  return newTxn;
+}
+
 // ─── EXPORTS (filled in subsequent commits) ──────────────────────
 module.exports = {
   // Exports populated by later wip commits — this module is built
   // incrementally. See commit log for per-function staging.
+  buildPayload,
+  renderFlatFile,
+  regeneratePayload,
   validateCaEdits,
+  ASSEMBLERS,
+  _renderFlatFileFromPayload,
   _buildBasePayload,
   _assembleFroi00,
   _assembleFroi04,
