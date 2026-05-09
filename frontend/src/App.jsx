@@ -1272,9 +1272,15 @@ function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,
         <div style={{padding:"14px 22px",borderBottom:`1px solid ${C.border}`,fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.text}}>ALL CLAIMS — {claims.length}</div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>{["Claim ID","Claimant","Employer","DOI","Injury","Status","Priority","Reserve","Appt","Media","Actions"].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+            <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>{["Claim ID","Claimant","Employer","DOI","Injury","Status","Active Benefit","TD Weeks","Priority","Reserve","Appt","Media","Actions"].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
             <tbody>{claims.map((c,i)=>{
               const res=c.aiAnalysis?c.aiAnalysis.suggestedMedicalReserve+c.aiAnalysis.suggestedIndemnityReserve+c.aiAnalysis.suggestedExpenseReserve:null;
+              const tdSum = c.td_summary || null;
+              const tdActive = tdSum?.active || null;
+              const tdPaid = tdSum?.total_weeks_paid ?? 0;
+              const tdCap = tdSum?.statutory_cap_weeks || 104;
+              const tdPct = Math.min(100, Math.round((tdPaid/tdCap)*100));
+              const tdColor = tdPaid>=100 ? C.red : tdPaid>=95 ? C.amber : C.cyan;
               return(
                 <tr key={c.id} className="rh" onClick={()=>onSelect(c.id)} style={{borderBottom:i<claims.length-1?`1px solid ${C.border}`:"none",animation:`fadeUp .3s ease ${i*.04}s both`}}>
                   <td style={{padding:"12px 13px"}}><span style={{fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{c.id}</span></td>
@@ -1283,6 +1289,15 @@ function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,
                   <td style={{padding:"12px 13px",fontSize:12,fontFamily:C.mono,color:C.dim}}>{c.dateOfInjury}</td>
                   <td style={{padding:"12px 13px"}}><div style={{fontSize:12,color:C.dim}}>{c.injuryType}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{c.bodyPart}</div></td>
                   <td style={{padding:"12px 13px"}}><Badge status={c.status}/></td>
+                  <td style={{padding:"12px 13px"}}>{tdActive?<span style={{fontFamily:C.mono,fontSize:11,fontWeight:600,color:TD_TYPE_COLOR[tdActive.benefit_type]||C.blue}}>{tdActive.benefit_type} {fmt$(tdActive.weekly_rate)}/wk</span>:<span style={{color:C.dim}}>—</span>}</td>
+                  <td style={{padding:"12px 13px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontFamily:C.mono,fontSize:11,color:tdColor,fontWeight:tdPaid>=95?700:500,whiteSpace:"nowrap"}}>{tdPaid} / {tdCap}</span>
+                      <div style={{width:32,height:4,background:C.bg,borderRadius:2,overflow:"hidden",border:`1px solid ${C.border}`}}>
+                        <div style={{width:`${tdPct}%`,height:"100%",background:tdColor}}/>
+                      </div>
+                    </div>
+                  </td>
                   <td style={{padding:"12px 13px"}}>{c.aiAnalysis?<span style={{fontFamily:C.mono,fontSize:12,fontWeight:700,color:PRI_COLOR[c.aiAnalysis.priority]}}>{c.aiAnalysis.priority}</span>:<span style={{color:C.muted}}>—</span>}</td>
                   <td style={{padding:"12px 13px"}}>{res!=null?<span style={{fontFamily:C.mono,fontSize:12,fontWeight:600,color:C.cyan}}>{fmt$(res)}</span>:<span style={{color:C.muted}}>—</span>}</td>
                   <td style={{padding:"12px 13px"}}>{c.appointment?.confirmed?<span style={{fontSize:10,background:C.tealF,color:C.teal,padding:"2px 8px",borderRadius:4,fontFamily:C.mono,border:`1px solid ${C.teal}33`}}>✓ Booked</span>:<span style={{color:C.muted,fontSize:11}}>—</span>}</td>

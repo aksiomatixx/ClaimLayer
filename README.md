@@ -278,6 +278,24 @@ Claude generates diary descriptions only — all statutory dates are calculated 
 | M14 | Compromise and Release (no MSA only): offer → accept → sign → EAMS → OACR → paid lifecycle, MSA gate on pricing, CCR §10880 30-day payment due (CRITICAL no_snooze), C&R closes claim (no future medical) | ✅ Complete |
 | M14.5 | Award Response, Disbursement Queue & Advance Cap Retrofit: WCAB award extraction (Claude PDF), DEU Template B commutation, disbursement bundle (accrued + scheduled + AA fee + §5800 interest), `pd_advance_payments` per-week tracking, represented 85% / unrepresented 100% advance cap with adjuster override, `claims.p_and_s_date` first-class column with source priority, `recordEAMSFiled` premature-closure fix | ✅ Complete |
 | M22A | California WCIS EDI FROI/SROI transmission infrastructure: trigger queue, payload assembly for 19 MTCs (FROI 00/04/AU/01/02/CO + SROI IP/AP/CA/CB/RE/FS/Sx-Px/PY/04/4P/CD/02/FN/CO + scaffolded RB/UR), validation per guide Section K/L (structural, CA edits, referential), stubAdapter with synthetic 824 acks + stub JCN sequence, sftpAdapter/vendorAdapter scaffolds, deadline monitor + queue scanner + ack poller cron, admin routes, C&R breakdown columns on settlement_offers with DN85 5xx three-line PY payload. Event hooks wired on claimService.createClaim / updateStatus, pdService.initiatePDAdvances / recordPDAdvancePayment, cnrService.recordPayment, disbursementService.recordDisbursementPayment. tdService hooks, SROI 02 representation, FROI AU, SROI CD deferred with TRIGGER_EVENT_TO_MTC entries scaffolded for future wire-up. Migrations 20260102000010 + 20260102000011 not applied — SQL for review | ✅ Complete |
+| tdService (PARTIAL) | TD period tracking + admin drawer visibility (data + UI; WCIS triggers deferred). See "tdService milestone (PARTIAL — period tracking shipped)" below for shipped/remaining breakdown. Migration 20260102000012 not applied — SQL for review | 🟡 Partial |
+
+---
+
+### tdService milestone (PARTIAL — period tracking shipped)
+
+> Master_Context.md (the canonical "Deferred tasks" log) is internal and not in this repo. This subsection mirrors the equivalent entry so the in-repo state of tdService is searchable.
+
+**Shipped 2026-05-09:** First-class `td_periods` table, `tdPeriodsService.js` with full CRUD + reinstatement + summary aggregations, 6 REST routes, ClaimDrawer Benefits tab with summary card / timeline / period table / Start modal, AdminDashboard columns for active benefit and 104-week cap progress, auto-completion of `TD_PAYMENT_SETUP` diary on first period, `audit_log` entries on every mutation, `claim_event` entries for `td_period_started` / `td_period_closed` / `td_period_reinstated`.
+
+**Remaining for full milestone:**
+
+- WCIS SROI trigger wiring per state change (IP / CA / CB / Sx / Px / RB / RE / FS) — hooks in service file mark the exact MTC mappings; needs `wcisTriggerService.enqueue` calls.
+- DWC-9 / SROI 02 generation on benefit changes.
+- LC §4650(d) self-imposed-penalty automation for late TD payments.
+- Salary continuation specifics (rare in home health).
+- Constraint of `suspension_reason_code` to WCIS code list (currently free-text VARCHAR).
+- 240-week severe-injury cap path (LC §4656(c)(3)) — currently hardcoded to 104 in `summary`.
 
 ---
 
