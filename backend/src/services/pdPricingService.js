@@ -86,7 +86,16 @@ async function priceCnr(claimId) {
   };
 
   const systemPrompt = _loadPrompt();
-  const result = await aiService._callClaude(systemPrompt, JSON.stringify(claimSnapshot), 1500);
+  // Prefer the metadata-returning helper, but fall back to plain
+  // _callClaude so existing test doubles (which only mock _callClaude)
+  // keep working without modification.
+  let result, raw = null, meta = { input_tokens: null, output_tokens: null, latency_ms: null };
+  if (typeof aiService._callClaudeMeta === 'function') {
+    const out = await aiService._callClaudeMeta(systemPrompt, JSON.stringify(claimSnapshot), 1500);
+    result = out.parsed; raw = out.raw; meta = out.meta;
+  } else {
+    result = await aiService._callClaude(systemPrompt, JSON.stringify(claimSnapshot), 1500);
+  }
 
   // Safety: recommendation must always be adjuster_review
   if (result.recommendation && result.recommendation !== 'adjuster_review') {
@@ -96,6 +105,43 @@ async function priceCnr(claimId) {
 
   // Use midpoint as the cnr value
   const cnrValue = parseFloat(result.cnrValueMid) || stipData.stipValue * 1.5;
+
+  // Guardrail capture — always emit BOTH cap rules so the audit row is
+  // explicit about which thresholds passed and which fired.
+  const stip       = stipData.stipValue || 0;
+  const premiumMul = stip > 0 ? cnrValue / stip : 0;
+  const guardrails = [];
+  if (premiumMul > CNR_GUARDRAILS.MAX_PREMIUM_MULTIPLIER) {
+    guardrails.push({ rule: 'cnr_premium_cap_5x', triggered: true,
+      action: 'rejected', computed_premium: Math.round(premiumMul * 100) / 100 });
+  } else {
+    guardrails.push({ rule: 'cnr_premium_cap_5x', triggered: false,
+      computed_premium: Math.round(premiumMul * 100) / 100 });
+  }
+  if (premiumMul > CNR_GUARDRAILS.MIN_PREMIUM_MULTIPLIER) {
+    guardrails.push({ rule: 'cnr_premium_cap_1.15x', triggered: true,
+      action: 'flagged_above_premium_threshold',
+      computed_premium: Math.round(premiumMul * 100) / 100 });
+  } else {
+    guardrails.push({ rule: 'cnr_premium_cap_1.15x', triggered: false,
+      computed_premium: Math.round(premiumMul * 100) / 100 });
+  }
+
+  try {
+    const aid = require('./aiDecisionsService');
+    await aid.logDecision({
+      claim_id:       claimId,
+      decision_type:  'cnr_pricing',
+      prompt_name:    'cnr_pricing',
+      model:          require('../config').anthropic.model,
+      input_snapshot: claimSnapshot,
+      output_parsed:  result,
+      output_raw:     raw,
+      ...meta,
+      confidence:        typeof result.confidence === 'number' ? result.confidence : null,
+      guardrail_actions: guardrails,
+    });
+  } catch (e) { logger.warn({ msg: 'priceCnr: audit log failed', err: e.message }); }
 
   // Write settlement_offers row
   const { data: offer, error } = await supabase

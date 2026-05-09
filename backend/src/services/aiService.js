@@ -30,7 +30,12 @@ function loadPrompt(name) {
 }
 
 // ── Core Claude call ──────────────────────────────────────────────────────────
-async function callClaude(systemPrompt, userContent, maxTokens = 1500) {
+//
+// Two flavors:
+//   callClaude(...)      — returns parsed JSON (back-compat for existing callers).
+//   callClaudeMeta(...)  — returns { parsed, raw, meta:{input_tokens, output_tokens, latency_ms} }
+// for callers that want to log via aiDecisionsService.
+async function callClaudeMeta(systemPrompt, userContent, maxTokens = 1500) {
   if (!config.anthropic.apiKey) {
     throw new Error('ANTHROPIC_API_KEY is not set — AI analysis unavailable');
   }
@@ -56,24 +61,31 @@ async function callClaude(systemPrompt, userContent, maxTokens = 1500) {
   );
 
   const raw = res.data.content?.find(b => b.type === 'text')?.text || '';
+  const latency_ms = Date.now() - start;
+  const input_tokens  = res.data.usage?.input_tokens  ?? null;
+  const output_tokens = res.data.usage?.output_tokens ?? null;
 
   logger.info({
-    integration:  'anthropic',
-    model:        config.anthropic.model,
-    latencyMs:    Date.now() - start,
-    inputTokens:  res.data.usage?.input_tokens,
-    outputTokens: res.data.usage?.output_tokens,
+    integration: 'anthropic', model: config.anthropic.model,
+    latencyMs: latency_ms, inputTokens: input_tokens, outputTokens: output_tokens,
   });
 
   // Strip accidental markdown fences before parsing
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
+  let parsed;
   try {
-    return JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned);
   } catch (parseErr) {
     logger.error({ msg: 'Claude: JSON parse failed — manual review required', raw });
     throw new Error('Claude returned invalid JSON — task queued for manual review');
   }
+  return { parsed, raw, meta: { input_tokens, output_tokens, latency_ms } };
+}
+
+async function callClaude(systemPrompt, userContent, maxTokens = 1500) {
+  const { parsed } = await callClaudeMeta(systemPrompt, userContent, maxTokens);
+  return parsed;
 }
 
 // ── Compensability analysis ───────────────────────────────────────────────────
@@ -87,7 +99,7 @@ async function callClaude(systemPrompt, userContent, maxTokens = 1500) {
 async function analyzeCompensability(claim) {
   const systemPrompt = loadPrompt('compensability_analysis');
 
-  const userContent = JSON.stringify({
+  const inputSnapshot = {
     claimNumber:        claim.claimNumber,
     dateOfInjury:       claim.dateOfInjury,
     bodyPart:           claim.bodyPart,
@@ -99,23 +111,36 @@ async function analyzeCompensability(claim) {
     stateOfJurisdiction: 'CA',
     employerContests:   claim.employerContests   ?? false,
     motorVehicleFields: claim.motorVehicleFields ?? null,
-  });
+  };
 
-  const result = await callClaude(systemPrompt, userContent);
+  const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, JSON.stringify(inputSnapshot));
 
   // Validate required output fields
   const required = [
-    'compensability',
-    'compensabilityScore',
-    'priority',
-    'suggestedMedicalReserve',
-    'suggestedIndemnityReserve',
-    'suggestedExpenseReserve',
+    'compensability', 'compensabilityScore', 'priority',
+    'suggestedMedicalReserve', 'suggestedIndemnityReserve', 'suggestedExpenseReserve',
   ];
   const missing = required.filter(f => !(f in result));
   if (missing.length) {
     throw new Error(`Claude compensability response missing fields: ${missing.join(', ')}`);
   }
+
+  // Audit log — best-effort; never breaks the AI return
+  try {
+    const aid = require('./aiDecisionsService');
+    await aid.logDecision({
+      claim_id:       claim.id || null,
+      decision_type:  'compensability',
+      prompt_name:    'compensability_analysis',
+      model:          config.anthropic.model,
+      input_snapshot: inputSnapshot,
+      output_parsed:  result,
+      output_raw:     raw,
+      ...meta,
+      confidence:     typeof result.compensabilityScore === 'number' ? result.compensabilityScore : null,
+      guardrail_actions: [],
+    });
+  } catch (e) { logger.warn({ msg: 'analyzeCompensability: audit log failed', err: e.message }); }
 
   return result;
 }
@@ -135,26 +160,52 @@ async function evaluateRFA(rfa, claim) {
     (Date.now() - new Date(claim.dateOfInjury).getTime()) / (1000 * 60 * 60 * 24)
   );
 
-  const userContent = JSON.stringify({
-    claimNumber:          claim.claimNumber,
-    dateOfInjury:         claim.dateOfInjury,
+  const inputSnapshot = {
+    claimNumber:         claim.claimNumber,
+    dateOfInjury:        claim.dateOfInjury,
     daysSinceInjury,
-    bodyPart:             claim.bodyPart,
-    acceptedDiagnosis:    rfa.acceptedDiagnosis,
-    requestedTreatment:   rfa.requestedTreatment,
-    requestedCptCodes:    rfa.requestedCptCodes,
-    requestingPhysician:  rfa.requestingPhysician,
-    rfaReceivedDate:      rfa.rfaReceivedDate,
-    stateOfJurisdiction:  'CA',
-  });
+    bodyPart:            claim.bodyPart,
+    acceptedDiagnosis:   rfa.acceptedDiagnosis,
+    requestedTreatment:  rfa.requestedTreatment,
+    requestedCptCodes:   rfa.requestedCptCodes,
+    requestingPhysician: rfa.requestingPhysician,
+    rfaReceivedDate:     rfa.rfaReceivedDate,
+    stateOfJurisdiction: 'CA',
+  };
 
-  const result = await callClaude(systemPrompt, userContent, 1000);
+  const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, JSON.stringify(inputSnapshot), 1000);
 
   // Safety guard: AI must never return a denial
-  if (result.recommendedAction && result.recommendedAction !== 'auto_approve' && result.recommendedAction !== 'physician_review') {
-    logger.error({ msg: 'Claude RFA: unexpected recommendedAction', value: result.recommendedAction });
+  const guardrails = [];
+  const original = result.recommendedAction;
+  const validActions = ['auto_approve', 'physician_review'];
+  if (original && !validActions.includes(original)) {
+    logger.error({ msg: 'Claude RFA: unexpected recommendedAction', value: original });
     result.recommendedAction = 'physician_review';
+    guardrails.push({
+      rule: 'no_auto_deny', triggered: true,
+      original, forced_to: 'physician_review',
+    });
+  } else {
+    // Always emit the rule with triggered:false so the audit is explicit
+    guardrails.push({ rule: 'no_auto_deny', triggered: false });
   }
+
+  try {
+    const aid = require('./aiDecisionsService');
+    await aid.logDecision({
+      claim_id:       claim.id || null,
+      decision_type:  'rfa_mtus',
+      prompt_name:    'rfa_mtus_evaluation',
+      model:          config.anthropic.model,
+      input_snapshot: inputSnapshot,
+      output_parsed:  result,
+      output_raw:     raw,
+      ...meta,
+      confidence:        typeof result.confidence === 'number' ? result.confidence : null,
+      guardrail_actions: guardrails,
+    });
+  } catch (e) { logger.warn({ msg: 'evaluateRFA: audit log failed', err: e.message }); }
 
   return result;
 }
@@ -233,5 +284,6 @@ module.exports = {
   analyzeCompensability,
   evaluateRFA,
   _callClaude:             callClaude,             // exported for voiceService structured extraction
+  _callClaudeMeta:         callClaudeMeta,         // exported for callers that want token + latency metadata
   _callClaudeWithDocument: callClaudeWithDocument, // exported for awardExtractionService (M14.5)
 };
