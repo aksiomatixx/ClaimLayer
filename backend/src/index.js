@@ -64,6 +64,7 @@ app.use('/api/v1/stipulations',  stipulationsRouter);
 app.use('/api/v1',               require('./routes/td-periods'));
 app.use('/api/v1',               reportingRouter);
 app.use('/api/v1/wcis',          wcisRouter);
+app.use('/api/v1/admin',         require('./routes/admin'));
 app.use('/webhooks',             webhooksRouter);
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────

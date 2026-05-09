@@ -481,6 +481,28 @@ git clone https://github.com/aksiomatixx/homecare-tpa.git
 cd homecare-tpa
 ```
 
+### Demo mode — one command (`npm run dev:demo`)
+
+For an interview / walkthrough, the fastest path is the demo orchestrator:
+
+```bash
+cd backend && npm install && cd ..    # install backend deps once
+cd frontend && npm install && cd ..   # install frontend deps once
+npm run dev:demo                      # wipes demo data, seeds 8 claims, starts both servers
+```
+
+Then open http://localhost:5173. An amber banner at the top confirms demo mode is loaded and provides a one-click "Reset Demo" button (calls `POST /api/v1/admin/demo-reset`, admin-auth required, blocked when `NODE_ENV=production`).
+
+The seed creates 8 fake claims spanning every lifecycle status (`new_claim` → `intake_complete` → `under_investigation` → `active_medical` ×2 → `p_and_s` → `pd_evaluation` → `settlement_discussions`), all flagged `metadata.demo = true`. PD evaluations use the values already in the `pdrs_lookup` seed (per the Regulatory Data Rule — no synthesized PDRS / fee-schedule / AWW figures).
+
+| Script | Purpose |
+|---|---|
+| `npm run dev:demo` | db:reset + seed + dev (one-shot demo bootstrap) |
+| `npm run db:reset` | Wipes only rows where `metadata.demo = true` (safe if mixed with real claims) |
+| `npm run seed:demo` | Seeds the 8 demo claims (idempotent) |
+| `npm run dev` | Spawns backend (3001) and frontend (5173) in parallel |
+| `npm test` | Delegates to `backend/npm test` |
+
 ### Mock servers (optional — manual API exploration only)
 
 The Jest test suite uses `jest.mock('axios')` and does not require external processes. The Python mock servers are only needed if you want to test raw ADP/FileHandler HTTP calls directly (e.g. with Postman or curl against a running backend).
