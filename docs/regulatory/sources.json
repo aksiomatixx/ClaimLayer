@@ -1,0 +1,101 @@
+{
+  "_note": "Manually-maintained registry of every authoritative regulatory source the platform consumes. Used by the in-app Architecture view (frontend/src/Architecture.jsx). Update last_verified when a source is re-checked against the upstream publisher.",
+  "sources": [
+    {
+      "source":         "DWC PDRS 2005 Schedule",
+      "version":        "Original (effective 2005-01-01)",
+      "publisher":      "California DWC",
+      "last_verified":  "2026-04-15",
+      "used_in":        "pdService.calculatePD, pdPricingService.priceCnr, pdrs_lookup table seed",
+      "url":            "https://www.dir.ca.gov/dwc/PDR.pdf"
+    },
+    {
+      "source":         "DEU Template B — Commutation Tables (2001)",
+      "version":        "2001 PV/PD tables",
+      "publisher":      "California DWC Disability Evaluation Unit",
+      "last_verified":  "2026-04-15",
+      "used_in":        "commutationService, deu_table1_pv_pd.csv",
+      "url":            "https://www.dir.ca.gov/dwc/DEU/DEU.htm"
+    },
+    {
+      "source":         "California Labor Code §4453 — TD rate floor / ceiling",
+      "version":        "2026 statutory year",
+      "publisher":      "California Legislature",
+      "last_verified":  "2026-01-02",
+      "used_in":        "adp.js (AWW + TD calculation)",
+      "url":            "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=LAB&sectionNum=4453"
+    },
+    {
+      "source":         "California Labor Code §4656(c)(2) — 104-week TTD cap",
+      "version":        "Current",
+      "publisher":      "California Legislature",
+      "last_verified":  "2026-01-02",
+      "used_in":        "tdPeriodsService.summary statutory_cap_weeks",
+      "url":            "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=LAB&sectionNum=4656"
+    },
+    {
+      "source":         "California Labor Code §4650 / §4650(b) — TD payment timing",
+      "version":        "Current",
+      "publisher":      "California Legislature",
+      "last_verified":  "2026-01-02",
+      "used_in":        "claimService initial diaries, pdService.initiatePDAdvances",
+      "url":            "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=LAB&sectionNum=4650"
+    },
+    {
+      "source":         "California Labor Code §5402 — 90-day compensability decision",
+      "version":        "Current",
+      "publisher":      "California Legislature",
+      "last_verified":  "2026-01-02",
+      "used_in":        "claimService COMPENSABILITY_DECISION_DUE diary",
+      "url":            "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=LAB&sectionNum=5402"
+    },
+    {
+      "source":         "8 CCR §9785 / §9792.9.1 — RFA timeframes (5 business days / 72 hours)",
+      "version":        "Current (April 2026 amendments)",
+      "publisher":      "California Office of Administrative Law",
+      "last_verified":  "2026-04-01",
+      "used_in":        "rfaService._calcDeadline",
+      "url":            "https://www.dir.ca.gov/title8/9792_9_1.html"
+    },
+    {
+      "source":         "MTUS / ACOEM Treatment Guidelines",
+      "version":        "ACOEM 2024",
+      "publisher":      "American College of Occupational and Environmental Medicine",
+      "last_verified":  "2026-04-15",
+      "used_in":        "aiService.evaluateRFA system prompt context",
+      "url":            "https://www.dir.ca.gov/dwc/MTUS/MTUS.html"
+    },
+    {
+      "source":         "WCIS EDI Implementation Guide v3.1",
+      "version":        "March 2018",
+      "publisher":      "California DWC Workers' Compensation Information System",
+      "last_verified":  "2026-04-15",
+      "used_in":        "wcisPayloadService, wcisConstants TRIGGER_EVENT_TO_MTC + DN code maps, docs/regulatory/wcis_*.csv",
+      "url":            "https://www.dir.ca.gov/dwc/WCIS/WCIS.htm"
+    },
+    {
+      "source":         "CMS WCMSA Reference Guide",
+      "version":        "Latest",
+      "publisher":      "Centers for Medicare & Medicaid Services",
+      "last_verified":  "2026-04-15",
+      "used_in":        "msaScreeningService.screenMSA gate thresholds",
+      "url":            "https://www.cms.gov/medicare/coordination-benefits-recovery/workers-compensation-medicare-set-aside-arrangements/wcmsa-reference-guide"
+    },
+    {
+      "source":         "8 CCR §10212 — DWC I&A block requirement",
+      "version":        "Current",
+      "publisher":      "California Office of Administrative Law",
+      "last_verified":  "2026-04-01",
+      "used_in":        "pdfService._drawIABlock (structurally hardcoded into every notice generator)",
+      "url":            "https://www.dir.ca.gov/title8/10212.html"
+    },
+    {
+      "source":         "CCR §10880 — C&R 30-day payment deadline",
+      "version":        "Current",
+      "publisher":      "California Office of Administrative Law",
+      "last_verified":  "2026-04-01",
+      "used_in":        "cnrService payment-due diary",
+      "url":            "https://www.dir.ca.gov/title8/10880.html"
+    }
+  ]
+}
