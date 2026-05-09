@@ -1478,6 +1478,110 @@ function TdPeriodsTable({periods,onClose,onReinstate,onEdit}){
   );
 }
 
+function StartTdModal({claim,activePeriod,onClose,onSubmit,pending}){
+  const today = new Date().toISOString().split('T')[0];
+  const [form,setForm] = useState({
+    benefit_type:   activePeriod ? (activePeriod.benefit_type==='TTD'?'TPD':'TTD') : 'TTD',
+    start_date:     today,
+    weekly_rate:    activePeriod?.weekly_rate || claim?.tdRate || '',
+    reason_started: activePeriod ? (activePeriod.benefit_type==='TTD'?'benefit_type_change':'rate_change') : 'initial_disability',
+    notes:          '',
+  });
+  const upd = (k,v)=>setForm(p=>({...p,[k]:v}));
+  const closeDate = (()=>{ try{ const d=new Date(form.start_date+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()-1); return d.toISOString().split('T')[0]; }catch{ return ''; } })();
+  const valid = form.benefit_type && form.start_date && Number(form.weekly_rate)>0 && form.reason_started;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:480,maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>Start TD Period</div>
+        {activePeriod && (
+          <div style={{background:C.amberF,border:`1px solid ${C.amber}55`,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.amber}}>
+            ⚠ This will close the current {activePeriod.benefit_type} period effective {closeDate} and start a new one.
+          </div>
+        )}
+        <Field label="Benefit Type">
+          <select value={form.benefit_type} onChange={e=>upd('benefit_type',e.target.value)}>
+            <option value="TTD">TTD — Temporary Total Disability</option>
+            <option value="TPD">TPD — Temporary Partial Disability</option>
+            <option value="salary_continuation">Salary Continuation</option>
+          </select>
+        </Field>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <Field label="Start Date"><input type="date" value={form.start_date} onChange={e=>upd('start_date',e.target.value)}/></Field>
+          <Field label="Weekly Rate ($)"><input type="number" min="0" step="0.01" value={form.weekly_rate} onChange={e=>upd('weekly_rate',e.target.value)}/></Field>
+        </div>
+        <Field label="Reason Started">
+          <select value={form.reason_started} onChange={e=>upd('reason_started',e.target.value)}>
+            <option value="initial_disability">Initial Disability</option>
+            <option value="reinstatement">Reinstatement</option>
+            <option value="rate_change">Rate Change</option>
+            <option value="benefit_type_change">Benefit Type Change</option>
+          </select>
+        </Field>
+        <Field label="Notes (optional)"><textarea rows={3} value={form.notes} onChange={e=>upd('notes',e.target.value)}/></Field>
+        <div style={{display:"flex",gap:8,marginTop:8}}>
+          <Btn disabled={!valid||pending} onClick={()=>onSubmit({benefit_type:form.benefit_type,start_date:form.start_date,weekly_rate:Number(form.weekly_rate),reason_started:form.reason_started,notes:form.notes||undefined})}>
+            {pending?<Spinner/>:'Start Period'}
+          </Btn>
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CloseTdForm({period,onCancel,onSubmit,pending}){
+  const today = new Date().toISOString().split('T')[0];
+  const [end_date,setEnd] = useState(today);
+  const [reason_ended,setReason] = useState('rtw_full');
+  const [notes,setNotes] = useState('');
+  const valid = end_date >= period.start_date && reason_ended;
+  return (
+    <>
+      <div style={{fontSize:11,color:C.muted,marginBottom:10,fontFamily:C.mono}}>{period.benefit_type} · started {period.start_date}</div>
+      <Field label="End Date"><input type="date" min={period.start_date} value={end_date} onChange={e=>setEnd(e.target.value)}/></Field>
+      <Field label="Reason Ended">
+        <select value={reason_ended} onChange={e=>setReason(e.target.value)}>
+          <option value="rtw_full">Returned to work — full duty</option>
+          <option value="rtw_modified">Returned to work — modified</option>
+          <option value="mmi_reached">MMI reached</option>
+          <option value="max_weeks_exhausted">Max weeks exhausted (104-wk cap)</option>
+          <option value="suspended_by_adjuster">Suspended by adjuster</option>
+          <option value="settled">Settled</option>
+          <option value="death">Death</option>
+          <option value="other">Other</option>
+        </select>
+      </Field>
+      <Field label="Notes (optional)"><textarea rows={2} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <Btn disabled={!valid||pending} onClick={()=>onSubmit({end_date,reason_ended,notes:notes||undefined})}>{pending?<Spinner/>:'Close Period'}</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </>
+  );
+}
+
+function ReinstateTdForm({period,onCancel,onSubmit,pending}){
+  const today = new Date().toISOString().split('T')[0];
+  const minStart = (()=>{ try{ const d=new Date(period.end_date+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().split('T')[0]; }catch{ return today; } })();
+  const [start_date,setStart] = useState(minStart>today?minStart:today);
+  const [weekly_rate,setRate] = useState(period.weekly_rate||'');
+  const [notes,setNotes] = useState('');
+  const valid = start_date>period.end_date && Number(weekly_rate)>0;
+  return (
+    <>
+      <div style={{fontSize:11,color:C.muted,marginBottom:10,fontFamily:C.mono}}>Source period: {period.benefit_type} · {period.start_date} → {period.end_date}</div>
+      <Field label="New Start Date"><input type="date" min={minStart} value={start_date} onChange={e=>setStart(e.target.value)}/></Field>
+      <Field label="Weekly Rate ($)"><input type="number" min="0" step="0.01" value={weekly_rate} onChange={e=>setRate(e.target.value)}/></Field>
+      <Field label="Notes (optional)"><textarea rows={2} value={notes} onChange={e=>setNotes(e.target.value)}/></Field>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <Btn disabled={!valid||pending} onClick={()=>onSubmit({start_date,weekly_rate:Number(weekly_rate),notes:notes||undefined})}>{pending?<Spinner/>:'Reinstate Period'}</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 // CLAIM DRAWER (Admin) — M3: live data, reserve approval, diaries, status
 // ═══════════════════════════════════════════════════════════
@@ -1533,6 +1637,28 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
   const [resForm,setResForm]=useState({medical:'',indemnity:'',expense:'',reason:''});
   const [resEditing,setResEditing]=useState(false);
   const [drawerTab,setDrawerTab]=useState("details");
+
+  // TD periods (Benefits tab)
+  const {data:tdPeriods=[]}=useQuery({queryKey:['td-periods',claimId],queryFn:()=>fetchTdPeriods(claimId),enabled:!!claimId,staleTime:30_000});
+  const {data:tdSummary}=useQuery({queryKey:['td-summary',claimId],queryFn:()=>fetchTdSummary(claimId),enabled:!!claimId,staleTime:30_000});
+  const [tdModal,setTdModal]=useState(null); // 'start' | {kind:'close',period} | {kind:'reinstate',period} | null
+  const tdMut=useMutation({
+    mutationFn:async(action)=>{
+      if(action.type==='create')    return createTdPeriod(claimId,action.body);
+      if(action.type==='close')     return closeTdPeriod(action.periodId,action.body);
+      if(action.type==='reinstate') return reinstateTdPeriod(action.periodId,action.body);
+    },
+    onSuccess:()=>{
+      qc.invalidateQueries({queryKey:['td-periods',claimId]});
+      qc.invalidateQueries({queryKey:['td-summary',claimId]});
+      qc.invalidateQueries({queryKey:['claim-diaries',claimId]});
+      qc.invalidateQueries({queryKey:['claims']});
+      setTdModal(null);
+      notify('TD period updated');
+    },
+    onError:(e)=>notify(`TD period action failed: ${e.message}`,'error'),
+  });
+  const tdActive = tdPeriods.find(p=>p.end_date==null) || null;
 
   // M11: QME/AME data
   const {data:qmePanels=[]}=useQuery({queryKey:['qme-panels',claimId],queryFn:()=>fetchPanelsForClaim(claimId),enabled:!!claimId,staleTime:30_000});
@@ -1653,7 +1779,7 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
         </div>
 
         <div style={{padding:"22px 26px"}}>
-          <Tabs tabs={[{key:"details",label:"Details"},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"},{key:"pd",label:"PD / Stip"}]} active={drawerTab} onChange={setDrawerTab}/>
+          <Tabs tabs={[{key:"details",label:"Details"},{key:"benefits",label:`Benefits${tdActive?` · ${tdActive.benefit_type}`:''}`},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"},{key:"pd",label:"PD / Stip"}]} active={drawerTab} onChange={setDrawerTab}/>
 
           {drawerTab==="details"&&<>
           {/* Claim Facts */}
@@ -1784,6 +1910,51 @@ function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
               {reserveMut.isSuccess&&<div style={{marginTop:8,fontSize:12,color:C.green}}>✓ Reserves approved and synced to CMS</div>}
             </div>
           )}
+          </>}
+
+          {/* ── Benefits Tab — TD period tracking ────────────────── */}
+          {drawerTab==="benefits"&&<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <SectionHead title="Temporary Disability"/>
+              <Btn small variant="outline" onClick={()=>setTdModal('start')}>Start TD Period</Btn>
+            </div>
+            <TdSummaryCard summary={tdSummary}/>
+            {tdPeriods.length===0 ? (
+              <div style={{background:C.card,border:`1px dashed ${C.border}`,borderRadius:10,padding:"32px 20px",textAlign:"center",color:C.muted,fontSize:13}}>
+                <div style={{fontSize:22,marginBottom:8}}>🗓</div>
+                <div style={{fontWeight:600,color:C.dim,marginBottom:6}}>No TD periods recorded.</div>
+                <div style={{fontSize:12}}>Click "Start TD Period" to begin tracking.</div>
+              </div>
+            ) : (
+              <>
+                <TdTimeline periods={tdPeriods}/>
+                <TdPeriodsTable
+                  periods={tdPeriods}
+                  onClose={(p)=>setTdModal({kind:'close',period:p})}
+                  onReinstate={(p)=>setTdModal({kind:'reinstate',period:p})}
+                />
+              </>
+            )}
+
+            {tdModal==='start' && <StartTdModal claim={claim} activePeriod={tdActive} pending={tdMut.isPending} onClose={()=>setTdModal(null)} onSubmit={(body)=>tdMut.mutate({type:'create',body})}/>}
+
+            {tdModal && tdModal.kind==='close' && (
+              <div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setTdModal(null)}>
+                <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:440}} onClick={e=>e.stopPropagation()}>
+                  <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>Close TD Period</div>
+                  <CloseTdForm period={tdModal.period} pending={tdMut.isPending} onCancel={()=>setTdModal(null)} onSubmit={(body)=>tdMut.mutate({type:'close',periodId:tdModal.period.id,body})}/>
+                </div>
+              </div>
+            )}
+
+            {tdModal && tdModal.kind==='reinstate' && (
+              <div style={{position:"fixed",inset:0,background:"rgba(2,8,18,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setTdModal(null)}>
+                <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:28,width:440}} onClick={e=>e.stopPropagation()}>
+                  <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>Reinstate TD Period</div>
+                  <ReinstateTdForm period={tdModal.period} pending={tdMut.isPending} onCancel={()=>setTdModal(null)} onSubmit={(body)=>tdMut.mutate({type:'reinstate',periodId:tdModal.period.id,body})}/>
+                </div>
+              </div>
+            )}
           </>}
 
           {/* ── M11: QME/AME Tab ─────────────────────────────────── */}
