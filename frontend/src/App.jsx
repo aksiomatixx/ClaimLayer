@@ -10,6 +10,42 @@ import { evaluateMMISignals, fetchMMIEvaluations, solicitPR4, recordPR4Response,
 import { calculatePD, initiatePDAdvances, recordPDAdvancePayment, waivePDAdvance, createStipulation, sendStipToWorker, recordWorkerSignature, recordAdjusterSignature, recordEAMSFiled, fetchPDData } from './services/pd.js';
 
 // ═══════════════════════════════════════════════════════════
+// TD PERIOD API HELPERS (inline — backend deferred from full tdService milestone)
+// ═══════════════════════════════════════════════════════════
+const _TD_BASE = '/api/v1';
+async function _tdJson(res){
+  if(!res.ok){
+    const body = await res.json().catch(()=>({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+function _tdOpts(method='GET', body){
+  const opts = { method, credentials: 'include' };
+  if(body !== undefined){
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  return opts;
+}
+export async function fetchTdPeriods(claimId){
+  const data = await _tdJson(await fetch(`${_TD_BASE}/claims/${claimId}/td-periods`, _tdOpts()));
+  return data.periods ?? [];
+}
+export async function fetchTdSummary(claimId){
+  return _tdJson(await fetch(`${_TD_BASE}/claims/${claimId}/td-summary`, _tdOpts()));
+}
+export async function createTdPeriod(claimId, body){
+  return _tdJson(await fetch(`${_TD_BASE}/claims/${claimId}/td-periods`, _tdOpts('POST', body)));
+}
+export async function closeTdPeriod(periodId, body){
+  return _tdJson(await fetch(`${_TD_BASE}/td-periods/${periodId}/close`, _tdOpts('PATCH', body)));
+}
+export async function reinstateTdPeriod(periodId, body){
+  return _tdJson(await fetch(`${_TD_BASE}/td-periods/${periodId}/reinstate`, _tdOpts('PATCH', body)));
+}
+
+// ═══════════════════════════════════════════════════════════
 // THEME & CONSTANTS
 // ═══════════════════════════════════════════════════════════
 const FONTS = `@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');`;
