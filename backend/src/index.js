@@ -61,6 +61,7 @@ app.use('/api/v1/claims',        disbursementClaimsRouter);
 app.use('/api/v1/disbursements', disbursementsRouter);
 app.use('/api/v1/pd-advances',   pdAdvancesRouter);
 app.use('/api/v1/stipulations',  stipulationsRouter);
+app.use('/api/v1',               require('./routes/td-periods'));
 app.use('/api/v1',               reportingRouter);
 app.use('/api/v1/wcis',          wcisRouter);
 app.use('/webhooks',             webhooksRouter);
