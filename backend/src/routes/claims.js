@@ -3,8 +3,10 @@
 const express           = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const claimService      = require('../services/claimService');
+const tdPeriodsService  = require('../services/tdPeriodsService');
 const pdfService        = require('../services/pdfService');
 const db                = require('../services/db');
+const logger            = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { CLAIM_STATUSES, SETTABLE_CLAIM_STATUSES } = require('../constants');
 
@@ -74,7 +76,23 @@ router.get(
       if (req.query.status) filters.status = req.query.status;
 
       const claims = await claimService.listClaims(filters);
-      res.json({ claims, count: claims.length });
+
+      // Inline TD summary per claim — admins use it to render the
+      // "Active Benefit" and "TD Weeks" columns on the claims list.
+      // TODO: denormalize/cache td_summary when list size > 50.
+      const enriched = await Promise.all(
+        claims.map(async (c) => {
+          try {
+            const td_summary = await tdPeriodsService.summary(c.id);
+            return { ...c, td_summary };
+          } catch (err) {
+            logger.warn({ msg: 'claims list: td_summary failed', claimId: c.id, err: err.message });
+            return { ...c, td_summary: null };
+          }
+        })
+      );
+
+      res.json({ claims: enriched, count: enriched.length });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
