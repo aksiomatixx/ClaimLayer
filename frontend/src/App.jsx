@@ -8,6 +8,7 @@ import { fetchLossRun, fetchEmployerSummary, fetchExperienceModInputs, fetchCros
 import { fetchPanelsForClaim, requestPanel, issuePanel, recordStrikes, scheduleQmeAppointment, markReportReceived, fetchSupplementalRequests, approveSupplemental, dismissSupplemental } from './services/qme.js';
 import { evaluateMMISignals, fetchMMIEvaluations, solicitPR4, recordPR4Response, dismissMMIEvaluation, fetchPR4Solicitations } from './services/mmi.js';
 import { calculatePD, initiatePDAdvances, recordPDAdvancePayment, waivePDAdvance, createStipulation, sendStipToWorker, recordWorkerSignature, recordAdjusterSignature, recordEAMSFiled, fetchPDData } from './services/pd.js';
+import Architecture from './Architecture.jsx';
 
 // ═══════════════════════════════════════════════════════════
 // TD PERIOD API HELPERS (inline — backend deferred from full tdService milestone)
@@ -2944,7 +2945,7 @@ function TopNav({role,setRole,claims,adminView,setAdminView}){
       <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         {role==="admin"&&(
           <div style={{display:"flex",background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:2,gap:2}}>
-            {[{key:"claims",label:"Claims"},{key:"rfas",label:"RFAs"},{key:"notices",label:"Notices"},{key:"agents",label:"Agents"},{key:"reports",label:"Reports"}].map(({key,label})=>(
+            {[{key:"claims",label:"Claims"},{key:"rfas",label:"RFAs"},{key:"notices",label:"Notices"},{key:"agents",label:"Agents"},{key:"reports",label:"Reports"},{key:"architecture",label:"Architecture"}].map(({key,label})=>(
               <button key={key} onClick={()=>setAdminView(key)} style={{background:adminView===key?C.borderMid:"transparent",color:adminView===key?C.text:C.muted,border:"none",padding:"4px 12px",borderRadius:5,fontSize:11,fontWeight:600,fontFamily:C.sans,cursor:"pointer"}}>{label}</button>
             ))}
           </div>
@@ -3246,6 +3247,7 @@ export default function App(){
         {role==="admin"&&adminView==="notices"&&<NoticeCenter claims={claims} jsPdfReady={jsPdfReady} notify={notify}/>}
         {role==="admin"&&adminView==="agents"&&<AgentsConsole notify={notify}/>}
         {role==="admin"&&adminView==="reports"&&<AdminReports onSelect={setSelectedId}/>}
+        {role==="admin"&&adminView==="architecture"&&<Architecture/>}
         {role==="employer"&&<EmployerPortal employerUser={employerUser} setEmployerUser={setEmployerUser} onSelect={setSelectedId}/>}
         {role==="employee"&&(
           <div style={{paddingTop:32,maxWidth:660,animation:"fadeUp .3s ease"}}>
