@@ -106,6 +106,94 @@ describe('seedDemo', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// td_periods seeding
+// ═════════════════════════════════════════════════════════════════════════════
+describe('td_periods seeding', () => {
+  async function tdFor(claimId) {
+    const { data } = await supabase.from('td_periods').select('*').eq('claim_id', claimId);
+    return (data || []).sort((a, b) => a.start_date.localeCompare(b.start_date));
+  }
+
+  it('claim_demo_004 has exactly 1 active TTD period', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(3));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].benefit_type).toBe('TTD');
+    expect(periods[0].end_date).toBeNull();
+    expect(periods[0].reason_started).toBe('initial_disability');
+  });
+
+  it('claim_demo_005 has exactly 1 active TTD period', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(4));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].end_date).toBeNull();
+  });
+
+  it('claim_demo_006 has 1 closed period with reason_ended=mmi_reached', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(5));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].end_date).not.toBeNull();
+    expect(periods[0].reason_ended).toBe('mmi_reached');
+  });
+
+  it('claim_demo_007 has 2 closed periods — one TTD then one TPD', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(6));
+    expect(periods).toHaveLength(2);
+    expect(periods[0].benefit_type).toBe('TTD');
+    expect(periods[0].end_date).not.toBeNull();
+    expect(periods[1].benefit_type).toBe('TPD');
+    expect(periods[1].end_date).not.toBeNull();
+    expect(periods[1].reason_started).toBe('benefit_type_change');
+  });
+
+  it('claim_demo_008 has 2 closed periods, second reinstated_from_period_id points to the first', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(7));
+    expect(periods).toHaveLength(2);
+    expect(periods[0].reason_ended).toBe('rtw_full');
+    expect(periods[1].reason_started).toBe('reinstatement');
+    expect(periods[1].reinstated_from_period_id).toBe(periods[0].id);
+  });
+
+  it('claims 1-3 have zero td_periods (pre-TD lifecycle stages)', async () => {
+    await seedDemo();
+    for (const i of [0, 1, 2]) {
+      const periods = await tdFor(makeClaimId(i));
+      expect(periods).toHaveLength(0);
+    }
+  });
+
+  it('total td_periods rows after seed = 7', async () => {
+    await seedDemo();
+    const { data } = await supabase.from('td_periods').select('*');
+    // 0+0+0+1+1+1+2+2 = 7
+    expect(data).toHaveLength(7);
+  });
+
+  it('claim_demo_006 summary math — Carlos Ruiz tdRate $497, P&S 4d ago, ~41-day span', async () => {
+    await seedDemo();
+    const tdPeriodsService = require('../../src/services/tdPeriodsService');
+    const summary = await tdPeriodsService.summary(makeClaimId(5));
+    // claim_demo_006: daysAgo=47, pAndSDate=4 (per existing convention
+    // where pAndSDate is "days ago" — see line 269 of seedDemo.js).
+    // Period spans (47 - 3)=44 days ago → 4 days ago = 41-day
+    // inclusive span = 5.86 weeks. Tolerance accounts for the
+    // date-of-execution drift (test runs at varying times of day).
+    expect(summary.total_weeks_paid).toBeGreaterThanOrEqual(5.5);
+    expect(summary.total_weeks_paid).toBeLessThanOrEqual(6);
+    expect(summary.weeks_remaining).toBeGreaterThanOrEqual(98);
+    expect(summary.weeks_remaining).toBeLessThanOrEqual(98.5);
+    // ~$497/wk × ~5.86wk ≈ $2,911.
+    expect(summary.total_indemnity_paid).toBeGreaterThanOrEqual(2750);
+    expect(summary.total_indemnity_paid).toBeLessThanOrEqual(3050);
+    expect(summary.active).toBeNull();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // wipeDemo
 // ═════════════════════════════════════════════════════════════════════════════
 describe('wipeDemo', () => {

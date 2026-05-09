@@ -106,6 +106,8 @@ const LIFECYCLE_PLANS = [
     priority: 'Medium',
     aiCompensability: 'Likely Compensable', aiConfidence: 88,
     rfa: { decision: 'auto_approved', cpt: '97110', desc: 'Therapeutic exercise, 12 visits' },
+    // 3-day waiting period per LC §4652. One open TTD period.
+    tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffset: null, reason_started: 'initial_disability' }],
   },
   {
     persona: 4, status: 'active_medical',      daysAgo: 28,
@@ -116,6 +118,7 @@ const LIFECYCLE_PLANS = [
     aiRedFlags: ['SUBROGATION_POTENTIAL — third-party vehicle involved'],
     subrogationStatus: 'under_evaluation',
     rfa: { decision: null, cpt: '72141', desc: 'MRI cervical spine without contrast' },
+    tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffset: null, reason_started: 'initial_disability' }],
   },
   {
     persona: 5, status: 'p_and_s',             daysAgo: 47,
@@ -124,6 +127,8 @@ const LIFECYCLE_PLANS = [
     priority: 'Medium',
     aiCompensability: 'Likely Compensable',  aiConfidence: 86,
     pAndSDate: 4,
+    // Closed TTD ending at the P&S date.
+    tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffsetFromPS: 0, reason_started: 'initial_disability', reason_ended: 'mmi_reached' }],
   },
   {
     persona: 6, status: 'pd_evaluation',       daysAgo: 55,
@@ -133,6 +138,11 @@ const LIFECYCLE_PLANS = [
     aiCompensability: 'Likely Compensable',  aiConfidence: 89,
     pAndSDate: 12,
     pdEval: { wpi: 10, pdPercent: 16, pdWeeks: 48, pdWeeklyRate: 290, pdTotalValue: 13920 },
+    // (a) TTD doi+3 → doi+30 (rtw_modified). (b) TPD doi+31 → P&S (mmi).
+    tdPeriods: [
+      { benefit_type: 'TTD', startOffset: 3, endOffset: 30, reason_started: 'initial_disability',  reason_ended: 'rtw_modified' },
+      { benefit_type: 'TPD', startOffset: 31, endOffsetFromPS: 0, weeklyRateMul: 0.6, reason_started: 'benefit_type_change', reason_ended: 'mmi_reached' },
+    ],
   },
   {
     persona: 7, status: 'settlement_discussions', daysAgo: 60,
@@ -143,6 +153,12 @@ const LIFECYCLE_PLANS = [
     pAndSDate: 18,
     pdEval: { wpi: 15, pdPercent: 24, pdWeeks: 72.75, pdWeeklyRate: 290, pdTotalValue: 21097.50 },
     settlementOffer: { stipValue: 21097.50, cnrValue: 27500, cnrPremiumPct: 30.34 },
+    // (a) TTD doi+3 → doi+25 (rtw_full). (b) Reinstatement TTD
+    // doi+35 → P&S (mmi). reinstated_from = (a).
+    tdPeriods: [
+      { benefit_type: 'TTD', startOffset: 3, endOffset: 25, reason_started: 'initial_disability', reason_ended: 'rtw_full' },
+      { benefit_type: 'TTD', startOffset: 35, endOffsetFromPS: 0, reason_started: 'reinstatement', reason_ended: 'mmi_reached', reinstatedFromIdx: 0 },
+    ],
   },
 ];
 
@@ -330,6 +346,57 @@ async function _seedOneClaim(id, idx, plan, persona) {
       status:           'draft',
       created_at:       isoDaysAgo(1),
     });
+  }
+
+  // TD periods — direct insert (NOT via tdPeriodsService.createPeriod):
+  // the service writes audit_log + claim_event entries that are
+  // meaningless for a synthetic seed, and rejects start_date <
+  // active.start_date which would block seeding closed periods in any
+  // order. Per-row IDs are deterministic so re-seed is idempotent.
+  if (plan.tdPeriods && plan.tdPeriods.length > 0) {
+    await _seedTdPeriods(id, plan, persona);
+  }
+}
+
+// Resolve a tdPeriods spec into concrete dated rows. startOffset /
+// endOffset are days after DOI; endOffsetFromPS is days after the
+// claim's pAndSDate (typically 0 = exactly at P&S).
+async function _seedTdPeriods(claimId, plan, persona) {
+  const insertedIds = [];
+  for (let i = 0; i < plan.tdPeriods.length; i++) {
+    const spec = plan.tdPeriods[i];
+    const startDaysAgo = plan.daysAgo - spec.startOffset;
+    const start = dateDaysAgo(startDaysAgo);
+
+    let end = null;
+    if (spec.endOffset != null) {
+      end = dateDaysAgo(plan.daysAgo - spec.endOffset);
+    } else if (spec.endOffsetFromPS != null) {
+      const psDays = (plan.pAndSDate || 0) - spec.endOffsetFromPS;
+      end = dateDaysAgo(psDays);
+    }
+
+    const rate = persona.tdRate * (spec.weeklyRateMul || 1);
+    const periodId = `tdp_demo_${claimId}_${i + 1}`;
+    const reinstFrom = spec.reinstatedFromIdx != null ? insertedIds[spec.reinstatedFromIdx] : null;
+
+    await supabase.from('td_periods').insert({
+      id:                        periodId,
+      claim_id:                  claimId,
+      benefit_type:              spec.benefit_type,
+      start_date:                start,
+      end_date:                  end,
+      weekly_rate:               Math.round(rate * 100) / 100,
+      reason_started:            spec.reason_started,
+      reason_ended:              spec.reason_ended || null,
+      suspension_reason_code:    null,
+      reinstated_from_period_id: reinstFrom,
+      notes:                     null,
+      created_at:                isoDaysAgo(startDaysAgo),
+      created_by:                'system@demo',
+      updated_at:                isoDaysAgo(startDaysAgo),
+    });
+    insertedIds.push(periodId);
   }
 }
 
