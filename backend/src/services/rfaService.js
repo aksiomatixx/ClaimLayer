@@ -438,6 +438,13 @@ async function adjusterApproveRFA(rfaId, adjusterEmail) {
 
   await _completeRFADiary(rfa.claim_id, rfaId);
   _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+  // Link the adjuster's action back to the most recent ai_decisions
+  // row so the audit trail shows model rec → human override pairing.
+  try {
+    await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
+      human_reviewer_id: null, human_decision: `adjuster_approved by ${adjusterEmail}`,
+    });
+  } catch { /* non-fatal */ }
   logger.info({ msg: 'rfaService.adjusterApproveRFA: approved', rfaId, adjusterEmail });
 
   return getRFA(rfaId);
@@ -463,6 +470,11 @@ async function adjusterRouteToURO(rfaId, adjusterEmail, reason) {
 
   _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
   _fireNotice(_getNoticeService().generateImrRightsNotice, rfaId);
+  try {
+    await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
+      human_reviewer_id: null, human_decision: `routed_to_uro by ${adjusterEmail}`,
+    });
+  } catch { /* non-fatal */ }
   logger.info({ msg: 'rfaService.adjusterRouteToURO', rfaId, adjusterEmail });
   return getRFA(rfaId);
 }

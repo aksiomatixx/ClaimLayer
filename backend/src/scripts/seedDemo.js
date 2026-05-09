@@ -98,6 +98,9 @@ const LIFECYCLE_PLANS = [
     priority: 'High',
     aiCompensability: 'Questionable', aiConfidence: 62,
     aiRedFlags: ['No witnesses to mechanism', 'Prior shoulder treatment in claim history'],
+    aiDecisions: [
+      { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 7, guardrails: [] },
+    ],
   },
   {
     persona: 3, status: 'active_medical',      daysAgo: 21,
@@ -108,6 +111,11 @@ const LIFECYCLE_PLANS = [
     rfa: { decision: 'auto_approved', cpt: '97110', desc: 'Therapeutic exercise, 12 visits' },
     // 3-day waiting period per LC §4652. One open TTD period.
     tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffset: null, reason_started: 'initial_disability' }],
+    aiDecisions: [
+      { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 20, guardrails: [] },
+      { type: 'rfa_mtus',       tokens: { in: 600, out: 400 }, latency: 2200, daysOffset: 18,
+        guardrails: [{ rule: 'no_auto_deny', triggered: false }] },
+    ],
   },
   {
     persona: 4, status: 'active_medical',      daysAgo: 28,
@@ -119,6 +127,13 @@ const LIFECYCLE_PLANS = [
     subrogationStatus: 'under_evaluation',
     rfa: { decision: null, cpt: '72141', desc: 'MRI cervical spine without contrast' },
     tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffset: null, reason_started: 'initial_disability' }],
+    aiDecisions: [
+      { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 27, guardrails: [] },
+      // RFA still pending adjuster review — no human_decision yet
+      { type: 'rfa_mtus',       tokens: { in: 600, out: 400 }, latency: 2200, daysOffset: 23,
+        guardrails: [{ rule: 'no_auto_deny', triggered: false }],
+        pendingHuman: true },
+    ],
   },
   {
     persona: 5, status: 'p_and_s',             daysAgo: 47,
@@ -129,6 +144,9 @@ const LIFECYCLE_PLANS = [
     pAndSDate: 4,
     // Closed TTD ending at the P&S date.
     tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffsetFromPS: 0, reason_started: 'initial_disability', reason_ended: 'mmi_reached' }],
+    aiDecisions: [
+      { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 46, guardrails: [] },
+    ],
   },
   {
     persona: 6, status: 'pd_evaluation',       daysAgo: 55,
@@ -142,6 +160,9 @@ const LIFECYCLE_PLANS = [
     tdPeriods: [
       { benefit_type: 'TTD', startOffset: 3, endOffset: 30, reason_started: 'initial_disability',  reason_ended: 'rtw_modified' },
       { benefit_type: 'TPD', startOffset: 31, endOffsetFromPS: 0, weeklyRateMul: 0.6, reason_started: 'benefit_type_change', reason_ended: 'mmi_reached' },
+    ],
+    aiDecisions: [
+      { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 54, guardrails: [] },
     ],
   },
   {
@@ -158,6 +179,15 @@ const LIFECYCLE_PLANS = [
     tdPeriods: [
       { benefit_type: 'TTD', startOffset: 3, endOffset: 25, reason_started: 'initial_disability', reason_ended: 'rtw_full' },
       { benefit_type: 'TTD', startOffset: 35, endOffsetFromPS: 0, reason_started: 'reinstatement', reason_ended: 'mmi_reached', reinstatedFromIdx: 0 },
+    ],
+    aiDecisions: [
+      { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 59, guardrails: [] },
+      { type: 'cnr_pricing',    tokens: { in: 1200, out: 900 }, latency: 5800, daysOffset: 2,
+        guardrails: [
+          { rule: 'cnr_premium_cap_5x',     triggered: false, computed_premium: 1.30 },
+          { rule: 'cnr_premium_cap_1.15x',  triggered: true,  action: 'flagged_above_premium_threshold', computed_premium: 1.30 },
+        ] },
+      { type: 'msa_screening',  tokens: null, latency: 1100, daysOffset: 3, guardrails: [] },
     ],
   },
 ];
@@ -176,7 +206,7 @@ async function wipeDemo() {
   // in-memory mock ignores FKs but the order is still correct.
   const childTables = [
     'td_periods', 'pd_evaluations', 'settlement_offers',
-    'rfas', 'rfa_evaluations',
+    'rfas', 'rfa_evaluations', 'ai_decisions',
     'diaries', 'claim_events', 'reserves', 'audit_log',
   ];
   for (const tbl of childTables) {
@@ -356,6 +386,120 @@ async function _seedOneClaim(id, idx, plan, persona) {
   if (plan.tdPeriods && plan.tdPeriods.length > 0) {
     await _seedTdPeriods(id, plan, persona);
   }
+
+  if (plan.aiDecisions && plan.aiDecisions.length > 0) {
+    await _seedAiDecisions(id, idx, plan, persona);
+  }
+}
+
+// Seed ai_decisions rows so the admin Agents view has data on first
+// load. Same rule as td_periods: direct insert, deterministic UUIDs.
+async function _seedAiDecisions(claimId, idx, plan, persona) {
+  const MODEL = 'claude-sonnet-4-20250514';
+  for (let i = 0; i < plan.aiDecisions.length; i++) {
+    const spec = plan.aiDecisions[i];
+    const row = _buildAiDecisionRow(claimId, idx, i, spec, plan, persona, MODEL);
+    await supabase.from('ai_decisions').insert(row);
+  }
+}
+
+function _buildAiDecisionRow(claimId, claimIdx, decisionIdx, spec, plan, persona, MODEL) {
+  // Deterministic UUID-shaped ID for re-seed idempotency.
+  const id = `aaaaaaaa-aaaa-4${String(claimIdx + 1).padStart(3, '0')}-8aaa-${String(decisionIdx + 1).padStart(12, '0')}`;
+  const created_at = isoDaysAgo(spec.daysOffset || 0);
+  const PROMPT_MAP = {
+    compensability: 'compensability_analysis',
+    rfa_mtus:       'rfa_mtus_evaluation',
+    cnr_pricing:    'cnr_pricing',
+    msa_screening:  'msa_threshold_evaluation',
+    voice_extract:  'voice_extraction',
+  };
+  const base = {
+    id, claim_id: claimId, decision_type: spec.type,
+    prompt_name: PROMPT_MAP[spec.type] || spec.type,
+    model: spec.type === 'msa_screening' ? 'deterministic' : MODEL,
+    input_snapshot: _buildInputSnapshot(spec.type, plan, persona),
+    output_parsed:  _buildOutputParsed(spec.type, plan, persona),
+    output_raw:     null,
+    input_tokens:   spec.tokens?.in  ?? null,
+    output_tokens:  spec.tokens?.out ?? null,
+    latency_ms:     spec.latency || null,
+    confidence:     _buildConfidence(spec.type, plan),
+    guardrail_actions: spec.guardrails || [],
+    human_decision: spec.pendingHuman ? null : _humanDecisionFor(spec.type, plan),
+    human_decision_at: spec.pendingHuman ? null : isoDaysAgo(Math.max(0, (spec.daysOffset || 0) - 1)),
+    created_at,
+  };
+  return base;
+}
+
+function _buildInputSnapshot(type, plan, persona) {
+  if (type === 'compensability') return {
+    bodyPart: plan.bodyPart, injuryType: plan.injuryType,
+    injuryDescription: plan.description, jobTitle: persona.title,
+    aww: persona.aww, tdRate: persona.tdRate, stateOfJurisdiction: 'CA',
+  };
+  if (type === 'rfa_mtus') return {
+    requestedTreatment: plan.rfa?.desc, requestedCptCodes: [plan.rfa?.cpt],
+    bodyPart: plan.bodyPart, stateOfJurisdiction: 'CA',
+  };
+  if (type === 'cnr_pricing') return {
+    bodyPart: plan.bodyPart, stipValue: plan.settlementOffer?.stipValue,
+    pdPercent: plan.pdEval?.pdPercent, wpi: plan.pdEval?.wpi,
+  };
+  if (type === 'msa_screening') return {
+    ageAtScreening: 56, ssdiReceiving: false,
+    projectedSettlementValue: plan.settlementOffer?.cnrValue || 0,
+    thresholds: { MEDICARE_ELIGIBLE_SETTLEMENT: 25000, LIKELY_ELIGIBLE_SETTLEMENT: 250000, MEDICARE_AGE: 65, LIKELY_ELIGIBLE_MIN_AGE: 35 },
+  };
+  return {};
+}
+
+function _buildOutputParsed(type, plan, persona) {
+  if (type === 'compensability') return {
+    compensability:   plan.aiCompensability || 'Likely Compensable',
+    compensabilityScore: plan.aiConfidence || 88,
+    priority:         plan.priority || 'Medium',
+    suggestedMedicalReserve:   25000,
+    suggestedIndemnityReserve: 18000,
+    suggestedExpenseReserve:    4500,
+    redFlags:         plan.aiRedFlags || [],
+  };
+  if (type === 'rfa_mtus') return {
+    recommendedAction: plan.rfa?.decision === 'auto_approved' ? 'auto_approve' : 'physician_review',
+    mtusConsistency:   plan.rfa?.decision === 'auto_approved' ? 'consistent' : 'inconsistent',
+    confidence:        plan.rfa?.decision === 'auto_approved' ? 92 : 64,
+  };
+  if (type === 'cnr_pricing') return {
+    cnrValueLow:  Math.round((plan.settlementOffer?.cnrValue || 0) * 0.85),
+    cnrValueMid:  plan.settlementOffer?.cnrValue || 0,
+    cnrValueHigh: Math.round((plan.settlementOffer?.cnrValue || 0) * 1.20),
+    recommendation: 'adjuster_review',
+  };
+  if (type === 'msa_screening') return {
+    medicare_eligible: false, msa_required: false,
+    msa_required_reason: null,
+  };
+  return {};
+}
+
+function _buildConfidence(type, plan) {
+  if (type === 'compensability') return plan.aiConfidence || 88;
+  if (type === 'rfa_mtus') return plan.rfa?.decision === 'auto_approved' ? 92 : 64;
+  return null;
+}
+
+function _humanDecisionFor(type, plan) {
+  if (type === 'compensability' && plan.status !== 'new_claim' && plan.status !== 'intake_complete' && plan.status !== 'under_investigation') {
+    return 'accepted by adjuster@homecaretpa.com';
+  }
+  if (type === 'rfa_mtus' && plan.rfa?.decision === 'auto_approved') {
+    return 'auto_approved (no override)';
+  }
+  if (type === 'cnr_pricing' && plan.settlementOffer) {
+    return 'offer_accepted_by_adjuster (worker)';
+  }
+  return null;
 }
 
 // Resolve a tdPeriods spec into concrete dated rows. startOffset /

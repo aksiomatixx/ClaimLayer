@@ -597,6 +597,17 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
     data:      { from: prev, to: newStatus, changedBy },
   });
 
+  // Compensability accept/deny is the human counterpart to the
+  // AI compensability decision — link them so the audit trail
+  // shows model rec → adjuster decision pairing.
+  if (newStatus === 'accepted' || newStatus === 'denied') {
+    try {
+      await require('./aiDecisionsService').linkHumanDecision(claimId, 'compensability', {
+        human_reviewer_id: null, human_decision: `${newStatus} by ${changedBy}`,
+      });
+    } catch { /* non-fatal */ }
+  }
+
   // Keep test store in sync
   if (_testStore.has(claimId)) {
     const c = _testStore.get(claimId);

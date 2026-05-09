@@ -106,6 +106,36 @@ async function screenMSA(claimId, projectedSettlementValue) {
     claimId, msaRequired, ageAtScreening, ssdiReceiving, settlement,
   });
 
+  // Deterministic gate is logged to the same audit feed as Claude
+  // calls so the agent / decisions view shows ALL automated gating
+  // in one place, not just AI output.
+  try {
+    const aid = require('./aiDecisionsService');
+    await aid.logDecision({
+      claim_id:      claimId,
+      decision_type: 'msa_screening',
+      prompt_name:   'msa_threshold_evaluation',
+      model:         'deterministic',
+      input_snapshot: {
+        ageAtScreening, ssdiReceiving,
+        projectedSettlementValue: settlement,
+        thresholds: MSA_THRESHOLDS,
+      },
+      output_parsed: {
+        medicare_eligible:         medicareEligible,
+        medicare_eligibility_reason: medicareEligibilityReason,
+        msa_required:              msaRequired,
+        msa_required_reason:       msaRequiredReason,
+      },
+      output_raw:        null,
+      input_tokens:      null,
+      output_tokens:     null,
+      latency_ms:        null,
+      confidence:        null,
+      guardrail_actions: [],
+    });
+  } catch (e) { logger.warn({ msg: 'screenMSA: audit log failed', err: e.message }); }
+
   return {
     required:    msaRequired,
     reason:      msaRequiredReason || 'MSA not required — C&R may proceed',

@@ -252,6 +252,15 @@ async function offerCnr(offerId, { offeredTo }) {
     offerId, offeredTo, cnrValue: offer.cnr_value,
   });
 
+  // Link the adjuster's decision to extend the offer back to the
+  // AI cnr_pricing decision (if any) so the audit trail closes the
+  // model→human loop.
+  try {
+    await require('./aiDecisionsService').linkHumanDecision(offer.claim_id, 'cnr_pricing', {
+      human_reviewer_id: null, human_decision: `offer_accepted_by_adjuster (${offeredTo})`,
+    });
+  } catch { /* non-fatal */ }
+
   logger.info({ msg: 'cnrService.offerCnr: complete', offerId, offeredTo });
   return updated;
 }

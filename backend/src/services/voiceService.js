@@ -102,20 +102,42 @@ async function extractClaimFields(transcript, claim = {}) {
   const promptPath = path.join(__dirname, '../../prompts/voice_extraction.txt');
   const systemPrompt = fs.readFileSync(promptPath, 'utf8').trim();
 
-  const userContent = JSON.stringify({
+  const inputSnapshot = {
     transcript,
     claim_context: {
       date_of_injury: claim.dateOfInjury,
       employer_name:  claim.employerName,
       known_body_part: claim.bodyPart || null,
     },
-  });
+  };
 
-  const result = await aiService._callClaude(systemPrompt, userContent, 800);
+  let result, raw = null, meta = { input_tokens: null, output_tokens: null, latency_ms: null };
+  if (typeof aiService._callClaudeMeta === 'function') {
+    const out = await aiService._callClaudeMeta(systemPrompt, JSON.stringify(inputSnapshot), 800);
+    result = out.parsed; raw = out.raw; meta = out.meta;
+  } else {
+    result = await aiService._callClaude(systemPrompt, JSON.stringify(inputSnapshot), 800);
+  }
 
   // Validate required output
   if (typeof result.confidence !== 'number') result.confidence = 50;
   if (!result.extraction_notes) result.extraction_notes = '';
+
+  try {
+    const aid = require('./aiDecisionsService');
+    await aid.logDecision({
+      claim_id:      claim.id || null,
+      decision_type: 'voice_extract',
+      prompt_name:   'voice_extraction',
+      model:         require('../config').anthropic.model,
+      input_snapshot: inputSnapshot,
+      output_parsed: result,
+      output_raw:    raw,
+      ...meta,
+      confidence:        typeof result.confidence === 'number' ? result.confidence : null,
+      guardrail_actions: [],
+    });
+  } catch (e) { logger.warn({ msg: 'voice: audit log failed', err: e.message }); }
 
   logger.info({
     msg:        'voiceService: Claude extraction complete',

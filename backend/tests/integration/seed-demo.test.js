@@ -194,6 +194,72 @@ describe('td_periods seeding', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// ai_decisions seeding
+// ═════════════════════════════════════════════════════════════════════════════
+describe('ai_decisions seeding', () => {
+  async function aidFor(claimId) {
+    const { data } = await supabase.from('ai_decisions').select('*').eq('claim_id', claimId);
+    return data || [];
+  }
+
+  it('claim_demo_003 has 1 compensability decision row', async () => {
+    await seedDemo();
+    const rows = await aidFor(makeClaimId(2));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].decision_type).toBe('compensability');
+    expect(rows[0].confidence).toBe(62);
+  });
+
+  it('claim_demo_004 has 1 compensability + 1 rfa_mtus row', async () => {
+    await seedDemo();
+    const rows = await aidFor(makeClaimId(3));
+    expect(rows).toHaveLength(2);
+    const types = rows.map(r => r.decision_type).sort();
+    expect(types).toEqual(['compensability', 'rfa_mtus']);
+  });
+
+  it('claim_demo_005 rfa_mtus row has no human_decision (pending review)', async () => {
+    await seedDemo();
+    const rows = await aidFor(makeClaimId(4));
+    const rfa = rows.find(r => r.decision_type === 'rfa_mtus');
+    expect(rfa).toBeTruthy();
+    expect(rfa.human_decision).toBeNull();
+  });
+
+  it('claim_demo_008 has compensability + cnr_pricing + msa_screening rows', async () => {
+    await seedDemo();
+    const rows = await aidFor(makeClaimId(7));
+    const types = rows.map(r => r.decision_type).sort();
+    expect(types).toEqual(['cnr_pricing', 'compensability', 'msa_screening'].sort());
+  });
+
+  it('claim_demo_008 cnr_pricing row has the 1.15x guardrail triggered', async () => {
+    await seedDemo();
+    const rows = await aidFor(makeClaimId(7));
+    const cnr = rows.find(r => r.decision_type === 'cnr_pricing');
+    expect(cnr).toBeTruthy();
+    const triggered = cnr.guardrail_actions.find(g => g.rule === 'cnr_premium_cap_1.15x');
+    expect(triggered).toBeTruthy();
+    expect(triggered.triggered).toBe(true);
+    expect(triggered.action).toBe('flagged_above_premium_threshold');
+  });
+
+  it('total ai_decisions rows after seed = 10', async () => {
+    await seedDemo();
+    const { data } = await supabase.from('ai_decisions').select('*');
+    // claims 1+2 (new_claim, intake_complete) → 0 each.
+    // claim_3 (under_investigation) → 1 (compensability).
+    // claim_4 (auto-approved RFA) → 2 (compensability + rfa_mtus).
+    // claim_5 (pending RFA)       → 2 (compensability + rfa_mtus).
+    // claim_6 (p_and_s)           → 1 (compensability).
+    // claim_7 (pd_evaluation)     → 1 (compensability).
+    // claim_8 (settlement_discussions) → 3 (compensability + cnr_pricing + msa_screening).
+    // Total = 1+2+2+1+1+3 = 10.
+    expect(data).toHaveLength(10);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // wipeDemo
 // ═════════════════════════════════════════════════════════════════════════════
 describe('wipeDemo', () => {
