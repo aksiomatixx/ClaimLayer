@@ -1365,6 +1365,80 @@ function TdSummaryCard({summary}){
   );
 }
 
+function TdTimeline({periods}){
+  if(!periods||periods.length===0){
+    return <div style={{background:C.card,border:`1px dashed ${C.border}`,borderRadius:10,padding:"22px 18px",textAlign:"center",color:C.muted,fontSize:12,marginBottom:14}}>No TD periods yet — timeline will appear once a period is recorded.</div>;
+  }
+  // Determine x-axis range: earliest start_date → today (or latest end_date if later).
+  const today = new Date().toISOString().split('T')[0];
+  const starts = periods.map(p=>p.start_date).sort();
+  const ends   = periods.map(p=>p.end_date||today).sort();
+  const min = starts[0];
+  const maxRaw = ends[ends.length-1];
+  const max = maxRaw>today?maxRaw:today;
+  const minMs = new Date(min+'T00:00:00Z').getTime();
+  const maxMs = new Date(max+'T00:00:00Z').getTime();
+  const range = Math.max(1, maxMs-minMs);
+  const W = 800, H = 120, padX = 40, padY = 24, barH = 32;
+  const xFor = (d)=> padX + ((new Date(d+'T00:00:00Z').getTime()-minMs)/range) * (W-padX*2);
+
+  // Build hatched suspension gaps between consecutive closed→next-start periods.
+  const sortedByStart = [...periods].sort((a,b)=>a.start_date.localeCompare(b.start_date));
+  const gaps = [];
+  for(let i=0;i<sortedByStart.length-1;i++){
+    const cur = sortedByStart[i];
+    const nxt = sortedByStart[i+1];
+    if(cur.end_date && cur.end_date < nxt.start_date){
+      gaps.push({from:cur.end_date, to:nxt.start_date});
+    }
+  }
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 12px",marginBottom:14}}>
+      <Lbl>Timeline</Lbl>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+        <defs>
+          <pattern id="td-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke={C.muted} strokeWidth="1.5"/>
+          </pattern>
+        </defs>
+        {/* baseline */}
+        <line x1={padX} y1={padY+barH+8} x2={W-padX} y2={padY+barH+8} stroke={C.border} strokeWidth="1"/>
+        {/* end caps with date labels */}
+        <text x={padX} y={padY+barH+24} fill={C.muted} fontSize="10" fontFamily="IBM Plex Mono">{min}</text>
+        <text x={W-padX} y={padY+barH+24} fill={C.muted} fontSize="10" fontFamily="IBM Plex Mono" textAnchor="end">{max}</text>
+        {/* suspension gap hatches (drawn beneath bars) */}
+        {gaps.map((g,i)=>{
+          const x1 = xFor(g.from), x2 = xFor(g.to);
+          return <rect key={`gap${i}`} x={x1} y={padY+8} width={Math.max(1,x2-x1)} height={barH-16} fill="url(#td-hatch)" opacity="0.6"><title>Suspension gap {g.from} → {g.to}</title></rect>;
+        })}
+        {/* period bars */}
+        {sortedByStart.map((p,i)=>{
+          const x1 = xFor(p.start_date);
+          const x2 = xFor(p.end_date||today);
+          const w  = Math.max(2, x2-x1);
+          const color = TD_TYPE_COLOR[p.benefit_type]||C.blue;
+          const weeks = _tdWeeks(p.start_date,p.end_date);
+          return (
+            <g key={p.id||i}>
+              <rect x={x1} y={padY} width={w} height={barH} fill={color} opacity={p.end_date?0.65:1} rx="3" ry="3">
+                <title>{p.benefit_type} — {p.start_date} to {p.end_date||"active"} — ${Number(p.weekly_rate).toFixed(2)}/wk · {weeks}wk</title>
+              </rect>
+              {w>40 && <text x={x1+6} y={padY+barH/2+4} fill="#000" fontSize="11" fontWeight="700" fontFamily="IBM Plex Mono">{p.benefit_type}</text>}
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{display:"flex",gap:14,marginTop:8,fontSize:10,fontFamily:C.mono,color:C.muted}}>
+        <span><span style={{display:"inline-block",width:9,height:9,background:C.blue,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>TTD</span>
+        <span><span style={{display:"inline-block",width:9,height:9,background:C.teal,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>TPD</span>
+        <span><span style={{display:"inline-block",width:9,height:9,background:C.purple,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Salary Cont.</span>
+        <span><span style={{display:"inline-block",width:9,height:9,background:C.muted,opacity:.6,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Suspension gap</span>
+      </div>
+    </div>
+  );
+}
+
 function TdPeriodsTable({periods,onClose,onReinstate,onEdit}){
   if(!periods||periods.length===0) return null;
   return (
