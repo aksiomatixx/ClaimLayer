@@ -1304,6 +1304,107 @@ function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGenPDF,onPushCMS,
 }
 
 // ═══════════════════════════════════════════════════════════
+// TD PERIOD UI — Benefits tab building blocks
+// ═══════════════════════════════════════════════════════════
+const TD_TYPE_COLOR={TTD:C.blue,TPD:C.teal,salary_continuation:C.purple};
+const TD_TYPE_BG   ={TTD:C.blueF,TPD:C.tealF,salary_continuation:C.purpleF};
+function _tdCapColor(weeksPaid,cap){
+  const pct = cap>0 ? (weeksPaid/cap)*100 : 0;
+  if(pct>95)  return C.red;
+  if(pct>=70) return C.amber;
+  return C.green;
+}
+function _tdWeeks(startStr,endStr){
+  if(!startStr) return 0;
+  const a = new Date(startStr+'T00:00:00Z');
+  const b = new Date((endStr||new Date().toISOString().split('T')[0])+'T00:00:00Z');
+  const days = Math.max(0, Math.round((b-a)/86400000)+1);
+  return Math.round((days/7)*100)/100;
+}
+
+function TdSummaryCard({summary}){
+  const s = summary||{};
+  const active = s.active||null;
+  const cap    = s.statutory_cap_weeks||104;
+  const paid   = s.total_weeks_paid||0;
+  const pct    = Math.min(100, Math.round((paid/cap)*1000)/10);
+  const color  = _tdCapColor(paid,cap);
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px 22px",marginBottom:18}}>
+      {/* LEFT — active benefit */}
+      <div style={{borderRight:`1px solid ${C.border}`,paddingRight:14}}>
+        <Lbl>Active Benefit</Lbl>
+        {active ? (
+          <>
+            <div style={{display:"inline-block",background:TD_TYPE_BG[active.benefit_type]||C.blueF,color:TD_TYPE_COLOR[active.benefit_type]||C.blue,border:`1px solid ${(TD_TYPE_COLOR[active.benefit_type]||C.blue)}55`,padding:"4px 12px",borderRadius:5,fontSize:14,fontFamily:C.mono,fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:8}}>{active.benefit_type}</div>
+            <div style={{fontFamily:C.mono,fontSize:18,fontWeight:600,color:C.cyan}}>{fmt$(active.weekly_rate)}<span style={{fontSize:11,color:C.muted,marginLeft:4}}>/wk</span></div>
+            <div style={{fontSize:11,color:C.dim,marginTop:6}}>Started {active.start_date} · {active.days_in}d in</div>
+          </>
+        ) : (
+          <div style={{display:"inline-block",background:C.bg,color:C.muted,border:`1px solid ${C.border}`,padding:"4px 12px",borderRadius:5,fontSize:13,fontFamily:C.mono,fontWeight:700,textTransform:"uppercase"}}>None Active</div>
+        )}
+      </div>
+      {/* MIDDLE — cumulative */}
+      <div style={{borderRight:`1px solid ${C.border}`,paddingRight:14,paddingLeft:14}}>
+        <Lbl>Cumulative</Lbl>
+        <div style={{fontFamily:C.mono,fontSize:18,fontWeight:600}}>{paid}<span style={{fontSize:11,color:C.muted,marginLeft:4}}>weeks paid</span></div>
+        <div style={{fontFamily:C.mono,fontSize:13,color:C.cyan,marginTop:4}}>{fmt$(s.total_indemnity_paid||0)}</div>
+        <div style={{fontSize:11,color:C.dim,marginTop:4}}>{s.periods_count||0} period{(s.periods_count||0)===1?'':'s'}</div>
+      </div>
+      {/* RIGHT — statutory cap */}
+      <div style={{paddingLeft:14}}>
+        <Lbl>Statutory Cap</Lbl>
+        <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:6}}>
+          <div style={{width:`${Math.min(100,pct)}%`,height:"100%",background:color,transition:"width .3s"}}/>
+        </div>
+        <div style={{fontFamily:C.mono,fontSize:12,color}}>{paid} / {cap} wk · {pct}%</div>
+        <div style={{fontSize:11,color:C.dim,marginTop:4}}>Projected exhaustion: {s.projected_exhaustion_date||"—"}</div>
+        <div style={{fontSize:9,color:C.muted,marginTop:6,fontFamily:C.mono}}>LC §4656(c)(2)</div>
+      </div>
+    </div>
+  );
+}
+
+function TdPeriodsTable({periods,onClose,onReinstate,onEdit}){
+  if(!periods||periods.length===0) return null;
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:14}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:"#08172a"}}>
+          {["Type","Start","End","Rate","Weeks","Total","Reason Ended","Actions"].map(h=>
+            <th key={h} style={{padding:"8px 11px",textAlign:"left",fontSize:10,fontFamily:C.mono,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+          )}
+        </tr></thead>
+        <tbody>{periods.map((p,i)=>{
+          const isActive = p.end_date==null;
+          const weeks = _tdWeeks(p.start_date,p.end_date);
+          const total = Math.round(weeks*Number(p.weekly_rate)*100)/100;
+          const color = TD_TYPE_COLOR[p.benefit_type]||C.blue;
+          return (
+            <tr key={p.id} style={{borderBottom:i<periods.length-1?`1px solid ${C.border}`:"none",background:isActive?C.amberF:"transparent"}}>
+              <td style={{padding:"10px 11px"}}><span style={{fontFamily:C.mono,fontSize:11,fontWeight:700,color}}>{p.benefit_type}</span></td>
+              <td style={{padding:"10px 11px",fontFamily:C.mono,fontSize:11,color:C.dim}}>{p.start_date}</td>
+              <td style={{padding:"10px 11px",fontFamily:C.mono,fontSize:11,color:isActive?C.amber:C.dim}}>{p.end_date||"— active"}</td>
+              <td style={{padding:"10px 11px",fontFamily:C.mono,fontSize:11,color:C.cyan}}>{fmt$(p.weekly_rate)}</td>
+              <td style={{padding:"10px 11px",fontFamily:C.mono,fontSize:11}}>{weeks}</td>
+              <td style={{padding:"10px 11px",fontFamily:C.mono,fontSize:11,color:C.cyan}}>{fmt$(total)}</td>
+              <td style={{padding:"10px 11px",fontSize:11,color:C.dim}}>{p.reason_ended||(isActive?"—":"")}</td>
+              <td style={{padding:"10px 11px"}}>
+                <div style={{display:"flex",gap:5}}>
+                  {isActive && onClose      && <Btn small variant="outline" onClick={()=>onClose(p)}>Close</Btn>}
+                  {!isActive && onReinstate && <Btn small variant="ghost"   onClick={()=>onReinstate(p)}>Reinstate</Btn>}
+                  {onEdit && <Btn small variant="ghost" onClick={()=>onEdit(p)}>Edit</Btn>}
+                </div>
+              </td>
+            </tr>
+          );
+        })}</tbody>
+      </table>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // CLAIM DRAWER (Admin) — M3: live data, reserve approval, diaries, status
 // ═══════════════════════════════════════════════════════════
 const VALID_NEXT={
