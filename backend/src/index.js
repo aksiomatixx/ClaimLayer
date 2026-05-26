@@ -66,6 +66,7 @@ app.use('/api/v1',               reportingRouter);
 app.use('/api/v1/wcis',          wcisRouter);
 app.use('/api/v1/admin',         require('./routes/admin'));
 app.use('/api/v1',               require('./routes/ai-decisions'));
+app.use('/api/v1',               require('./routes/integrations'));
 app.use('/webhooks',             webhooksRouter);
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────

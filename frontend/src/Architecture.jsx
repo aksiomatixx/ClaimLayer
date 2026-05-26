@@ -114,6 +114,15 @@ const GUARDRAILS = [
   { rule: 'Audit trail on every Claude call + every gate decision',                    where: 'aiDecisionsService.logDecision (best-effort, never throws)',                       why: '7-year CA WC audit retention; observability for DWC PAR audits' },
 ];
 
+// Integration architecture — system-of-engagement / system-of-record split.
+const INTEGRATION_ADAPTERS = [
+  { adapter: 'A1 Tracker / FileHandler',  direction: 'Write-back',     status: 'Reference impl (live)' },
+  { adapter: 'Mock Legacy',               direction: 'Bidirectional',  status: 'Demo round trip (live)' },
+  { adapter: 'Origami Risk',              direction: 'Bidirectional',  status: 'Planned' },
+  { adapter: 'Guidewire ClaimCenter',     direction: 'Bidirectional',  status: 'Planned' },
+  { adapter: 'Sapiens',                   direction: 'Bidirectional',  status: 'Planned' },
+];
+
 const HUMAN_CHECKPOINTS = [
   { step: 'Compensability decision (accepted / denied)',  who: 'Adjuster',           triggers: 'AI compensability output → claimService.updateStatus' },
   { step: 'Reserve approval',                              who: 'Adjuster',           triggers: 'AI suggested reserves → claimService.approveReserves' },
@@ -376,6 +385,36 @@ function Architecture() {
             { key: 'triggers', label: 'Triggered by', mono: true },
           ]}
           rows={HUMAN_CHECKPOINTS}
+        />
+      </Section>
+
+      {/* F-prime. Integration architecture */}
+      <Section title="Integration Architecture" sub="System-of-engagement on top of a retained system-of-record">
+        <p style={{fontSize:13,color:C.dim,maxWidth:880,lineHeight:1.7,marginBottom:14}}>
+          ClaimLayer deploys on top of a customer's existing claims system-of-record
+          (Origami Risk, Guidewire ClaimCenter, Sapiens, A1 Tracker / FileHandler) rather
+          than replacing it. A pluggable <span style={{fontFamily:C.mono,color:C.text}}>LegacyClaimsAdapter</span> interface
+          lets each customer system be wired in with the same contract — no rip-and-replace,
+          no rewriting business logic. The customer's adjusters continue to use their
+          system-of-record as the financial / regulatory ledger; ClaimLayer runs the
+          AI-assisted workflow layer on top.
+        </p>
+        <p style={{fontSize:12,color:C.dim,maxWidth:880,lineHeight:1.65,marginBottom:18,fontFamily:C.mono}}>
+          Interface methods:&nbsp;
+          <span style={{color:C.amber}}>healthCheck()</span>,&nbsp;
+          <span style={{color:C.amber}}>ingestClaims(filter)</span>,&nbsp;
+          <span style={{color:C.amber}}>pushClaimUpdate(externalId, change)</span>,&nbsp;
+          <span style={{color:C.amber}}>pushDiary(externalId, diary)</span>,&nbsp;
+          <span style={{color:C.amber}}>pushDocument(externalId, doc)</span>,&nbsp;
+          <span style={{color:C.amber}}>pushNotice(externalId, notice)</span>.
+        </p>
+        <PlainTable
+          columns={[
+            { key: 'adapter',   label: 'Adapter' },
+            { key: 'direction', label: 'Direction', mono: true },
+            { key: 'status',    label: 'Status',    mono: true },
+          ]}
+          rows={INTEGRATION_ADAPTERS}
         />
       </Section>
 

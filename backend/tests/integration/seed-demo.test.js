@@ -50,8 +50,9 @@ describe('seedDemo', () => {
     expect(out.ids[0]).toBe('claim_demo_001');
     expect(out.ids[7]).toBe('claim_demo_008');
 
+    // 8 from LIFECYCLE_PLANS + 1 pre-migrated legacy example (LEG-000).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(9);
   });
 
   it('every seeded claim has metadata.demo === true', async () => {
@@ -78,8 +79,9 @@ describe('seedDemo', () => {
     const b = await seedDemo();
     expect(b.count).toBe(8);
     expect(b.ids).toEqual(a.ids);
+    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(9);
   });
 
   it('writes claim_events and diaries per plan', async () => {
@@ -292,8 +294,9 @@ describe('POST /api/v1/admin/demo-reset', () => {
     expect(res.body.ok).toBe(true);
     expect(res.body.count).toBe(8);
 
+    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(9);
   });
 
   it('401 without admin token', async () => {
@@ -326,11 +329,12 @@ describe('GET /api/v1/admin/demo-status', () => {
     expect(res.body.count).toBe(0);
   });
 
-  it('reports demo=true and count=8 after seed', async () => {
+  it('reports demo=true and count=9 after seed', async () => {
+    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000).
     await seedDemo();
     const res = await request(app).get('/api/v1/admin/demo-status').set('Cookie', `token=${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.demo).toBe(true);
-    expect(res.body.count).toBe(8);
+    expect(res.body.count).toBe(9);
   });
 });
