@@ -480,6 +480,11 @@ async function _seedOneClaim(id, idx, plan, persona) {
     subrogation_status:  plan.subrogationStatus || null,
     p_and_s_date:        plan.pAndSDate ? dateDaysAgo(plan.pAndSDate) : null,
     filed_at:            filed,
+    // Explicit source_system='native' so the Integrations "Migrated Claims"
+    // view filters these out cleanly. The Postgres DEFAULT does this in
+    // prod; setting it here makes the in-memory mock behave identically.
+    source_system:       'native',
+    sync_status:         'native',
     metadata:            { demo: true, persona: `${persona.first} ${persona.last}` },
     created_at:          filed,
     updated_at:          filed,
