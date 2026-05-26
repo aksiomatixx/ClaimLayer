@@ -29,3 +29,23 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+
+# Test coverage
+coverage/
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Keys & certificates — never commit
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Supabase CLI local state
+.supabase/
+supabase/.branches/
+supabase/.temp/
+supabase/.env
