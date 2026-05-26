@@ -68,6 +68,10 @@ function _toClaim(row) {
     employerName:     row.employer_name,
     filed_at:            row.filed_at,
     filehandlerId:       row.filehandler_id,
+    sourceSystem:        row.source_system || 'native',
+    externalClaimId:     row.external_claim_id || null,
+    syncStatus:          row.sync_status || 'native',
+    lastSyncedAt:        row.last_synced_at || null,
     aiAnalysis:          row.ai_analysis || null,
     priority:            row.priority    || null,
     motorVehicleFields:  row.motor_vehicle_fields || null,
@@ -661,10 +665,80 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
     }
   });
 
+  // ── Legacy adapter write-back (M_legacy_integration) ──────────────────────
+  // For claims migrated from a legacy system-of-record, push the field
+  // change to that system through the adapter registry. Native and
+  // a1_tracker claims also flow through the adapter — A1TrackerAdapter
+  // delegates to filehandler so behavior is unchanged for them.
+  //
+  // QUEUE-NEVER-BLOCK: any failure is logged as a claim_event and toggles
+  // sync_status='sync_failed'. Never throws into updateStatus.
+  setImmediate(() => {
+    _legacyWriteBackUpdate(claimId, {
+      field: 'status', oldValue: prev, newValue: newStatus,
+    }).catch((err) => logger.error({
+      msg: 'updateStatus: legacy write-back unexpected throw', claimId, err: err.message,
+    }));
+  });
+
   if (_testStore.has(claimId)) {
     return _testStore.get(claimId);
   }
   return getClaim(claimId);
+}
+
+// ── Legacy write-back helper ─────────────────────────────────────────────────
+// Routes a claim field-update through the appropriate LegacyClaimsAdapter
+// based on source_system. Best-effort: never throws.
+async function _legacyWriteBackUpdate(claimId, change) {
+  const claim = await getClaim(claimId);
+  if (!claim) return;
+
+  // Skip native claims that don't yet have an external peer record.
+  // (A1 / filehandler-side state for native claims continues to be managed
+  // by claimService's existing filehandler calls — the adapter is layered
+  // on top, not replacing those calls.)
+  const sourceSystem = claim.sourceSystem || 'native';
+  const externalId   = claim.externalClaimId;
+  if (sourceSystem === 'native' || !externalId) return;
+
+  const { getAdapter } = require('./legacy/adapterRegistry');
+  const adapter = getAdapter(sourceSystem);
+  const now = new Date().toISOString();
+
+  try {
+    await supabase.from('claims').update({
+      sync_status: 'sync_pending', updated_at: now,
+    }).eq('id', claimId);
+
+    await adapter.pushClaimUpdate(externalId, change);
+
+    await supabase.from('claims').update({
+      sync_status:   'synced',
+      last_synced_at: new Date().toISOString(),
+      updated_at:    new Date().toISOString(),
+    }).eq('id', claimId);
+
+    await supabase.from('claim_events').insert({
+      claim_id:  claimId,
+      type:      'legacy_sync_ok',
+      timestamp: new Date().toISOString(),
+      data:      { source_system: sourceSystem, field: change.field, external_claim_id: externalId },
+    });
+  } catch (err) {
+    logger.error({ msg: '_legacyWriteBackUpdate failed', claimId, sourceSystem, err: err.message });
+    try {
+      await supabase.from('claims').update({
+        sync_status: 'sync_failed', updated_at: new Date().toISOString(),
+      }).eq('id', claimId);
+      await supabase.from('claim_events').insert({
+        claim_id:  claimId,
+        type:      'legacy_sync_failed',
+        timestamp: new Date().toISOString(),
+        data:      { source_system: sourceSystem, field: change.field, error: err.message },
+      });
+    } catch { /* swallowed — already in failure path */ }
+  }
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -704,4 +778,5 @@ module.exports = {
   _nextClaimNumber,
   _seedClaim,
   _resetClaims,
+  _legacyWriteBackUpdate,
 };

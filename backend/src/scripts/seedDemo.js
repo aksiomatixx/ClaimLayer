@@ -217,6 +217,21 @@ async function wipeDemo() {
   for (const id of ids) {
     try { await supabase.from('claims').delete().eq('id', id); } catch { /* ignore */ }
   }
+
+  // ── Legacy integration demo (M_legacy_integration) ────────────────────────
+  // Wipe the mock legacy system tables + any claim rows the migration
+  // service created from them. External IDs are deterministic so this is
+  // safe to re-run.
+  const legacyExternalIds = ['LEG-000', 'LEG-001', 'LEG-002', 'LEG-003'];
+  for (const tbl of ['legacy_updates', 'legacy_diaries', 'legacy_documents']) {
+    for (const ext of legacyExternalIds) {
+      try { await supabase.from(tbl).delete().eq('external_claim_id', ext); } catch { /* table may not exist */ }
+    }
+  }
+  for (const ext of legacyExternalIds) {
+    try { await supabase.from('legacy_claims').delete().eq('external_id', ext); } catch { /* */ }
+    try { await supabase.from('claims').delete().eq('external_claim_id', ext); } catch { /* */ }
+  }
   return ids.length;
 }
 
@@ -247,9 +262,176 @@ async function seedDemo() {
     created.push(id);
   }
 
+  // ── Legacy integration demo data ──────────────────────────────────────────
+  // Three un-migrated legacy claims (the "Migrate" button pulls them in)
+  // plus one already-migrated example so the round trip is visible without
+  // clicking anything.
+  await _seedLegacyDemo();
+
   logger.info({ msg: 'seedDemo: complete', count: created.length });
   return { count: created.length, ids: created,
     employers: [EMPLOYER_BRIGHTCARE.id, EMPLOYER_WESTSIDE.id] };
+}
+
+// ── Legacy integration seed (M_legacy_integration) ────────────────────────────
+// Realistic CA home-health injuries; deterministic external IDs so re-seed
+// is idempotent. LEG-000 is pre-migrated with simulated write-back history;
+// LEG-001..003 are un-migrated, waiting for the demo "Migrate" button.
+async function _seedLegacyDemo() {
+  const UN_MIGRATED = [
+    {
+      external_id: 'LEG-001',
+      claimant_name: 'Theresa Nguyen',
+      employer_name: 'Westside Home Care Services',
+      doi:        dateDaysAgo(45),
+      body_part:  'Lumbar Spine / Lower Back',
+      status:     'open',
+      raw: {
+        injury_type: 'Lifting Injury',
+        injury_description: 'Patient transfer lift; sudden lumbar pain, declined ER, reported next shift.',
+        aww: 812.50, tdRate: 541.67,
+        employee: {
+          firstName: 'Theresa', lastName: 'Nguyen', dob: '1983-07-22',
+          phone: '(818) 555-0211', jobTitle: 'LVN Home Health',
+          address: { line1: '6710 Sepulveda Blvd', state: 'CA', zip: '91411' },
+        },
+      },
+    },
+    {
+      external_id: 'LEG-002',
+      claimant_name: 'Robert Ortiz',
+      employer_name: 'BrightCare Home Health, Inc.',
+      doi:        dateDaysAgo(12),
+      body_part:  'Shoulder',
+      status:     'pending_review',
+      raw: {
+        injury_type: 'Repetitive Motion',
+        injury_description: 'Right shoulder pain after week of repeat overhead patient repositioning.',
+        aww: 695.25, tdRate: 463.50,
+        employee: {
+          firstName: 'Robert', lastName: 'Ortiz', dob: '1991-02-14',
+          phone: '(213) 555-0322', jobTitle: 'Home Health Aide II',
+          address: { line1: '4422 W Adams Blvd', state: 'CA', zip: '90016' },
+        },
+      },
+    },
+    {
+      external_id: 'LEG-003',
+      claimant_name: 'Jennifer Park',
+      employer_name: 'Westside Home Care Services',
+      doi:        dateDaysAgo(4),
+      body_part:  'Wrist / Hand',
+      status:     'in_progress',
+      raw: {
+        injury_type: 'Strain / Sprain',
+        injury_description: 'Right wrist soreness after long shift of medication preps; no specific incident.',
+        aww: 730.00, tdRate: 486.67,
+        employee: {
+          firstName: 'Jennifer', lastName: 'Park', dob: '1989-11-30',
+          phone: '(818) 555-0444', jobTitle: 'Personal Care Worker',
+          address: { line1: '15040 Burbank Blvd', state: 'CA', zip: '91411' },
+        },
+      },
+    },
+  ];
+
+  for (const row of UN_MIGRATED) {
+    try {
+      await supabase.from('legacy_claims').insert({ ...row, created_at: isoDaysAgo(45) });
+    } catch (err) {
+      logger.warn({ msg: '_seedLegacyDemo: legacy_claims insert failed', external_id: row.external_id, err: err.message });
+    }
+  }
+
+  // Pre-migrated example: LEG-000 already exists in the legacy system AND
+  // already has a claims row in ClaimLayer (sync_status='synced') plus a
+  // visible round-trip footprint.
+  await _seedPreMigrated();
+}
+
+async function _seedPreMigrated() {
+  const externalId = 'LEG-000';
+  const claimId    = `claim_legacy_${externalId}`;
+  const doi        = dateDaysAgo(34);
+  const filed      = isoDaysAgo(34);
+
+  // Legacy-side seed row.
+  try {
+    await supabase.from('legacy_claims').insert({
+      external_id:    externalId,
+      claimant_name:  'Anthony Brooks',
+      employer_name:  'BrightCare Home Health, Inc.',
+      doi,
+      body_part:      'Knee',
+      status:         'in_progress',
+      raw: {
+        injury_type: 'Slip & Fall',
+        injury_description: 'Slipped exiting patient bathroom; right knee twist + immediate swelling.',
+        aww: 765.00, tdRate: 510.00,
+        employee: {
+          firstName: 'Anthony', lastName: 'Brooks', dob: '1976-09-04',
+          phone: '(213) 555-0177', jobTitle: 'Home Health Aide II',
+          address: { line1: '2200 W Olympic Blvd', state: 'CA', zip: '90006' },
+        },
+      },
+      created_at: filed,
+    });
+  } catch { /* may already exist */ }
+
+  // ClaimLayer-side migrated claim row.
+  try {
+    await supabase.from('claims').insert({
+      id:                 claimId,
+      claim_number:       `LEG-${externalId.slice(-6)}`,
+      employer_id:        null,
+      employer_name:      'BrightCare Home Health, Inc.',
+      employee: {
+        firstName: 'Anthony', lastName: 'Brooks', dob: '1976-09-04',
+        phone: '(213) 555-0177', jobTitle: 'Home Health Aide II',
+        address: { line1: '2200 W Olympic Blvd', state: 'CA', zip: '90006' },
+      },
+      status:             'active_medical',
+      date_of_injury:     doi,
+      body_part:          'Knee',
+      injury_type:        'Slip & Fall',
+      injury_description: 'Slipped exiting patient bathroom; right knee twist + immediate swelling.',
+      aww:                765.00,
+      td_rate:            510.00,
+      filed_at:           filed,
+      source_system:      'mock_legacy',
+      external_claim_id:  externalId,
+      sync_status:        'synced',
+      last_synced_at:     isoDaysAgo(1),
+      metadata:           { demo: true, migrated_from: 'mock_legacy' },
+      created_at:         filed,
+      updated_at:         isoDaysAgo(1),
+    });
+  } catch { /* */ }
+
+  // Round-trip footprint: a diary + a notice + a status field update,
+  // already pushed back to the legacy system. Lets the reviewer see what
+  // "write-back" looks like without doing anything.
+  try {
+    await supabase.from('legacy_updates').insert({
+      external_claim_id: externalId, field: 'status',
+      old_value: 'open', new_value: 'in_progress',
+      pushed_at: isoDaysAgo(20), created_at: isoDaysAgo(20),
+    });
+    await supabase.from('legacy_diaries').insert({
+      external_claim_id: externalId, type: 'PR2_FOLLOW_UP',
+      due_date: dateDaysAgo(-7),
+      notes: 'Push from ClaimLayer: follow up on next PR-2 from treating physician',
+      pushed_at: isoDaysAgo(15), created_at: isoDaysAgo(15),
+    });
+    await supabase.from('legacy_documents').insert({
+      external_claim_id: externalId, doc_type: 'NOTICE_DWC7',
+      title: 'DWC-7 Notice of Rights (generated by ClaimLayer)',
+      summary: 'Statutory notice generated and pushed to legacy system-of-record.',
+      pushed_at: isoDaysAgo(33), created_at: isoDaysAgo(33),
+    });
+  } catch (err) {
+    logger.warn({ msg: '_seedPreMigrated: round-trip seed partial', err: err.message });
+  }
 }
 
 async function _seedOneClaim(id, idx, plan, persona) {
