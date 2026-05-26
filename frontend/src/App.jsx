@@ -2881,17 +2881,23 @@ function AdminReports({onSelect}){
 function EmployerPortal({employerUser,setEmployerUser,onSelect}){
   const [view,setView]=useState("new");
 
-  // Auth gate — show login if no employer session
-  if(!employerUser) return <EmployerLogin onLogin={setEmployerUser}/>;
-
-  const {employerName}=employerUser;
-
-  // Claims via React Query — scoped by employer auth on the backend
+  // Claims via React Query — scoped by employer auth on the backend.
+  // MUST be called before any conditional return: React's rules-of-hooks
+  // require the hook list to match across renders. The login-gate render
+  // returned 1 hook (useState only); this render returned 2 (useState +
+  // useQuery), which fired "Rendered more hooks than during the previous
+  // render" the moment setEmployerUser flipped null → object.
   const {data:myClaims=[],isLoading:claimsLoading}=useQuery({
     queryKey:['employer-claims'],
     queryFn:fetchClaims,
     refetchInterval:30_000,
+    enabled:!!employerUser,
   });
+
+  // Auth gate — show login if no employer session
+  if(!employerUser) return <EmployerLogin onLogin={setEmployerUser}/>;
+
+  const {employerName}=employerUser;
 
   return(
     <div style={{paddingTop:32,maxWidth:960,animation:"fadeUp .3s ease"}}>
@@ -3414,15 +3420,20 @@ export default function App(){
   const [jsPdfReady,setJsPdfReady]=useState(false);
   const [employerUser,setEmployerUser]=useState(null);
 
-  // ── Dev session auto-login for admin (replaced by Supabase Auth in M5) ────────
-  useEffect(()=>{ensureDevSession();},[]);
-
-  // ── Dev employer session when switching to employer portal ────────────────────
+  // ── Dev-only auto-login (replaced by Supabase Auth in M5).
+  // Refresh the cookie on every role change so the demo never carries a
+  // stale cookie from a prior role: switching admin → employer → admin
+  // must restore the admin cookie, not leave the employer one in place.
   useEffect(()=>{
-    if(role==='employer'&&!employerUser){
-      ensureDevEmployerSession().then(data=>{
-        if(data?.ok) setEmployerUser({employerId:data.employerId,employerName:data.employerName,email:data.email||'hr@brightcarehh.com'});
-      });
+    if(role==='employer'){
+      if(!employerUser){
+        ensureDevEmployerSession().then(data=>{
+          if(data?.ok) setEmployerUser({employerId:data.employerId,employerName:data.employerName,email:data.email||'hr@brightcarehh.com'});
+        });
+      }
+    } else {
+      // admin + employee portals both use the admin dev cookie today
+      ensureDevSession();
     }
   },[role]);
 
