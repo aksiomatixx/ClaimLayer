@@ -166,7 +166,7 @@ async function _postConfirmationTasks(appointment, claim) {
       providerName:    appointment.facility_name,
       providerAddress: appointment.facility_address,
       appointmentDate: appointment.scheduled_at,
-      adjusterName:    config.adjuster?.name || 'Akash Kumar',
+      adjusterName:    config.adjuster?.name || 'Demo Adjuster',
       adjusterPhone:   config.adjuster?.phone || process.env.ADJUSTER_PHONE,
       adjusterEmail:   config.adjuster?.email || process.env.ADJUSTER_EMAIL,
     });

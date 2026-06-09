@@ -1,7 +1,7 @@
 {
-  "name": "homecare-tpa-backend",
+  "name": "claimlayer-backend",
   "version": "1.0.0",
-  "description": "HomeCare TPA — California WC claims administration backend",
+  "description": "ClaimLayer — California WC claims administration backend",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

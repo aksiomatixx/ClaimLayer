@@ -1,8 +1,8 @@
 {
-  "name": "homecare-tpa",
+  "name": "claimlayer",
   "version": "0.0.0",
   "private": true,
-  "description": "HomeCare TPA monorepo orchestrator. Backend, frontend, and demo seed scripts.",
+  "description": "ClaimLayer monorepo orchestrator. Backend, frontend, and demo seed scripts.",
   "scripts": {
     "dev:demo": "NODE_ENV=development node scripts/dev-demo.js",
     "db:reset": "NODE_ENV=development node scripts/db-reset.js",

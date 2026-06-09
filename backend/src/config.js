@@ -59,9 +59,9 @@ const config = {
   },
 
   adjuster: {
-    name:  process.env.ADJUSTER_NAME  || 'Akash Kumar',
-    phone: process.env.ADJUSTER_PHONE || '(800) XXX-XXXX',
-    email: process.env.ADJUSTER_EMAIL || 'akash.kumar@homecaretpa.com',
+    name:  process.env.ADJUSTER_NAME  || 'Demo Adjuster',
+    phone: process.env.ADJUSTER_PHONE || '(800) 555-0100',
+    email: process.env.ADJUSTER_EMAIL || 'adjuster@claimlayer.example',
   },
 
   magicLink: {

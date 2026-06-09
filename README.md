@@ -65,9 +65,24 @@ A reference implementation and active project — not a live system processing r
 
 ## Try the demo
 
+### Prerequisites
+
+The demo runs against a real PostgreSQL database via Supabase — there is no in-memory fallback, because the audit trail and row-level security are part of what's being demonstrated.
+
+1. **Node.js 20+** (CI runs on 24).
+2. **A Supabase project** — the free tier works. Either [supabase.com](https://supabase.com) or a local stack via `supabase start` ([Supabase CLI](https://supabase.com/docs/guides/cli)).
+3. **Apply the migrations** in `supabase/migrations/` in filename order (SQL editor, `psql`, or `supabase db push`).
+4. **Environment** — copy `backend/.env.example` to `backend/.env` and fill in at minimum:
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
+   - `JWT_SECRET` (any random string for local use)
+   - `ANTHROPIC_API_KEY` — optional; without it the app runs but agent analyses are unavailable
+   - ADP / FileHandler / SendGrid / Twilio / Lob keys are **not** required for the demo
+
+### Run it
+
 ```bash
 npm install
-npm run dev:demo      # seeds 8 synthetic claims and starts the app
+npm run dev:demo      # wipes demo-flagged rows, seeds 8 synthetic claims, starts backend (:3001) + frontend (:5173)
 ```
 
 Then open the `/architecture` and `/agents` views to see the agent registry, guardrail catalog, and live decision audit trail.
