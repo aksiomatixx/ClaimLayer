@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchClaims, fetchClaim, triggerAnalysis, approveReserves, updateClaimStatus, fetchDiaries, ensureDevSession } from './services/claims.js';
 import { loginEmployer, ensureDevEmployerSession, previewEmployee, submitFROI } from './services/employer.js';
@@ -9,10 +8,10 @@ import { fetchPanelsForClaim, requestPanel, issuePanel, recordStrikes, scheduleQ
 import { evaluateMMISignals, fetchMMIEvaluations, solicitPR4, recordPR4Response, dismissMMIEvaluation, fetchPR4Solicitations } from './services/mmi.js';
 import { calculatePD, initiatePDAdvances, recordPDAdvancePayment, waivePDAdvance, createStipulation, sendStipToWorker, recordWorkerSignature, recordAdjusterSignature, recordEAMSFiled, fetchPDData } from './services/pd.js';
 import Architecture from './Architecture.jsx';
-import { C, FONTS, CSS, STATUS_CFG, PRI_COLOR, COMP_COLOR, TD_TYPE_COLOR, TD_TYPE_BG } from './theme.js';
+import { C, FONTS, CSS, PRI_COLOR, COMP_COLOR, TD_TYPE_COLOR, TD_TYPE_BG } from './theme.js';
 import { NOTICE_TYPES, EMPLOYERS, BODY_PARTS, INJURY_TYPES } from './mockData.js';
 import { fmt$, getProvidersNearZip, getSlots, dayLabel } from './utils.js';
-import { Badge, Btn, Lbl, Field, SectionHead, StatCard, Spinner, Toast, Tabs, InfoPair, RadioGroup, StepBar, SyncBadge } from './ui/primitives.jsx';
+import { Badge, Btn, Lbl, Field, SectionHead, StatCard, Spinner, Toast, Tabs, InfoPair, SyncBadge } from './ui/primitives.jsx';
 import LanguageSelector from './components/LanguageSelector.jsx';
 import M2VoiceRecorder from './components/M2VoiceRecorder.jsx';
 import MediaUploader from './components/MediaUploader.jsx';
