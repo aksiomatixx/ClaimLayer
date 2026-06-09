@@ -30,6 +30,7 @@
 
 const { supabase } = require('./supabase');
 const logger       = require('../logger');
+const { isRepresented } = require('../utils/representation');
 
 // ── Lazy requires (avoid cycles) ─────────────────────────────────────────────
 function _getClaimService() { return require('./claimService'); }
@@ -143,16 +144,10 @@ async function _getLatestMsaScreening(claimId) {
 }
 
 async function _isRepresented(claimId) {
-  // Mirrors pdService.sendStipToWorker's represented check — reads the raw
-  // claims row so tests can seed attorney_represented directly.
+  // Reads the raw claims row so tests can seed attorney_represented directly,
+  // then applies the shared representation check (M17B).
   const { data } = await supabase.from('claims').select('*').eq('id', claimId).single();
-  if (!data) return false;
-  return !!(
-    data.attorney_represented ||
-    data.attorneyName ||
-    data.attorney_name ||
-    data.representedBy
-  );
+  return isRepresented(data);
 }
 
 async function _transitionClaimStatus(claimId, expectedFrom, newStatus, reason) {

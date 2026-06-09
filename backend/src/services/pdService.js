@@ -44,19 +44,9 @@ const ADVANCE_CAP_POLICY = {
 };
 
 // ── Represented check ────────────────────────────────────────────────────────
-// Duplicated here because cnrService._isRepresented is its own private helper.
-// M17B Master-Context deferred task: consolidate attorney_represented into a
-// single claim column and replace this OR-chain + the twin in cnrService with
-// a shared helper.
-function _isRepresented(claim) {
-  if (!claim) return false;
-  return !!(
-    claim.attorney_represented ||
-    claim.attorneyName ||
-    claim.attorney_name ||
-    claim.representedBy
-  );
-}
+// Shared helper (M17B). Data-level consolidation onto a single
+// attorney_represented column is still pending.
+const { isRepresented: _isRepresented } = require('../utils/representation');
 
 // ── Cap policy resolution ────────────────────────────────────────────────────
 // Per-advance override wins. Otherwise represented = 85%, unrepresented = 100%.
@@ -919,10 +909,10 @@ async function sendStipToWorker(stipId) {
   const emp = claim.employee || {};
   const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Injured Worker';
 
-  // Check if worker is represented (attorney on file)
-  // attorneyName is not yet a formal claims column — check raw row for future-proofing
+  // Check if worker is represented (attorney on file) — check both the raw
+  // row and the mapped claim, since attorney fields aren't formal columns yet
   const { data: rawClaim } = await supabase.from('claims').select('*').eq('id', stip.claim_id).single();
-  const isRepresented = !!(rawClaim?.attorneyName || rawClaim?.attorney_name || claim.attorneyName || claim.representedBy);
+  const isRepresented = _isRepresented(rawClaim) || _isRepresented(claim);
 
   if (isRepresented) {
     // Represented worker: action item for attorney transmission only.
