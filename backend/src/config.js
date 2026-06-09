@@ -26,8 +26,9 @@ const config = {
 
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY,
-    // Always pin the exact model string — never use a bare alias
-    model: 'claude-sonnet-4-20250514',
+    // Pin the exact model ID. claude-sonnet-4-6 is the complete current ID
+    // (no date-suffixed variant exists for this generation).
+    model: 'claude-sonnet-4-6',
   },
 
   supabase: {

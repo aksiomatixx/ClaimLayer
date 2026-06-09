@@ -9,6 +9,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.0",
     "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.103.0",
     "axios": "^1.7.2",

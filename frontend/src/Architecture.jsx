@@ -54,7 +54,7 @@ const LIFECYCLE = [
 const AGENTS = [
   {
     id: 'compensability', name: 'Compensability Analyst',
-    prompt: 'compensability_analysis', model: 'claude-sonnet-4-20250514',
+    prompt: 'compensability_analysis', model: 'claude-sonnet-4-6',
     invoked_when: 'Claim transitions to intake_complete (FROI + ADP pull complete)',
     inputs:  ['Body part', 'Injury type + description', 'Job title', 'AWW / TD rate', 'Employer-contests flag', 'Motor vehicle fields'],
     outputs: ['compensability', 'compensabilityScore (0-100)', 'priority', 'suggestedMedicalReserve', 'suggestedIndemnityReserve', 'suggestedExpenseReserve', 'redFlags[]', 'nextActions[]'],
@@ -63,7 +63,7 @@ const AGENTS = [
   },
   {
     id: 'rfa_mtus', name: 'RFA / MTUS Evaluator',
-    prompt: 'rfa_mtus_evaluation', model: 'claude-sonnet-4-20250514',
+    prompt: 'rfa_mtus_evaluation', model: 'claude-sonnet-4-6',
     invoked_when: 'New RFA received (rfaService.createRFA → fire-and-forget evaluation)',
     inputs:  ['Accepted diagnosis', 'Requested treatment', 'CPT codes', 'Days since DOI', 'Body part', 'CA jurisdiction context'],
     outputs: ['recommendedAction (auto_approve | physician_review)', 'mtusConsistency', 'rationale', 'urgency'],
@@ -72,7 +72,7 @@ const AGENTS = [
   },
   {
     id: 'cnr_pricing', name: 'C&R Pricing Engine',
-    prompt: 'cnr_pricing', model: 'claude-sonnet-4-20250514',
+    prompt: 'cnr_pricing', model: 'claude-sonnet-4-6',
     invoked_when: 'pdPricingService.priceCnr called after MSA screening passes',
     inputs:  ['Claim demographics + age', 'WPI + PD%', 'Stip value (deterministic from PDRS)', 'Apportionment %', 'Claim age'],
     outputs: ['cnrValueLow / Mid / High', 'rationale', 'riskFactors[]', 'futureMedicalEstimate', 'recommendation (always adjuster_review)'],
@@ -90,7 +90,7 @@ const AGENTS = [
   },
   {
     id: 'voice_extract', name: 'Voice Intake Extractor',
-    prompt: 'voice_extraction', model: 'claude-sonnet-4-20250514',
+    prompt: 'voice_extraction', model: 'claude-sonnet-4-6',
     invoked_when: 'Employee submits voice transcript via intake wizard',
     inputs:  ['Whisper transcript', 'Known DOI / employer / body part context'],
     outputs: ['body_part', 'mechanism', 'time_of_injury', 'witnesses', 'prior_claims', 'medical_treatment', 'confidence (0-100)'],

@@ -582,7 +582,7 @@ async function _seedOneClaim(id, idx, plan, persona) {
 // Seed ai_decisions rows so the admin Agents view has data on first
 // load. Same rule as td_periods: direct insert, deterministic UUIDs.
 async function _seedAiDecisions(claimId, idx, plan, persona) {
-  const MODEL = 'claude-sonnet-4-20250514';
+  const MODEL = 'claude-sonnet-4-6';
   for (let i = 0; i < plan.aiDecisions.length; i++) {
     const spec = plan.aiDecisions[i];
     const row = _buildAiDecisionRow(claimId, idx, i, spec, plan, persona, MODEL);

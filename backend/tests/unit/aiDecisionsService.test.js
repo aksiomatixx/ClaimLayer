@@ -21,7 +21,7 @@ async function seed(rows) {
       claim_id: r.claim_id || 'claim_test',
       decision_type: r.decision_type,
       prompt_name: r.prompt_name || 'p',
-      model: r.model || 'claude-sonnet-4-20250514',
+      model: r.model || 'claude-sonnet-4-6',
       input_snapshot: r.input_snapshot || {},
       output_parsed: r.output_parsed || null,
       output_raw: r.output_raw || null,
@@ -41,7 +41,7 @@ describe('logDecision', () => {
   it('inserts a row and returns it', async () => {
     const out = await aid.logDecision({
       claim_id: 'claim_test', decision_type: 'compensability',
-      prompt_name: 'compensability_analysis', model: 'claude-sonnet-4-20250514',
+      prompt_name: 'compensability_analysis', model: 'claude-sonnet-4-6',
       input_snapshot: { x: 1 }, output_parsed: { y: 2 },
       input_tokens: 800, output_tokens: 600, latency_ms: 3500, confidence: 87,
     });

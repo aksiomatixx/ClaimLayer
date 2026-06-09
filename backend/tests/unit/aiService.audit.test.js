@@ -18,25 +18,25 @@ process.env.ANTHROPIC_API_KEY = 'test-key-not-real';
 
 jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
 
-// Mock the actual Claude HTTP call so we don't hit the network.
-jest.mock('axios', () => ({ post: jest.fn() }));
-const axios = require('axios');
+// Mock the Anthropic SDK so we don't hit the network.
+const mockMessagesCreate = jest.fn();
+jest.mock('@anthropic-ai/sdk', () =>
+  jest.fn().mockImplementation(() => ({ messages: { create: mockMessagesCreate } }))
+);
 
 const aiService = require('../../src/services/aiService');
 const aid       = require('../../src/services/aiDecisionsService');
 const { supabase } = require('../../src/services/supabase');
 
 beforeEach(() => {
-  axios.post.mockReset();
+  mockMessagesCreate.mockReset();
   supabase._resetStore();
 });
 
 function mockClaudeResponse(body) {
-  axios.post.mockResolvedValue({
-    data: {
-      content: [{ type: 'text', text: JSON.stringify(body) }],
-      usage: { input_tokens: 800, output_tokens: 600 },
-    },
+  mockMessagesCreate.mockResolvedValue({
+    content: [{ type: 'text', text: JSON.stringify(body) }],
+    usage: { input_tokens: 800, output_tokens: 600 },
   });
 }
 

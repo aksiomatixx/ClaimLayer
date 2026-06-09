@@ -11,13 +11,26 @@
  * auto-approve anything on a parse failure (per integrations.md).
  */
 
-const axios  = require('axios');
+const Anthropic = require('@anthropic-ai/sdk');
 const fs     = require('fs');
 const path   = require('path');
 const config = require('../config');
 const logger = require('../logger');
 
 const PROMPTS_DIR = path.join(__dirname, '../../prompts');
+
+// Lazy singleton — constructed on first call so a missing key fails the call,
+// not module load. The SDK retries 429/500/529 with exponential backoff.
+let _client = null;
+function getClient() {
+  if (!config.anthropic.apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is not set — AI analysis unavailable');
+  }
+  if (!_client) {
+    _client = new Anthropic({ apiKey: config.anthropic.apiKey, maxRetries: 3 });
+  }
+  return _client;
+}
 
 // ── Prompt loader ─────────────────────────────────────────────────────────────
 function loadPrompt(name) {
@@ -36,34 +49,24 @@ function loadPrompt(name) {
 //   callClaudeMeta(...)  — returns { parsed, raw, meta:{input_tokens, output_tokens, latency_ms} }
 // for callers that want to log via aiDecisionsService.
 async function callClaudeMeta(systemPrompt, userContent, maxTokens = 1500) {
-  if (!config.anthropic.apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not set — AI analysis unavailable');
-  }
+  const client = getClient();
 
   const start = Date.now();
 
-  const res = await axios.post(
-    'https://api.anthropic.com/v1/messages',
+  const res = await client.messages.create(
     {
       model:      config.anthropic.model,
       max_tokens: maxTokens,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userContent }],
     },
-    {
-      timeout: 45_000,
-      headers: {
-        'Content-Type':    'application/json',
-        'x-api-key':       config.anthropic.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-    }
+    { timeout: 45_000 }
   );
 
-  const raw = res.data.content?.find(b => b.type === 'text')?.text || '';
+  const raw = res.content?.find(b => b.type === 'text')?.text || '';
   const latency_ms = Date.now() - start;
-  const input_tokens  = res.data.usage?.input_tokens  ?? null;
-  const output_tokens = res.data.usage?.output_tokens ?? null;
+  const input_tokens  = res.usage?.input_tokens  ?? null;
+  const output_tokens = res.usage?.output_tokens ?? null;
 
   logger.info({
     integration: 'anthropic', model: config.anthropic.model,
@@ -219,17 +222,14 @@ async function evaluateRFA(rfa, claim) {
  * Does NOT change the existing callClaude signature.
  */
 async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, maxTokens = 2000) {
-  if (!config.anthropic.apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not set — AI analysis unavailable');
-  }
+  const client = getClient();
   if (!Buffer.isBuffer(pdfBuffer)) {
     throw new Error('callClaudeWithDocument: pdfBuffer must be a Buffer');
   }
 
   const start = Date.now();
 
-  const res = await axios.post(
-    'https://api.anthropic.com/v1/messages',
+  const res = await client.messages.create(
     {
       model:      config.anthropic.model,
       max_tokens: maxTokens,
@@ -249,25 +249,18 @@ async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, 
         ],
       }],
     },
-    {
-      timeout: 60_000,
-      headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         config.anthropic.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-    }
+    { timeout: 60_000 }
   );
 
-  const raw = res.data.content?.find(b => b.type === 'text')?.text || '';
+  const raw = res.content?.find(b => b.type === 'text')?.text || '';
 
   logger.info({
     integration:  'anthropic',
     mode:         'document',
     model:        config.anthropic.model,
     latencyMs:    Date.now() - start,
-    inputTokens:  res.data.usage?.input_tokens,
-    outputTokens: res.data.usage?.output_tokens,
+    inputTokens:  res.usage?.input_tokens,
+    outputTokens: res.usage?.output_tokens,
   });
 
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
