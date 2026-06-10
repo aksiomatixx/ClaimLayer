@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { approveReserves, fetchClaim, fetchDiaries, triggerAnalysis, updateClaimStatus, fetchClaimDocuments, fetchDecisionBrief, documentFileUrl, fetchAftermathPreview, completeDiaryAction, declineDiaryAction, editDiaryAction, ingestClaimDocument, generateSettlementPackage } from '../services/claims.js';
+import { approveReserves, fetchClaim, fetchDiaries, triggerAnalysis, updateClaimStatus, fetchClaimDocuments, fetchDecisionBrief, documentFileUrl, fetchAftermathPreview, completeDiaryAction, declineDiaryAction, editDiaryAction, ingestClaimDocument, ingestClaimFile, generateSettlementPackage } from '../services/claims.js';
 import { dismissMMIEvaluation, evaluateMMISignals, fetchMMIEvaluations, fetchPR4Solicitations, recordPR4Response, solicitPR4 } from '../services/mmi.js';
 import { calculatePD, createStipulation, fetchPDData, initiatePDAdvances, recordAdjusterSignature, recordEAMSFiled, recordPDAdvancePayment, recordWorkerSignature, sendStipToWorker, waivePDAdvance } from '../services/pd.js';
 import { approveSupplemental, dismissSupplemental, fetchPanelsForClaim, fetchSupplementalRequests, issuePanel, markReportReceived, recordStrikes, requestPanel, scheduleQmeAppointment } from '../services/qme.js';
@@ -75,15 +75,25 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
       notify(`Due date moved to ${editDue} (audited)`);
     }catch(e){notify(`Edit failed: ${e.message}`,'error');}
   };
+  const notifyIngest=(r)=>notify(r.routed==='filed'
+    ?`Ingested: ${r.document.category} → ${r.diary?.diary_type||'filed'}`
+    :`Routed to human triage (${r.document.triage_reason})`,
+    r.routed==='filed'?'success':'error');
   const runIngest=async()=>{
     try{
       const r=await ingestClaimDocument(claimId,{title:'Pasted document',content_text:ingestText,source:'upload'});
       setIngesting(false);setIngestText('');refresh();
-      notify(r.routed==='filed'
-        ?`Ingested: ${r.document.category} → ${r.diary?.diary_type||'filed'}`
-        :`Routed to human triage (${r.document.triage_reason})`,
-        r.routed==='filed'?'success':'error');
+      notifyIngest(r);
     }catch(e){notify(`Ingest failed: ${e.message}`,'error');}
+  };
+  const runIngestFile=async(file)=>{
+    if(!file)return;
+    try{
+      notify(`Classifying ${file.name}…`);
+      const r=await ingestClaimFile(claimId,file);
+      setIngesting(false);refresh();
+      notifyIngest(r);
+    }catch(e){notify(`Upload failed: ${e.message}`,'error');}
   };
   const genPackage=async(kind)=>{
     try{
@@ -166,10 +176,15 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
         </div>
         {ingesting&&(
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"13px 16px",marginBottom:12}}>
-            <div style={{fontSize:11,color:C.dim,marginBottom:8}}>Paste the document text — the classification agent labels it, summarizes it, files it, and queues the required action. Low confidence routes to human triage.</div>
+            <div style={{fontSize:11,color:C.dim,marginBottom:8}}>Drop a PDF (text or scanned) or paste the document text — the classification agent labels it, summarizes it, files it, and queues the required action. Low confidence routes to human triage.</div>
             <textarea value={ingestText} onChange={e=>setIngestText(e.target.value)} rows={5} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderMid||C.border}`,borderRadius:7,color:C.text,fontSize:12,padding:10,fontFamily:C.sans}} placeholder="PROGRESS REPORT PR-2. Claim: HHW-2026-D08 …"/>
-            <div style={{display:"flex",gap:8,marginTop:8}}>
+            <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
               <Btn small disabled={!ingestText.trim()} onClick={runIngest}>Classify & file</Btn>
+              <label style={{fontSize:11.5,color:C.dim,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 10px",cursor:"pointer"}}>
+                Upload PDF…
+                <input type="file" accept="application/pdf,.pdf" style={{display:"none"}}
+                  onChange={e=>{runIngestFile(e.target.files?.[0]);e.target.value='';}}/>
+              </label>
               <Btn small variant="ghost" onClick={()=>setIngesting(false)}>Cancel</Btn>
             </div>
           </div>

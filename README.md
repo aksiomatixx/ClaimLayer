@@ -32,7 +32,7 @@ The deeper change is to the shape of the adjuster's day. Traditional adjusting i
 
 The adjuster stops being a router of paperwork and becomes what the license is for: the decision-maker.
 
-That loop is implemented end to end: a document is ingested and classified into a controlled category by a Claude agent (every call logged to the audit trail); it is matched to its claim — or routed to a **human triage queue** when confidence is low, never silently filed; key fields are extracted and an AI summary attached; a **deterministic rules table** translates the document into the action it requires; the action surfaces in the claim drawer with the source document one click away; the adjuster sees a dry-run of **exactly what completing will do**, then approves, edits (audited — penalty diaries refuse to move), or declines with a documented reason; on approval the decision note writes back to the retained system of record, the diary completes, the successor deadline is set, and the statutory notice generates and queues. One integration test walks all ten steps.
+That loop is implemented end to end: a document arrives as an **actual PDF** (uploaded in the drawer, or as an email attachment via the inbound-email webhook) or as extracted text; PDFs extract their text layer locally, and scanned documents with no text layer fall back to classification of the document itself via a Claude document block — same guardrails either way; the document is classified into a controlled category by a Claude agent (every call logged to the audit trail); it is matched to its claim — or routed to a **human triage queue** when confidence is low, never silently filed; key fields are extracted and an AI summary attached; a **deterministic rules table** translates the document into the action it requires; the action surfaces in the claim drawer with the source document one click away; the adjuster sees a dry-run of **exactly what completing will do**, then approves, edits (audited — penalty diaries refuse to move), or declines with a documented reason; on approval the decision note writes back to the retained system of record, the diary completes, the successor deadline is set, and the statutory notice generates and queues. One integration test walks all ten steps.
 
 The wedge is agentic execution within hard regulatory limits, where every AI decision is bounded, auditable, and reversible by a human.
 
@@ -117,6 +117,13 @@ Physical mail is only marked **delivered** by a signature-verified Lob
 webhook (`POST /webhooks/lob/delivery`); until then a submitted letter
 is truthfully `submitted`. Set `LOB_WEBHOOK_SECRET` (and the DxF/Enlyte
 secrets) in production — webhook verification fails closed without them.
+
+The email-in document channel (`POST /webhooks/email/inbound`) is shaped
+for SendGrid Inbound Parse / Mailgun Routes: point the vendor's route at
+it with `?token=` matching `EMAIL_INBOUND_TOKEN` (required in
+production — fails closed without it). PDF attachments run through the
+standard ingestion pipeline, idempotent on the email Message-ID. The
+vendor account + inbound DNS (MX) configuration is the remaining setup.
 
 Then open the `/architecture` and `/agents` views to see the agent registry, guardrail catalog, and live decision audit trail.
 

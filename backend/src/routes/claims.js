@@ -353,8 +353,16 @@ router.get(
       if (!data || data.claim_id !== req.params.id) {
         return res.status(404).json({ error: 'Document not found' });
       }
-      const claim = await claimService.getClaim(req.params.id).catch(() => null);
-      const pdfBuffer = await pdfService.generateClaimDocumentPDF(data, claim);
+      // Documents that arrived as actual files (PDF intake / email-in)
+      // carry the original — serve it. Text-channel documents fall back
+      // to the rendered rendition of their content.
+      let pdfBuffer;
+      if (data.pdf_buffer_b64) {
+        pdfBuffer = Buffer.from(data.pdf_buffer_b64, 'base64');
+      } else {
+        const claim = await claimService.getClaim(req.params.id).catch(() => null);
+        pdfBuffer = await pdfService.generateClaimDocumentPDF(data, claim);
+      }
       res.set('Content-Type', 'application/pdf');
       res.set('Content-Disposition', `inline; filename="${data.id}.pdf"`);
       res.send(pdfBuffer);

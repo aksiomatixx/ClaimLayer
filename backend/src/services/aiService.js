@@ -222,7 +222,7 @@ async function evaluateRFA(rfa, claim) {
  *
  * Does NOT change the existing callClaude signature.
  */
-async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, maxTokens = 2000) {
+async function callClaudeWithDocumentMeta(systemPrompt, pdfBuffer, userInstruction, maxTokens = 2000) {
   const client = getClient();
   if (!Buffer.isBuffer(pdfBuffer)) {
     throw new Error('callClaudeWithDocument: pdfBuffer must be a Buffer');
@@ -254,24 +254,34 @@ async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, 
   );
 
   const raw = res.content?.find(b => b.type === 'text')?.text || '';
+  const latency_ms = Date.now() - start;
+  const input_tokens  = res.usage?.input_tokens  ?? null;
+  const output_tokens = res.usage?.output_tokens ?? null;
 
   logger.info({
     integration:  'anthropic',
     mode:         'document',
     model:        config.anthropic.model,
-    latencyMs:    Date.now() - start,
-    inputTokens:  res.usage?.input_tokens,
-    outputTokens: res.usage?.output_tokens,
+    latencyMs:    latency_ms,
+    inputTokens:  input_tokens,
+    outputTokens: output_tokens,
   });
 
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
+  let parsed;
   try {
-    return JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned);
   } catch (parseErr) {
     logger.error({ msg: 'Claude: document JSON parse failed — manual review required', raw });
     throw new Error('Claude returned invalid JSON — task queued for manual review');
   }
+  return { parsed, raw, meta: { input_tokens, output_tokens, latency_ms } };
+}
+
+async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, maxTokens = 2000) {
+  const { parsed } = await callClaudeWithDocumentMeta(systemPrompt, pdfBuffer, userInstruction, maxTokens);
+  return parsed;
 }
 
 // ── Document classification (Inbound Document Ingestion agent) ───────────────
@@ -292,16 +302,7 @@ const DOCUMENT_CLASS_CATEGORIES = [
  *     silent filing).
  * Every call is logged to ai_decisions as decision_type 'doc_classification'.
  */
-async function classifyDocument({ text, filename, source, claimIdHint }) {
-  const systemPrompt = loadPrompt('document_classification');
-  const userContent = JSON.stringify({
-    filename: filename || null,
-    source:   source || null,
-    text:     String(text || '').slice(0, 28_000), // bound input size
-  });
-
-  const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, userContent, 1200);
-
+function _applyClassificationGuardrails(result) {
   const required = ['category', 'confidence', 'summary'];
   const missing = required.filter(f => !(f in result));
   if (missing.length) {
@@ -321,23 +322,72 @@ async function classifyDocument({ text, filename, source, claimIdHint }) {
     guardrails.push({ rule: 'controlled_category_list', triggered: false });
   }
   result.confidence = Math.max(0, Math.min(100, Number(result.confidence) || 0));
+  return guardrails;
+}
 
-  // Regulated decision: the audit row is part of the contract. A
-  // persistence failure fails the classification — never a silent
-  // continue with an unaudited model decision.
+// Regulated decision: the audit row is part of the contract. A
+// persistence failure fails the classification — never a silent
+// continue with an unaudited model decision.
+async function _auditClassification({ claimIdHint, inputSnapshot, result, raw, meta, guardrails }) {
   const aid = require('./aiDecisionsService');
   await aid.logDecision({
     claim_id:       claimIdHint || null,
     decision_type:  'doc_classification',
     prompt_name:    'document_classification',
     model:          config.anthropic.model,
-    input_snapshot: { filename: filename || null, source: source || null, text_chars: String(text || '').length },
+    input_snapshot: inputSnapshot,
     output_parsed:  result,
     output_raw:     raw,
     ...meta,
     confidence:     result.confidence,
     guardrail_actions: guardrails,
   }, { required: true });
+}
+
+async function classifyDocument({ text, filename, source, claimIdHint }) {
+  const systemPrompt = loadPrompt('document_classification');
+  const userContent = JSON.stringify({
+    filename: filename || null,
+    source:   source || null,
+    text:     String(text || '').slice(0, 28_000), // bound input size
+  });
+
+  const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, userContent, 1200);
+  const guardrails = _applyClassificationGuardrails(result);
+
+  await _auditClassification({
+    claimIdHint,
+    inputSnapshot: { mode: 'text', filename: filename || null, source: source || null, text_chars: String(text || '').length },
+    result, raw, meta, guardrails,
+  });
+
+  return { ...result, guardrails };
+}
+
+/**
+ * Classify an inbound PDF by sending the document itself as a Claude
+ * document block — the fallback path for scanned/image PDFs with no
+ * usable text layer. Same prompt, same controlled-category guardrails,
+ * same required audit logging as the text path, so everything
+ * downstream (confidence triage, deterministic action translation) is
+ * identical regardless of which path classified the document.
+ */
+async function classifyDocumentFromPdf({ pdfBuffer, filename, source, claimIdHint }) {
+  const systemPrompt = loadPrompt('document_classification');
+  const instruction = JSON.stringify({
+    filename: filename || null,
+    source:   source || null,
+    note:     'The document is attached as a PDF (it may be scanned). Read it and respond with the JSON object described in your instructions.',
+  });
+
+  const { parsed: result, raw, meta } = await callClaudeWithDocumentMeta(systemPrompt, pdfBuffer, instruction, 1200);
+  const guardrails = _applyClassificationGuardrails(result);
+
+  await _auditClassification({
+    claimIdHint,
+    inputSnapshot: { mode: 'pdf_document_block', filename: filename || null, source: source || null, pdf_bytes: pdfBuffer.length },
+    result, raw, meta, guardrails,
+  });
 
   return { ...result, guardrails };
 }
@@ -345,6 +395,7 @@ async function classifyDocument({ text, filename, source, claimIdHint }) {
 module.exports = {
   analyzeCompensability,
   classifyDocument,
+  classifyDocumentFromPdf,
   evaluateRFA,
   _callClaude:             callClaude,             // exported for voiceService structured extraction
   _callClaudeMeta:         callClaudeMeta,         // exported for callers that want token + latency metadata

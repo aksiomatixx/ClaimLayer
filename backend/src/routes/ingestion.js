@@ -3,21 +3,36 @@
 /**
  * Inbound Document Ingestion routes (admin-only).
  *
- *   POST /api/v1/claims/:id/documents/ingest — ingest with a known claim
- *   POST /api/v1/documents/ingest            — ingest, agent resolves the claim
- *   GET  /api/v1/documents/triage            — pending human-triage queue
- *   POST /api/v1/documents/:docId/triage-resolve — file or reject
+ *   POST /api/v1/claims/:id/documents/ingest      — ingest extracted text, known claim
+ *   POST /api/v1/documents/ingest                 — ingest extracted text, agent resolves the claim
+ *   POST /api/v1/claims/:id/documents/ingest-file — upload an actual PDF, known claim
+ *   POST /api/v1/documents/ingest-file            — upload an actual PDF, agent resolves the claim
+ *   GET  /api/v1/documents/triage                 — pending human-triage queue
+ *   POST /api/v1/documents/:docId/triage-resolve  — file or reject
  *
  * NOTE: mounted BEFORE routes/documents.js so /documents/triage is not
  * swallowed by that router's GET /:id.
  */
 
 const express = require('express');
+const multer  = require('multer');
 const { body, param, validationResult } = require('express-validator');
 const ingestion = require('../services/documentIngestionService');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
+
+// PDF upload — in-memory; the magic-byte check happens in the service.
+const uploadPdf = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: ingestion.PDF_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype === 'application/pdf' ||
+               file.mimetype === 'application/octet-stream' ||
+               /\.pdf$/i.test(file.originalname || '');
+    cb(null, ok);
+  },
+});
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -61,6 +76,51 @@ router.post(
   ],
   validate,
   (req, res) => handleIngest(req, res, null)
+);
+
+async function handleIngestFile(req, res, claimId) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'a PDF file is required (multipart field "file")' });
+    }
+    const result = await ingestion.ingestPdf({
+      buffer:      req.file.buffer,
+      filename:    req.file.originalname,
+      title:       req.body.title || undefined,
+      source:      req.body.source || 'upload',
+      claim_id:    claimId || req.body.claim_id || null,
+      received_at: req.body.received_at || undefined,
+    }, req.user?.email);
+    res.status(201).json(result);
+  } catch (err) {
+    const status = /required|must be|cannot be|does not match|exceeds|%PDF/.test(err.message) ? 400 : 500;
+    res.status(status).json({ error: err.message });
+  }
+}
+
+router.post(
+  '/claims/:id/documents/ingest-file',
+  requireAuth, requireRole(['admin']),
+  uploadPdf.single('file'),
+  [
+    param('id').notEmpty(),
+    body('received_at').optional().isISO8601()
+      .withMessage('received_at must be an ISO-8601 timestamp (the channel receipt time)'),
+  ],
+  validate,
+  (req, res) => handleIngestFile(req, res, req.params.id)
+);
+
+router.post(
+  '/documents/ingest-file',
+  requireAuth, requireRole(['admin']),
+  uploadPdf.single('file'),
+  [
+    body('received_at').optional().isISO8601()
+      .withMessage('received_at must be an ISO-8601 timestamp (the channel receipt time)'),
+  ],
+  validate,
+  (req, res) => handleIngestFile(req, res, null)
 );
 
 router.get('/documents/triage', requireAuth, requireRole(['admin']), async (_req, res) => {

@@ -78,6 +78,10 @@ const config = {
     dxfSecret:    process.env.DXF_WEBHOOK_SECRET,
     enlyteSecret: process.env.ENLYTE_WEBHOOK_SECRET,
     lobSecret:    process.env.LOB_WEBHOOK_SECRET,
+    // Shared secret for the inbound-email channel (SendGrid Inbound
+    // Parse / Mailgun Routes deliver multipart posts; neither signs
+    // with HMAC, so the contract is a secret token in the request).
+    emailInboundToken: process.env.EMAIL_INBOUND_TOKEN,
   },
 };
 
