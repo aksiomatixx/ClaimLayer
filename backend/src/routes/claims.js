@@ -10,6 +10,7 @@ const { supabase }      = require('../services/supabase');
 const db                = require('../services/db');
 const logger            = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireClaimScope } = require('../middleware/claimAccess');
 const { CLAIM_STATUSES, SETTABLE_CLAIM_STATUSES } = require('../constants');
 
 const router = express.Router();
@@ -57,6 +58,7 @@ router.post(
 router.get(
   '/',
   requireAuth,
+  requireRole(['admin', 'employer']),
   [
     query('status')
       .optional()
@@ -105,21 +107,13 @@ router.get(
 router.get(
   '/:id',
   requireAuth,
+  requireClaimScope('params.id'),
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
     try {
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
-
-      // Employers may only view their own claims
-      if (req.user.role === 'employer') {
-        const empId = req.user.employerId || req.user.sub;
-        if (claim.employerId !== empId) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-      }
-
       res.json(claim);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -390,6 +384,7 @@ router.get(
 router.get(
   '/:id/dwc1',
   requireAuth,
+  requireClaimScope('params.id'),
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
@@ -397,16 +392,10 @@ router.get(
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
 
-      // Employer/employee scope check
-      if (req.user.role === 'employer') {
-        const empId = req.user.employerId || req.user.sub;
-        if (claim.employerId !== empId) return res.status(403).json({ error: 'Access denied' });
-      }
-
       const docId = claim.dwc1DocumentId;
       if (!docId) return res.status(404).json({ error: 'DWC-1 not yet generated for this claim' });
 
-      const doc = db.documents.findById(docId);
+      const doc = await db.documents.findById(docId);
       if (!doc) return res.status(404).json({ error: 'DWC-1 document record not found' });
 
       // If we have the PDF buffer in-memory (M2), return it as a download
@@ -436,6 +425,7 @@ router.post(
   '/:id/dwc1/request-signature',
   requireAuth,
   requireRole(['employee', 'admin']),
+  requireClaimScope('params.id'),
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
@@ -467,6 +457,7 @@ router.patch(
   '/:id/intake-progress',
   requireAuth,
   requireRole(['employee', 'admin']),
+  requireClaimScope('params.id'),
   [
     param('id').notEmpty(),
     body('step')

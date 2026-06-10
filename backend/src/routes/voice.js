@@ -16,8 +16,16 @@ const multer        = require('multer');
 const { body, validationResult } = require('express-validator');
 const voiceService  = require('../services/voiceService');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireClaimScope } = require('../middleware/claimAccess');
 
 const router = express.Router();
+
+// Employees may only attach intake to their own claim. A missing
+// claim_id is the pre-claim draft path — scope it to the token's claim
+// so a forged claim_id can never cross a claim boundary.
+const scopeIntakeClaim = requireClaimScope(
+  (req) => req.body?.claim_id || req.user?.claimId || null
+);
 
 // Audio upload — in-memory (max 25MB; Whisper limit is 25MB)
 const upload = multer({
@@ -61,6 +69,7 @@ router.post(
   requireAuth,
   requireRole(['employee', 'admin']),
   upload.single('audio'),
+  scopeIntakeClaim,
   async (req, res) => {
     try {
       const { claim_id, language } = req.body;
@@ -89,6 +98,7 @@ router.post(
   '/text',
   requireAuth,
   requireRole(['employee', 'admin']),
+  scopeIntakeClaim,
   [
     body('claim_id').optional().isString(),
     body('text')

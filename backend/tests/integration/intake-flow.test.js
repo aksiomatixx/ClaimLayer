@@ -80,10 +80,12 @@ const adminToken = generateAdminToken({
 });
 const AUTH = `Bearer ${adminToken}`;
 
+// claimId is the claim ID (what auth.js binds into real session tokens),
+// not the claim number — claim-scope authorization compares against it.
 const employeeToken = generateMagicToken({
   sub:           'emp-bc-001',
   adpEmployeeId: 'BC-001',
-  claimId:       'HHW-2026-TEST',
+  claimId:       TEST_CLAIM_ID,
   employerId:    'employer-brightcare-001',
 });
 const EMP_AUTH = `Bearer ${employeeToken}`;
@@ -230,11 +232,11 @@ describe('POST /api/v1/voice/text', () => {
     expect(res.body.transcript).toBeDefined();
   });
 
-  it('works with an optional claim_id', async () => {
+  it('works with an optional claim_id (the employee\'s own claim)', async () => {
     const res = await request(app)
       .post('/api/v1/voice/text')
       .set('Authorization', EMP_AUTH)
-      .send({ claim_id: 'HHW-2026-TEST', text: validText });
+      .send({ claim_id: TEST_CLAIM_ID, text: validText });
     expect(res.status).toBe(200);
     expect(res.body.transcript).toBe(validText);
   });
