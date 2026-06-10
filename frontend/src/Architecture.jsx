@@ -97,6 +97,15 @@ const AGENTS = [
     guardrails: ['Confidence floor of 50 set if model omits the field', 'No structured fields ever overwrite adjuster-entered values'],
     fallback: 'On extraction failure → EXTRACTION_FAILED, intake wizard falls back to manual form entry.',
   },
+  {
+    id: 'doc_classification', name: 'Document Classifier',
+    prompt: 'document_classification', model: 'claude-sonnet-4-6',
+    invoked_when: 'Any document ingested (upload, drawer ingest, legacy-adapter pull)',
+    inputs:  ['Extracted document text (bounded to 28K chars)', 'Filename + source channel'],
+    outputs: ['category (13-value controlled list)', 'confidence (0-100)', 'claim_number (verbatim or null)', 'summary', 'key_fields (report_date, work_status, restrictions, signals[])'],
+    guardrails: ['Category outside the controlled list forced to other + human triage', 'Confidence < 70 routes to human triage — never silently filed', 'Extracted claim numbers verified against the claims table; unverifiable → triage', 'Action translation is a deterministic rules table, never a model output'],
+    fallback: 'On classification failure → document held unfiled with error; nothing enters the action queue without either agent confidence or a human call.',
+  },
 ];
 
 const GUARDRAILS = [

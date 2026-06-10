@@ -109,15 +109,16 @@ describe('Architecture page', () => {
     expect(screen.getByText('Mechanical (no AI)')).toBeInTheDocument();
   });
 
-  it('renders 5 agent registry cards', () => {
+  it('renders 6 agent registry cards', () => {
     renderPage();
-    expect(screen.getByText('Agent Registry (5)')).toBeInTheDocument();
+    expect(screen.getByText('Agent Registry (6)')).toBeInTheDocument();
     for (const name of [
       'Compensability Analyst',
       'RFA / MTUS Evaluator',
       'C&R Pricing Engine',
       'MSA Screening Gate',
       'Voice Intake Extractor',
+      'Document Classifier',
     ]) {
       expect(screen.getByText(name)).toBeInTheDocument();
     }

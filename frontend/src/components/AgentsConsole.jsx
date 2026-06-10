@@ -7,11 +7,12 @@ import { Btn, Lbl, Spinner, StatCard } from '../ui/primitives.jsx';
 export const AGENT_TYPE_LABEL = {
   compensability: 'Compensability', rfa_mtus: 'RFA / MTUS',
   cnr_pricing:    'C&R Pricing',    msa_screening: 'MSA Screening',
-  voice_extract:  'Voice Extraction',
+  voice_extract:  'Voice Extraction', doc_classification: 'Doc Classification',
 };
 export const AGENT_TYPE_COLOR = {
   compensability: C.blue, rfa_mtus: C.amber, cnr_pricing: C.purple,
   msa_screening:  C.teal, voice_extract: C.rose,
+  doc_classification: C.cyan,
 };
 
 export function AgentsConsole({notify}){
