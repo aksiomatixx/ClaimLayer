@@ -65,3 +65,20 @@ export async function ensureDevSession() {
     // non-fatal — production will use real auth
   }
 }
+
+// ── Documents & decision brief (decision-support drawer) ─────────────────────
+
+export async function fetchClaimDocuments(id) {
+  const data = await _json(await fetch(`${BASE}/claims/${id}/documents`, _opts()));
+  return data.documents ?? [];
+}
+
+export async function fetchDecisionBrief(id) {
+  return _json(await fetch(`${BASE}/claims/${id}/decision-brief`, _opts()));
+}
+
+export function documentFileUrl(claimId, docId) {
+  // Static demo builds ship the document PDFs as files next to the bundle.
+  if (import.meta.env.VITE_DEMO) return `files/${docId}.pdf`;
+  return `${BASE}/claims/${claimId}/documents/${docId}/file`;
+}

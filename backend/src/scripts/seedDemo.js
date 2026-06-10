@@ -208,6 +208,7 @@ async function wipeDemo() {
     'td_periods', 'pd_evaluations', 'settlement_offers',
     'rfas', 'rfa_evaluations', 'ai_decisions',
     'diaries', 'claim_events', 'reserves', 'audit_log',
+    'claim_documents',
   ];
   for (const tbl of childTables) {
     for (const id of ids) {
@@ -516,6 +517,11 @@ async function _seedOneClaim(id, idx, plan, persona) {
     await supabase.from('diaries').insert(d);
   }
 
+  // Documents appropriate to status (with AI summaries for the decision brief)
+  for (const doc of _buildDocuments(id, idx, plan)) {
+    await supabase.from('claim_documents').insert(doc);
+  }
+
   // RFA if specified
   if (plan.rfa) {
     await supabase.from('rfas').insert({
@@ -785,6 +791,98 @@ if (require.main === module) {
       console.error('✗ seedDemo failed:', err.message);
       process.exit(1);
     });
+}
+
+// ── Demo documents ───────────────────────────────────────────────────────────
+// Every incoming document is ingested, labeled, and summarized — the drawer
+// links the original next to its AI summary so the adjuster never has to
+// hunt for source material behind a queued decision.
+function _buildDocuments(claimId, idx, plan) {
+  const doc = (slug, offset, fields) => ({
+    id:          `doc_demo_${claimId}_${slug}`,
+    claim_id:    claimId,
+    received_at: isoDaysAgo(offset),
+    source:      'inbound_mail',
+    pages:       fields.pages || 2,
+    status:      'filed',
+    created_at:  isoDaysAgo(offset),
+    ...fields,
+  });
+
+  const common = [
+    doc('froi', plan.daysAgo, {
+      title: 'DWC-1 / First Report of Injury', category: 'claim_form', source: 'employer', pages: 3,
+      ai_summary: 'Employer first report. Injury reported same day; mechanism consistent with the worker statement. No witnesses listed; employer does not contest.',
+      relevant_to: ['DWC1_ISSUE', 'COMPENSABILITY_DECISION_DUE'],
+    }),
+  ];
+
+  switch (plan.status) {
+    case 'new_claim':
+      return common;
+    case 'intake_complete':
+      return [...common, doc('intake_media', plan.daysAgo - 1, {
+        title: 'Worker intake — voice transcript & photos', category: 'intake', source: 'employee_portal',
+        ai_summary: 'Voice intake transcript (Spanish, auto-translated). Worker describes lifting injury during patient transfer; photos of the work area attached. Extraction confidence high; all fields pending human verification.',
+        relevant_to: ['AI_ANALYSIS_PENDING'],
+      })];
+    case 'under_investigation':
+      return [...common,
+        doc('med_initial', plan.daysAgo - 3, {
+          title: 'Initial treating physician report (PR-1)', category: 'medical_report', source: 'provider', pages: 6,
+          ai_summary: 'First visit report. Dx: lumbar strain; objective findings limited to reduced ROM. Work restrictions: no lifting >10 lbs for 2 weeks. Causation attributed to the reported incident.',
+          relevant_to: ['COMPENSABILITY_DECISION_DUE'],
+        }),
+        doc('wage_stmt', plan.daysAgo - 2, {
+          title: 'Wage statement (12 months)', category: 'wage_statement', source: 'employer',
+          ai_summary: 'Payroll export covering 52 weeks. Supports the calculated AWW; two unpaid gaps consistent with scheduled leave, not disputed time.',
+          relevant_to: ['COMPENSABILITY_DECISION_DUE'],
+        })];
+    case 'active_medical':
+      return [...common,
+        doc('pr2', 4, {
+          title: 'PR-2 progress report', category: 'medical_report', source: 'provider', pages: 4,
+          ai_summary: 'Treating physician progress report. Symptoms improving with PT; remains TTD. Next re-evaluation in 3 weeks. No new body parts claimed.',
+          relevant_to: ['TD_PAYMENT_REVIEW'],
+        }),
+        doc('work_status', 2, {
+          title: 'Work status report', category: 'work_status', source: 'provider', pages: 1,
+          ai_summary: 'Off-work order extended 21 days. TTD continues at the current rate; no modified-duty release offered by the employer yet.',
+          relevant_to: ['TD_PAYMENT_REVIEW'],
+        })];
+    case 'p_and_s':
+    case 'pd_evaluation':
+      return [...common,
+        doc('pr4', 6, {
+          title: 'PR-4 permanent & stationary report', category: 'medical_report', source: 'provider', pages: 9,
+          ai_summary: 'P&S report. WPI 8% lumbar spine with apportionment 90/10 industrial. Future medical: PRN flare-ups. Supports moving to PD rating.',
+          relevant_to: ['PD_ADVANCE_DUE'],
+        }),
+        doc('qme_panel', 10, {
+          title: 'QME panel assignment letter', category: 'legal', source: 'dwc', pages: 2,
+          ai_summary: 'Panel issued in orthopedic surgery. Strike deadline computed and diarised; two panelists within 30 miles of the worker.',
+          relevant_to: ['PD_ADVANCE_DUE'],
+        })];
+    case 'settlement_discussions':
+      return [...common,
+        doc('cnr_draft', 3, {
+          title: 'Draft Compromise & Release (DWC-CA 10214c)', category: 'settlement', source: 'internal', pages: 12,
+          ai_summary: 'C&R draft at the agent-priced value inside the 1.15×–5.0× stipulated band. MSA screen: no Medicare interest (worker under 65, no SSDI application). Open issue: future medical buyout language.',
+          relevant_to: ['CNR_OFFER_FOLLOWUP', 'CNR_ADJUSTER_SIGN'],
+        }),
+        doc('atty_letter', 5, {
+          title: 'Applicant attorney correspondence', category: 'legal', source: 'attorney', pages: 2,
+          ai_summary: 'Counsel acknowledges the offer and requests the MSA screening basis. Tone cooperative; counter expected within two weeks. Reminder: worker is represented — all contact through counsel.',
+          relevant_to: ['CNR_OFFER_FOLLOWUP'],
+        }),
+        doc('pr4', 12, {
+          title: 'PR-4 permanent & stationary report', category: 'medical_report', source: 'provider', pages: 9,
+          ai_summary: 'P&S report underlying the rating. WPI 8% with standard apportionment; future medical limited to PRN care — priced into the C&R.',
+          relevant_to: ['CNR_OFFER_FOLLOWUP'],
+        })];
+    default:
+      return common;
+  }
 }
 
 module.exports = { PERSONAS, EMPLOYER_BRIGHTCARE, EMPLOYER_WESTSIDE,

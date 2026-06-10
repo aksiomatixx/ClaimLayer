@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { approveReserves, fetchClaim, fetchDiaries, triggerAnalysis, updateClaimStatus } from '../services/claims.js';
+import { approveReserves, fetchClaim, fetchDiaries, triggerAnalysis, updateClaimStatus, fetchClaimDocuments, fetchDecisionBrief, documentFileUrl } from '../services/claims.js';
 import { dismissMMIEvaluation, evaluateMMISignals, fetchMMIEvaluations, fetchPR4Solicitations, recordPR4Response, solicitPR4 } from '../services/mmi.js';
 import { calculatePD, createStipulation, fetchPDData, initiatePDAdvances, recordAdjusterSignature, recordEAMSFiled, recordPDAdvancePayment, recordWorkerSignature, sendStipToWorker, waivePDAdvance } from '../services/pd.js';
 import { approveSupplemental, dismissSupplemental, fetchPanelsForClaim, fetchSupplementalRequests, issuePanel, markReportReceived, recordStrikes, requestPanel, scheduleQmeAppointment } from '../services/qme.js';
@@ -305,6 +305,68 @@ export const STATUS_LABEL={
 };
 export const PRI_DIARY={CRITICAL:C.red,HIGH:C.amber,MEDIUM:C.blue,LOW:C.dim};
 
+// ═══════════════════════════════════════════════════════════
+// DECISION SUPPORT — plain-language brief + ingested documents.
+// The adjuster sees what to do, why the claim led there, the AI
+// summary of every source document, and a link to the original.
+// ═══════════════════════════════════════════════════════════
+const CAT_COLOR={medical_report:C.green,work_status:C.cyan,legal:C.red,settlement:C.amber,claim_form:C.blue,wage_statement:C.blue,intake:C.dim};
+
+function DecisionSupport({claimId,brief,briefLoading,documents}){
+  const docById=Object.fromEntries((documents||[]).map(d=>[d.id,d]));
+  return(
+    <>
+      <SectionHead title="Decision Brief" color={C.amber}/>
+      {briefLoading&&<div style={{padding:"16px 0"}}><Spinner/></div>}
+      {brief&&<>
+        <div style={{fontSize:13.5,lineHeight:1.7,color:C.text,marginBottom:14}}>{brief.summary}</div>
+        <div style={{background:C.amberF||`${C.amber}14`,border:`1px solid ${C.amber}44`,borderRadius:9,padding:"11px 14px",fontSize:12,color:C.amber,lineHeight:1.6,marginBottom:20}}>{brief.contract}</div>
+        {(brief.actions||[]).map((a,i)=>(
+          <div key={a.diary_id||i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:6}}>
+              <span style={{fontFamily:C.mono,fontSize:11,color:C.amber,fontWeight:700}}>{String(i+1).padStart(2,"0")}</span>
+              <span style={{fontSize:14,fontWeight:700,flex:1}}>{a.action}</span>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              {a.due_date&&<span style={{fontFamily:C.mono,fontSize:10,color:C.dim,background:C.bg,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 8px"}}>due {a.due_date}</span>}
+              <span style={{fontFamily:C.mono,fontSize:10,fontWeight:700,color:PRI_DIARY[a.priority]||C.dim,background:C.bg,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 8px"}}>{a.priority}</span>
+            </div>
+            <div style={{fontSize:12.5,color:C.dim,lineHeight:1.65}}>{a.why}</div>
+            {(a.document_ids||[]).length>0&&(
+              <div style={{marginTop:10,display:"flex",flexWrap:"wrap",gap:6}}>
+                {a.document_ids.map(id=>docById[id]&&(
+                  <a key={id} href={documentFileUrl(claimId,id)} target="_blank" rel="noreferrer" style={{fontSize:11,fontFamily:C.mono,color:C.cyan,background:C.bg,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 9px"}}>📄 {docById[id].title} ↗</a>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {brief.actions&&brief.actions.length===0&&<div style={{fontSize:12.5,color:C.muted,marginBottom:16}}>No open actions — the file is current.</div>}
+      </>}
+
+      <div style={{marginTop:26}}>
+        <SectionHead title={`Documents (${(documents||[]).length})`}/>
+        {(documents||[]).length===0&&<div style={{fontSize:12.5,color:C.muted}}>No documents on file.</div>}
+        {(documents||[]).map(doc=>(
+          <div key={doc.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"13px 16px",marginBottom:11}}>
+            <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:5}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13.5,fontWeight:700,marginBottom:3}}>{doc.title}</div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <span style={{fontFamily:C.mono,fontSize:9.5,fontWeight:700,textTransform:"uppercase",letterSpacing:".05em",color:CAT_COLOR[doc.category]||C.dim,background:C.bg,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 7px"}}>{(doc.category||"document").replace(/_/g," ")}</span>
+                  <span style={{fontFamily:C.mono,fontSize:10,color:C.muted}}>{String(doc.received_at||"").split("T")[0]} · {doc.pages||1}p · {doc.source||""}</span>
+                </div>
+              </div>
+              <a href={documentFileUrl(claimId,doc.id)} target="_blank" rel="noreferrer" style={{fontSize:11,fontFamily:C.mono,fontWeight:700,color:C.cyan,whiteSpace:"nowrap",border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 10px",background:C.bg}}>Open original ↗</a>
+            </div>
+            {doc.ai_summary&&<div style={{fontSize:12,color:C.dim,lineHeight:1.6,borderLeft:`2px solid ${C.amber}55`,paddingLeft:10,marginTop:8}}><span style={{fontFamily:C.mono,fontSize:9.5,fontWeight:700,color:C.amber,letterSpacing:".06em"}}>AI SUMMARY&nbsp;&nbsp;</span>{doc.ai_summary}</div>}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
   const qc=useQueryClient();
   const {data:claim,isLoading:claimLoading}=useQuery({
@@ -318,6 +380,18 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
     enabled:!!claimId,
   });
   const diaries=diariesData||[];
+
+  // Decision support — plain-language brief + ingested documents
+  const {data:brief,isLoading:briefLoading}=useQuery({
+    queryKey:['decision-brief',claimId],
+    queryFn:()=>fetchDecisionBrief(claimId),
+    enabled:!!claimId,
+  });
+  const {data:documents=[]}=useQuery({
+    queryKey:['claim-documents',claimId],
+    queryFn:()=>fetchClaimDocuments(claimId),
+    enabled:!!claimId,
+  });
 
   const analyzeMut=useMutation({
     mutationFn:()=>triggerAnalysis(claimId),
@@ -425,7 +499,7 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
     return(
       <>
         <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(2,8,18,.75)",zIndex:200,backdropFilter:"blur(3px)"}}/>
-        <div style={{position:"fixed",top:0,right:0,bottom:0,width:600,background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{position:"fixed",top:0,right:0,bottom:0,width:"min(1500px,94vw)",background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <Spinner/>
         </div>
       </>
@@ -465,7 +539,7 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
   return(
     <>
       <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(2,8,18,.75)",zIndex:200,backdropFilter:"blur(3px)"}}/>
-      <div style={{position:"fixed",top:0,right:0,bottom:0,width:640,background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,overflowY:"auto",animation:"slideR .22s ease"}}>
+      <div style={{position:"fixed",top:0,right:0,bottom:0,width:"min(1500px,94vw)",background:C.surface,borderLeft:`1px solid ${C.border}`,zIndex:201,display:"flex",flexDirection:"column",animation:"slideR .22s ease"}}>
         {/* Header */}
         <div style={{padding:"18px 26px",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,background:C.surface,zIndex:1,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
@@ -482,7 +556,12 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
           </div>
         </div>
 
-        <div style={{padding:"22px 26px"}}>
+        <div style={{display:"flex",flex:1,minHeight:0}}>
+          {/* Decision support — what to do, why, and the source documents */}
+          <div style={{width:"40%",minWidth:340,maxWidth:560,borderRight:`1px solid ${C.border}`,overflowY:"auto",padding:"22px 24px",background:C.bg}}>
+            <DecisionSupport claimId={claimId} brief={brief} briefLoading={briefLoading} documents={documents}/>
+          </div>
+        <div style={{padding:"22px 26px",flex:1,overflowY:"auto",minWidth:0}}>
           <Tabs tabs={[{key:"details",label:"Details"},{key:"benefits",label:`Benefits${tdActive?` · ${tdActive.benefit_type}`:''}`},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"},{key:"pd",label:"PD / Stip"}]} active={drawerTab} onChange={setDrawerTab}/>
 
           {drawerTab==="details"&&<>
@@ -1047,6 +1126,7 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
               </div>
             </div>}
           </>}
+        </div>
         </div>
       </div>
     </>

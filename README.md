@@ -8,7 +8,7 @@
 
 A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.
 
-`969 tests · 58 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`982 tests · 60 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -23,6 +23,14 @@ It exists as both an active project and a public worked example of a question I 
 ## Why it's different
 
 Most AI in the claims space does prediction — scoring which claims are likely to be expensive, litigate, or go sideways. ClaimLayer does execution: it carries out the regulatory workflow itself — drafting the analysis, applying the statutory math, generating the notices, tracking the deadlines — inside compliance guardrails a licensed adjuster designed.
+
+The deeper change is to the shape of the adjuster's day. Traditional adjusting is **reactive**: medical reports, work status reports, and legal documents arrive all day, and the job is to notice them, read them, file them, and work out what each one requires. ClaimLayer inverts that loop:
+
+- **Inbound is automated.** Every incoming document is ingested, classified against a controlled category list, documented to the claim file, and translated into the action it requires — what reaches the adjuster is a queued decision, not a PDF.
+- **The human makes the decision.** Compensability, authorization, settlement — every consequential call is a licensed adjuster's, made from a ranked action queue where the analysis is already drafted and the deadline already computed.
+- **Outbound is automated.** Once the decision is made, the aftermath executes itself: the decision is documented in the audit trail, statutory notices generate and mail, completed diaries close, and the next deadline diaries are set.
+
+The adjuster stops being a router of paperwork and becomes what the license is for: the decision-maker.
 
 The wedge is agentic execution within hard regulatory limits, where every AI decision is bounded, auditable, and reversible by a human.
 
@@ -49,7 +57,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-969 automated tests across 58 suites: 911 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 58 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
+982 automated tests across 60 suites: 924 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 58 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
 
 ## Tech stack
 
