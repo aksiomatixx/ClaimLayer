@@ -5,6 +5,8 @@ const { body, param, query, validationResult } = require('express-validator');
 const claimService      = require('../services/claimService');
 const tdPeriodsService  = require('../services/tdPeriodsService');
 const pdfService        = require('../services/pdfService');
+const decisionBriefService = require('../services/decisionBriefService');
+const { supabase }      = require('../services/supabase');
 const db                = require('../services/db');
 const logger            = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
@@ -245,6 +247,74 @@ router.get(
     } catch (err) {
       const status = err.message.includes('not found') ? 404 : 500;
       res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/documents — ingested documents w/ AI summaries ────
+router.get(
+  '/:id/documents',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('claim_documents').select('*').eq('claim_id', req.params.id);
+      if (error) throw new Error(error.message);
+      const documents = (data || []).sort((a, b) =>
+        String(b.received_at || '').localeCompare(String(a.received_at || '')));
+      res.json({ documents });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/documents/:docId/file — open the original ─────────
+router.get(
+  '/:id/documents/:docId/file',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), param('docId').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const { data } = await supabase
+        .from('claim_documents').select('*').eq('id', req.params.docId).single();
+      if (!data || data.claim_id !== req.params.id) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+      const claim = await claimService.getClaim(req.params.id).catch(() => null);
+      const pdfBuffer = await pdfService.generateClaimDocumentPDF(data, claim);
+      res.set('Content-Type', 'application/pdf');
+      res.set('Content-Disposition', `inline; filename="${data.id}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/decision-brief — plain-language what/why ──────────
+router.get(
+  '/:id/decision-brief',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.getClaim(req.params.id);
+      if (!claim) return res.status(404).json({ error: 'Claim not found' });
+      const diaries = await claimService.getDiaries(req.params.id).catch(() => []);
+      const { data: documents } = await supabase
+        .from('claim_documents').select('*').eq('claim_id', req.params.id);
+      const brief = decisionBriefService.buildBrief({ claim, diaries, documents: documents || [] });
+      res.json(brief);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   }
 );
