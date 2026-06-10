@@ -79,6 +79,7 @@ app.use('/api/v1/claims',        claimsRouter);
 app.use('/api/v1/providers',     providersRouter);
 app.use('/api/v1/appointments',  appointmentsRouter);
 app.use('/api/v1/voice',         voiceRouter);
+app.use('/api/v1',               require('./routes/ingestion')); // before documentsRouter: /documents/triage must not match its /:id
 app.use('/api/v1/documents',     documentsRouter);
 app.use('/api/v1/auth',          authRouter);
 app.use('/api/v1/employer',      employerRouter);

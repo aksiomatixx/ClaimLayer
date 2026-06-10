@@ -58,6 +58,30 @@ const PLAYBOOK = {
     action: 'Issue the settlement payment',
     why: () => 'The Order Approving C&R is in. Payment is due within 30 days or LC §5814 penalties attach.',
   },
+  RFA_INTAKE_REVIEW: {
+    action: 'Route the received RFA to MTUS evaluation',
+    why: () => 'A Request for Authorization arrived — the UR clock under 8 CCR §9792.9.1 started at receipt. The MTUS agent can only recommend auto-approve or physician review; denial is yours alone.',
+  },
+  MED_REPORT_REVIEW: {
+    action: 'Review the new medical report',
+    why: () => 'A medical report was ingested, summarized, and filed by the document agent. Confirm the findings and treatment plan are reflected in the claim posture.',
+  },
+  PR4_RECEIVED_REVIEW: {
+    action: 'Review the P&S report and start the rating pathway',
+    why: () => 'The ingested report indicates the worker is permanent and stationary — PR-4 review drives the PD evaluation and rating.',
+  },
+  REPRESENTATION_REVIEW: {
+    action: 'Verify the representation change',
+    why: () => 'An ingested legal document indicates a representation change. Confirm and record it via the representation workflow — SROI 02 fires automatically when the state changes.',
+  },
+  SETTLEMENT_DOC_REVIEW: {
+    action: 'Reconcile the settlement document',
+    why: () => 'A settlement document was ingested — reconcile it against the open offer, the MSA screen, and the C&R breakdown.',
+  },
+  AWW_RECALC_REVIEW: {
+    action: 'Verify AWW against the new wage documentation',
+    why: c => `Wage documentation arrived. Confirm the average weekly wage${c.tdRate ? ` and the $${c.tdRate}/wk TD rate (two-thirds AWW)` : ''} still hold.`,
+  },
   STIP_ATTORNEY_TRANSMIT: {
     action: 'Send the stipulation package to the worker’s attorney',
     why: () => 'The worker is represented — the stip must go to counsel for review and signature, never directly to the worker.',
