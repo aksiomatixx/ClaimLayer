@@ -90,16 +90,18 @@ video{width:100%;display:block}
 .g-item b{display:block;font-size:14.5px;margin-bottom:2px}
 .g-item span{color:var(--dim);font-size:13.5px}
 
-/* stories */
+/* roles (worker / adjuster / employer) */
 .stories{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:46px}
 .story{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;display:flex;flex-direction:column}
-.story .role{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:16px}
-.story blockquote{font-size:15px;color:var(--text);line-height:1.65;flex:1}
-.story blockquote::before{content:'\201C';color:var(--amber);font-size:30px;line-height:0;vertical-align:-8px;margin-right:3px}
-.who{display:flex;align-items:center;gap:12px;margin-top:22px;padding-top:18px;border-top:1px solid var(--border)}
-.ava{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:13px;color:#000}
-.who b{font-size:13.5px;display:block}
-.who span{font-size:12px;color:var(--muted)}
+.story .role{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:14px}
+.story h3{font-size:17px;margin-bottom:12px}
+.story p{font-size:13.8px;color:var(--text);line-height:1.65;margin-bottom:10px}
+.story ul{list-style:none;margin:2px 0 14px;flex:1}
+.story li{font-size:13.3px;color:var(--dim);line-height:1.6;padding-left:18px;position:relative;margin-bottom:7px}
+.story li::before{content:'→';position:absolute;left:0;color:var(--amber);font-family:var(--mono);font-size:11px;top:2px}
+.delta{margin-top:auto;padding-top:16px;border-top:1px dashed var(--border)}
+.delta b{display:block;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.delta span{font-size:12.8px;color:var(--dim);line-height:1.6}
 .foot-note{font-size:12px;color:var(--muted);margin-top:22px;font-family:var(--mono)}
 
 /* gallery */
@@ -150,7 +152,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <a class="brand" href="#top"><img src="assets/mark.png" alt=""/>ClaimLayer</a>
   <div class="nav-l">
     <a href="demo/" target="_blank" rel="noopener">Live Demo</a><a href="#video">Tour</a><a href="#features">Product</a><a href="#how">How it works</a>
-    <a href="#stories">Stories</a><a href="#screens">Screenshots</a><a href="#about">About</a><a href="#contact">Contact</a>
+    <a href="#stories">Who it's for</a><a href="#screens">Screenshots</a><a href="#about">About</a><a href="#contact">Contact</a>
   </div>
   <a class="btn small ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">GitHub ↗</a>
 </div></nav>
@@ -245,26 +247,45 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 </div></section>
 
 <section id="stories" class="band"><div class="wrap reveal">
-  <div class="kicker">User stories</div>
+  <div class="kicker">Working with ClaimLayer</div>
   <h2>Three sides of the same claim</h2>
+  <p class="sub">How each person actually uses the platform — and what changes against the claims software they're used to.</p>
   <div class="stories">
     <div class="story">
       <span class="role" style="color:var(--green)">The injured worker</span>
-      <blockquote>I hurt my back on a Friday shift and reported it from my phone in Spanish — I just talked, and it understood everything. By Monday I had an appointment with a network doctor near my house. Nobody made me fill out a single form.</blockquote>
-      <div class="who"><div class="ava" style="background:linear-gradient(135deg,#3ecf8e,#1f8f5f)">MS</div><div><b>Maria S.</b><span>Home Health Aide · reported via voice intake</span></div></div>
+      <h3>Reports once, in their own words</h3>
+      <ul>
+        <li>Opens a secure single-use link on their phone — no account, no password, no app to install</li>
+        <li>Describes the injury by voice or typing, in English or Spanish; the agent extracts the facts — no forms</li>
+        <li>Picks a network doctor ranked by distance and tier, books the appointment, confirms it in the same session</li>
+        <li>The DWC-1 claim form is prepared from what they said and tracked to signature</li>
+      </ul>
+      <div class="delta"><b>vs. the usual claims system</b><span>Workers are usually a data subject: a paper FROI, a phone tree, then silence. Here the worker drives their own intake in one sitting — and every step they complete is one the adjuster never has to chase.</span></div>
     </div>
     <div class="story">
-      <span class="role" style="color:var(--amber)">The claims team</span>
-      <blockquote>I used to spend my mornings triaging an inbox. Now I open a ranked queue where the analysis is already drafted — score, reserves, rationale. I still make every call, but I make them in minutes, and the audit trail shows exactly what the AI saw when it recommended anything.</blockquote>
-      <div class="who"><div class="ava" style="background:linear-gradient(135deg,#e8a33d,#b97b1f)">DR</div><div><b>Dana R.</b><span>Senior Claims Adjuster · SIP-certified</span></div></div>
+      <span class="role" style="color:var(--amber)">The adjuster</span>
+      <h3>Works a queue of prepared decisions, not an inbox</h3>
+      <ul>
+        <li>Incoming documents — uploaded PDFs, scanned faxes, email attachments — are classified, summarized, filed to the claim, and translated into the action they require before the adjuster ever sees them</li>
+        <li>Each queued action opens as a plain-language brief: what to decide, why, what in the claim led here — with the original documents one click away</li>
+        <li>A dry-run shows exactly what approving will do; then one decision fires the whole aftermath: claim note written back, statutory notices generated and queued, the next deadline diary set</li>
+        <li>Every model recommendation is logged with what the AI saw; statutory deadlines are deterministic code, and penalty diaries refuse to move</li>
+      </ul>
+      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, and calendars deadlines by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided.</span></div>
     </div>
     <div class="story">
       <span class="role" style="color:var(--blue)">The employer</span>
-      <blockquote>Filing the first report used to mean a fax and a week of silence. Now HR files it in the portal, watches the claim move in real time, and pulls our loss runs ourselves at renewal. Our broker asked what changed.</blockquote>
-      <div class="who"><div class="ava" style="background:linear-gradient(135deg,#58a6ff,#2a6cc9)">JH</div><div><b>Jordan H.</b><span>HR Director · BrightCare Home Health</span></div></div>
+      <h3>Files in minutes, sees everything</h3>
+      <ul>
+        <li>HR files the first report of injury in the portal; payroll wage data pulls automatically and the benefit rates compute themselves</li>
+        <li>The worker's intake link goes out immediately — the claim is moving the same day</li>
+        <li>Watches claim status, deadlines, and decisions in real time instead of calling for updates</li>
+        <li>Pulls loss runs and OSHA-ready reporting self-serve at renewal — with reserves honestly labeled as adjuster-approved or pending</li>
+      </ul>
+      <div class="delta"><b>vs. the usual claims system</b><span>The usual experience is a fax, a week of silence, and a quarterly report. Here the employer sees the same live claim the adjuster does — scoped to their own data and nothing else.</span></div>
     </div>
   </div>
-  <p class="foot-note">Illustrative scenarios drawn from ClaimLayer's synthetic demo dataset — not statements by real customers.</p>
+  <p class="foot-note">Every behavior described above is implemented and demonstrated in the <a href="demo/" style="color:var(--amber)">interactive demo</a>, on synthetic data.</p>
 </div></section>
 
 <section id="screens"><div class="wrap reveal">
