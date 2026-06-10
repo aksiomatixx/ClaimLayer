@@ -20,7 +20,7 @@ export function TriageQueue({ claims, notify }) {
     refetchInterval: 30_000,
   });
   const [resolving, setResolving] = useState(null); // docId
-  const [form, setForm] = useState({ claim_id: '', category: '' });
+  const [form, setForm] = useState({ claim_id: '', category: '', reason: '' });
 
   if (docs.length === 0) return null;
 
@@ -28,11 +28,11 @@ export function TriageQueue({ claims, notify }) {
     try {
       const payload = action === 'file'
         ? { action, claim_id: form.claim_id, category: form.category || undefined }
-        : { action };
+        : { action, reason: form.reason }; // rejections are documented, never dropped
       const r = await resolveDocumentTriage(docId, payload);
       qc.invalidateQueries({ queryKey: ['doc-triage'] });
       qc.invalidateQueries({ queryKey: ['claims'] });
-      setResolving(null); setForm({ claim_id: '', category: '' });
+      setResolving(null); setForm({ claim_id: '', category: '', reason: '' });
       notify(action === 'file'
         ? `Filed → ${r.diary?.diary_type || 'documents'}`
         : 'Document rejected');
@@ -53,7 +53,7 @@ export function TriageQueue({ claims, notify }) {
               {doc.ai_summary && <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.55 }}>{doc.ai_summary}</div>}
             </div>
             {resolving !== doc.id && (
-              <Btn small onClick={() => { setResolving(doc.id); setForm({ claim_id: doc.claim_id || '', category: doc.category || '' }); }}>Resolve…</Btn>
+              <Btn small onClick={() => { setResolving(doc.id); setForm({ claim_id: doc.claim_id || '', category: doc.category || '', reason: '' }); }}>Resolve…</Btn>
             )}
           </div>
           {resolving === doc.id && (
@@ -71,7 +71,10 @@ export function TriageQueue({ claims, notify }) {
                 {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat.replace(/_/g, ' ')}</option>)}
               </select>
               <Btn small disabled={!form.claim_id} onClick={() => act(doc.id, 'file')}>File + queue action</Btn>
-              <Btn small variant="ghost" onClick={() => act(doc.id, 'reject')}>Reject</Btn>
+              <input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+                placeholder="Rejection reason (required to reject)"
+                style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 8px', fontSize: 12, minWidth: 220 }} />
+              <Btn small variant="ghost" disabled={!form.reason.trim()} onClick={() => act(doc.id, 'reject')}>Reject</Btn>
               <Btn small variant="ghost" onClick={() => setResolving(null)}>Cancel</Btn>
             </div>
           )}

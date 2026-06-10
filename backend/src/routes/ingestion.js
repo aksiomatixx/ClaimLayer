@@ -33,7 +33,7 @@ async function handleIngest(req, res, claimId) {
     }, req.user?.email);
     res.status(201).json(result);
   } catch (err) {
-    const status = err.message.includes('required') ? 400 : 500;
+    const status = /required|must be|cannot be|does not match/.test(err.message) ? 400 : 500;
     res.status(status).json({ error: err.message });
   }
 }
@@ -41,7 +41,12 @@ async function handleIngest(req, res, claimId) {
 router.post(
   '/claims/:id/documents/ingest',
   requireAuth, requireRole(['admin']),
-  [param('id').notEmpty(), body('content_text').notEmpty()],
+  [
+    param('id').notEmpty(),
+    body('content_text').notEmpty(),
+    body('received_at').optional().isISO8601()
+      .withMessage('received_at must be an ISO-8601 timestamp (the channel receipt time)'),
+  ],
   validate,
   (req, res) => handleIngest(req, res, req.params.id)
 );
@@ -49,7 +54,11 @@ router.post(
 router.post(
   '/documents/ingest',
   requireAuth, requireRole(['admin']),
-  [body('content_text').notEmpty()],
+  [
+    body('content_text').notEmpty(),
+    body('received_at').optional().isISO8601()
+      .withMessage('received_at must be an ISO-8601 timestamp (the channel receipt time)'),
+  ],
   validate,
   (req, res) => handleIngest(req, res, null)
 );
