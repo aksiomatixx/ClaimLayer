@@ -231,4 +231,48 @@ router.patch(
   }
 );
 
+// ── Named TD operations (tdService completion) ───────────────────────────────
+
+// POST /api/v1/claims/:claimId/td-rate-change   { new_rate, effective_date }
+router.post(
+  '/claims/:claimId/td-rate-change',
+  requireAuth, requireRole(['admin']),
+  [param('claimId').notEmpty(), body('new_rate').isFloat({ gt: 0 }), body('effective_date').matches(/^\d{4}-\d{2}-\d{2}$/)],
+  validate,
+  async (req, res) => {
+    try {
+      const period = await tdPeriodsService.changeTdRate(req.params.claimId, req.body, req.user?.email);
+      res.status(201).json({ period });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  }
+);
+
+// POST /api/v1/claims/:claimId/td-benefit-transition { to_benefit_type, effective_date, weekly_rate? }
+router.post(
+  '/claims/:claimId/td-benefit-transition',
+  requireAuth, requireRole(['admin']),
+  [param('claimId').notEmpty(), body('to_benefit_type').notEmpty(), body('effective_date').matches(/^\d{4}-\d{2}-\d{2}$/)],
+  validate,
+  async (req, res) => {
+    try {
+      const period = await tdPeriodsService.transitionBenefitType(req.params.claimId, req.body, req.user?.email);
+      res.status(201).json({ period });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  }
+);
+
+// POST /api/v1/claims/:claimId/td-reduced-earnings { effective_date, new_rate }
+router.post(
+  '/claims/:claimId/td-reduced-earnings',
+  requireAuth, requireRole(['admin']),
+  [param('claimId').notEmpty(), body('new_rate').isFloat({ gt: 0 }), body('effective_date').matches(/^\d{4}-\d{2}-\d{2}$/)],
+  validate,
+  async (req, res) => {
+    try {
+      const period = await tdPeriodsService.recordReducedEarnings(req.params.claimId, req.body, req.user?.email);
+      res.status(201).json({ period });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  }
+);
+
 module.exports = router;

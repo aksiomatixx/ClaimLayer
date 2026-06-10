@@ -17,12 +17,14 @@
  *     §4650(d) imposes a 10% self-imposed penalty on late payments.
  *     Penalty automation is a HOOK in this file but not yet wired.
  *
- * WCIS TRIGGER HOOKS:
- *   This service deliberately does NOT enqueue WCIS SROI transactions.
- *   Each create / close / reinstate path includes a comment marking the
- *   MTC that the full tdService milestone will fire (IP / CA / CB /
- *   Sx / Px / RB / RE / FS). The wcisConstants TRIGGER_EVENT_TO_MTC
- *   table already has matching scaffolded entries.
+ * WCIS TRIGGER HOOKS (tdService completion milestone):
+ *   Every TD state change enqueues its SROI transaction via
+ *   wcisTriggerService.enqueueIfReportable — IP on first indemnity,
+ *   CA on rate change, CB on benefit-type change, S1/P1/S2/S3/S7 on
+ *   suspension (mapped from reason_ended), RB on reinstatement, RE on
+ *   reduced earnings, FS on salary continuation. Hooks are non-fatal:
+ *   a queue failure logs an error but never blocks the benefit change
+ *   (the deadline monitor cron surfaces missed enqueues).
  */
 
 const { supabase } = require('./supabase');
@@ -39,9 +41,21 @@ const VALID_REASON_STARTED  = [
 ];
 const VALID_REASON_ENDED    = [
   'rtw_full', 'rtw_modified', 'mmi_reached', 'max_weeks_exhausted',
-  'suspended_by_adjuster', 'settled', 'death', 'rate_change',
-  'benefit_type_change', 'other',
+  'suspended_by_adjuster', 'med_noncompliance', 'settled', 'death',
+  'rate_change', 'benefit_type_change', 'other',
 ];
+
+// reason_ended → WCIS suspension trigger event. Reasons not listed are
+// reported by other services (mmi→PD CB via pdService, settled→cnr PY/FN,
+// rate/type change→the superseding period's CA/CB) or deferred (death→CD,
+// Injury Type Expansion milestone).
+const REASON_ENDED_TO_WCIS_EVENT = {
+  rtw_full:              'td_suspended_rtw',          // S1
+  rtw_modified:          'td_partial_suspended_rtw',  // P1
+  med_noncompliance:     'td_suspended_med_noncomp',  // S2
+  suspended_by_adjuster: 'td_suspended_admin_noncomp',// S3
+  max_weeks_exhausted:   'td_suspended_benefits_ex',  // S7
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,6 +105,27 @@ async function _writeClaimEvent(claimId, type, data) {
 }
 
 // ── Read operations ──────────────────────────────────────────────────────────
+
+/**
+ * Non-fatal WCIS enqueue. A trigger-queue failure must never block a
+ * benefit change — it logs loudly and the WCIS deadline monitor cron
+ * is the backstop for anything missed.
+ */
+async function _enqueueWcis(claimId, triggerEvent, sourceRecordId, eventDate, payloadContext) {
+  try {
+    const wcis = require('./wcisTriggerService');
+    await wcis.enqueueIfReportable({
+      claim_id:         claimId,
+      trigger_event:    triggerEvent,
+      source_service:   'tdPeriodsService',
+      source_record_id: sourceRecordId,
+      event_date:       eventDate,
+      payload_context:  payloadContext || {},
+    });
+  } catch (e) {
+    logger.error({ msg: 'tdPeriodsService: WCIS enqueue failed (non-fatal)', triggerEvent, claimId, err: e.message });
+  }
+}
 
 async function listForClaim(claimId) {
   const { data, error } = await supabase
@@ -270,13 +305,35 @@ async function createPeriod(claimId, input, actorEmail) {
   // Auto-complete the TD_PAYMENT_SETUP diary on first period creation.
   await _completeTdSetupDiaryIfFirst(claimId, inserted.id);
 
-  // WCIS HOOK: SROI IP / CA / CB will fire here in the full tdService
-  // milestone. IP = first indemnity ever paid; CA = rate change on
-  // existing TD; CB = benefit-type change (TTD↔TPD or TD→FS). The
-  // exact mapping depends on `active` and `benefit_type`.
-  // Penalty hook (LC §4650(d)) — late payments (>14 days post-DOI for
-  // initial; >14 days from any subsequent due-date) will be detected
-  // here once the payment ledger is wired.
+  // WCIS HOOK — SROI IP / CA / CB / RE / FS.
+  //   IP = first indemnity period ever on the claim
+  //   FS = salary continuation start (full salary in lieu of TD)
+  //   CA = rate change supersede; CB = benefit-type change supersede
+  //   RE = reduced earnings (explicit flag from recordReducedEarnings)
+  // Penalty hook (LC §4650(d)) remains deferred to the payment ledger.
+  {
+    const all = await listForClaim(claimId);
+    const isFirstEver = all.length === 1;
+    let wcisEvent = null;
+    if (input && input.wcis_event_override) {
+      wcisEvent = input.wcis_event_override;
+    } else if (isFirstEver) {
+      wcisEvent = benefit_type === 'salary_continuation' ? 'salary_continuation' : 'td_first_payment';
+    } else if (insertReasonStarted === 'benefit_type_change') {
+      wcisEvent = benefit_type === 'salary_continuation' ? 'salary_continuation' : 'td_benefit_type_changed';
+    } else if (insertReasonStarted === 'rate_change') {
+      wcisEvent = 'td_rate_changed';
+    } else if (insertReasonStarted === 'initial_disability') {
+      // New period after a gap that wasn't a reinstatement — report as
+      // reinstatement of indemnity rather than a duplicate IP.
+      wcisEvent = 'td_reinstated';
+    }
+    if (wcisEvent) {
+      await _enqueueWcis(claimId, wcisEvent, inserted.id, start_date, {
+        source: 'td_period', period_id: inserted.id, benefit_type, weekly_rate,
+      });
+    }
+  }
 
   return inserted;
 }
@@ -333,9 +390,16 @@ async function closePeriod(periodId, input, actorEmail) {
     actorEmail,
   );
 
-  // WCIS HOOK: SROI Sx / Px depending on reason_ended (S1=rtw_full,
-  // P1=rtw_modified, S2=med_noncompliance, etc.). Wired in the full
-  // tdService milestone.
+  // WCIS HOOK — SROI Sx / Px per reason_ended (S1=rtw_full,
+  // P1=rtw_modified, S2=med_noncompliance, S3=administrative,
+  // S7=benefits exhausted). Reasons without an entry are reported by
+  // other services or deferred — see REASON_ENDED_TO_WCIS_EVENT.
+  const suspensionEvent = REASON_ENDED_TO_WCIS_EVENT[reason_ended];
+  if (suspensionEvent) {
+    await _enqueueWcis(period.claim_id, suspensionEvent, periodId, end_date, {
+      source: 'td_period', period_id: periodId, reason_ended,
+    });
+  }
 
   return updated;
 }
@@ -409,8 +473,11 @@ async function reinstatePeriod(claimId, fromPeriodId, input, actorEmail) {
     actorEmail,
   );
 
-  // WCIS HOOK: SROI RB ("Reinstatement of Benefits"). Wired in the
-  // full tdService milestone.
+  // WCIS HOOK — SROI RB "Reinstatement of Benefits".
+  await _enqueueWcis(claimId, 'td_reinstated', inserted.id, start_date, {
+    source: 'td_period', period_id: inserted.id,
+    reinstated_from_period_id: fromPeriodId, weekly_rate,
+  });
 
   return inserted;
 }
@@ -508,7 +575,64 @@ async function summary(claimId) {
   };
 }
 
+// ── Named TD operations (master-context API surface) ─────────────────────────
+// Thin wrappers over createPeriod's supersede logic so callers (and the
+// WCIS mapping) express intent explicitly.
+
+async function changeTdRate(claimId, { new_rate, effective_date, notes }, actorEmail) {
+  const active = await getActive(claimId);
+  if (!active) throw new Error('No active TD period to change the rate on');
+  return createPeriod(claimId, {
+    benefit_type: active.benefit_type,
+    start_date:   effective_date,
+    weekly_rate:  new_rate,
+    reason_started: 'rate_change',
+    notes,
+  }, actorEmail);
+}
+
+async function transitionBenefitType(claimId, { to_benefit_type, effective_date, weekly_rate, notes }, actorEmail) {
+  const active = await getActive(claimId);
+  if (!active) throw new Error('No active TD period to transition');
+  if (active.benefit_type === to_benefit_type) {
+    throw new Error('Claim is already on that benefit type');
+  }
+  return createPeriod(claimId, {
+    benefit_type: to_benefit_type,
+    start_date:   effective_date,
+    weekly_rate:  weekly_rate != null ? weekly_rate : active.weekly_rate,
+    reason_started: 'benefit_type_change',
+    notes,
+  }, actorEmail);
+}
+
+async function recordReducedEarnings(claimId, { effective_date, new_rate, notes }, actorEmail) {
+  // Worker returned to work with wage loss — TPD on reduced earnings.
+  // SROI RE rather than the generic CA/CB the supersede would fire.
+  return createPeriod(claimId, {
+    benefit_type: 'TPD',
+    start_date:   effective_date,
+    weekly_rate:  new_rate,
+    reason_started: 'rate_change',
+    notes,
+    wcis_event_override: 'td_reduced_earnings',
+  }, actorEmail);
+}
+
+async function startSalaryContinuation(claimId, { effective_date, weekly_rate, notes }, actorEmail) {
+  return createPeriod(claimId, {
+    benefit_type: 'salary_continuation',
+    start_date:   effective_date,
+    weekly_rate,
+    notes,
+  }, actorEmail);
+}
+
 module.exports = {
+  changeTdRate,
+  transitionBenefitType,
+  recordReducedEarnings,
+  startSalaryContinuation,
   listForClaim,
   getActive,
   getById,

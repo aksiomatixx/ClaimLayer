@@ -163,15 +163,13 @@ const TRIGGER_EVENT_TO_MTC = {
     deferral: 'Correction UI not implemented in M22A.',
   },
 
-  // TD-family events — tdService does not exist in codebase.
-  // All entries scaffolded for future tdService milestone. No
-  // hook in M22A.
+  // TD-family events — wired by the tdService completion milestone
+  // (hooks live in tdPeriodsService create/close/reinstate paths).
   td_first_payment: {
     mtc_family: 'SROI', mtc_code: 'IP',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI IP.
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_acquired_first_payment: {
     mtc_family: 'SROI', mtc_code: 'AP',
@@ -184,37 +182,32 @@ const TRIGGER_EVENT_TO_MTC = {
     mtc_family: 'SROI', mtc_code: 'CA',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI CA "Change in Benefit Amount".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_benefit_type_changed: {
     mtc_family: 'SROI', mtc_code: 'CB',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI CB. (pdService hooks the
     // PD-from-TD variant as pd_advance_benefit_transition.)
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_suspended_rtw: {
     mtc_family: 'SROI', mtc_code: 'S1',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI S1 "Suspension, Return to Work".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_partial_suspended_rtw: {
     mtc_family: 'SROI', mtc_code: 'P1',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI P1 "Partial Suspension, RTW".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_suspended_med_noncomp: {
     mtc_family: 'SROI', mtc_code: 'S2',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI S2 "Suspension, Medical Noncompliance".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_partial_suspended_med: {
     mtc_family: 'SROI', mtc_code: 'P2',
@@ -227,8 +220,7 @@ const TRIGGER_EVENT_TO_MTC = {
     mtc_family: 'SROI', mtc_code: 'S3',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI S3 "Suspension, Administrative".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_partial_suspended_admin: {
     mtc_family: 'SROI', mtc_code: 'P3',
@@ -241,22 +233,27 @@ const TRIGGER_EVENT_TO_MTC = {
     mtc_family: 'SROI', mtc_code: 'S7',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI S7 "Suspension, Benefits Exhausted".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   td_reduced_earnings: {
     mtc_family: 'SROI', mtc_code: 'RE',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI RE "Reduced Earnings".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
   },
   salary_continuation: {
     mtc_family: 'SROI', mtc_code: 'FS',
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI FS "Full Salary Continuation".
-    wired: false,
-    deferral: 'Scaffolded for future tdService milestone. No hook in M22A.',
+    wired: true, // tdService completion milestone
+  },
+
+  td_reinstated: {
+    mtc_family: 'SROI', mtc_code: 'RB',
+    deadline_type: 'business_days_15',
+    // Guide Section N pg 87 — SROI RB "Reinstatement of Benefits".
+    // TD reinstated after a suspension (tdPeriodsService.reinstatePeriod).
+    wired: true, // tdService completion milestone
   },
 
   worker_died_industrial: {
