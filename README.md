@@ -92,9 +92,31 @@ The demo runs against a real PostgreSQL database via Supabase — there is no in
 ### Run it
 
 ```bash
-npm install
+npm ci --prefix backend && npm ci --prefix frontend   # lockfile-exact installs
 npm run dev:demo      # wipes demo-flagged rows, seeds 8 synthetic claims, starts backend (:3001) + frontend (:5173)
 ```
+
+### Deploying
+
+Apply migrations **before** deploying the matching backend (the code
+writes columns the migrations create — `migrate → deploy`, always).
+CI proves the chain on every push: all migrations apply in filename
+order to a clean PostgreSQL 16, the hardening migration re-applies
+idempotently, and schema-contract integration tests assert every write
+shape the code performs (`backend/scripts/migration-contract-test.js`).
+
+Two workers must run in production (cron or scheduler, both also
+triggerable via authenticated admin endpoints):
+
+| Worker | Module | Endpoint | Schedule |
+|---|---|---|---|
+| Notice delivery | `backend/src/cron/noticeDeliveryWorker.js` | `POST /api/v1/admin/workers/notice-delivery/run` | every 15 min |
+| Integration outbox | `backend/src/cron/outboxWorker.js` | `POST /api/v1/admin/workers/outbox/run` | every 5 min |
+
+Physical mail is only marked **delivered** by a signature-verified Lob
+webhook (`POST /webhooks/lob/delivery`); until then a submitted letter
+is truthfully `submitted`. Set `LOB_WEBHOOK_SECRET` (and the DxF/Enlyte
+secrets) in production — webhook verification fails closed without them.
 
 Then open the `/architecture` and `/agents` views to see the agent registry, guardrail catalog, and live decision audit trail.
 

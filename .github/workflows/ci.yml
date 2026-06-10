@@ -1,26 +1,23 @@
-name: Backend CI
+name: CI
 
 on:
   push:
     branches: [main, "claude/**"]
-    paths: ["backend/**", ".github/workflows/ci.yml"]
   pull_request:
     branches: [main]
-    paths: ["backend/**"]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
-    name: Unit + Integration Tests
+  backend:
+    name: Backend unit + integration tests
     runs-on: ubuntu-latest
 
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── Python (mock servers) ────────────────────────────────────────────────
+      # ── Python (mock ADP / FileHandler servers) ──────────────────────────────
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -28,19 +25,16 @@ jobs:
       - name: Install mock server dependencies
         run: pip install fastapi uvicorn pydantic
 
-      # ── Start mock ADP (port 8001) ───────────────────────────────────────────
-      - name: Start mock ADP
+      - name: Start mock ADP (port 8001)
         run: |
           python backend/mocks/mock_adp.py &
           echo "ADP_PID=$!" >> $GITHUB_ENV
-          # Wait until the health endpoint responds
           for i in $(seq 1 15); do
             curl -sf http://localhost:8001/health && break
             sleep 1
           done
 
-      # ── Start mock FileHandler (port 8002) ───────────────────────────────────
-      - name: Start mock FileHandler
+      - name: Start mock FileHandler (port 8002)
         run: |
           python backend/mocks/mock_filehandler.py &
           echo "FH_PID=$!" >> $GITHUB_ENV
@@ -54,14 +48,13 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: backend/package.json
+          cache-dependency-path: backend/package-lock.json
 
-      - name: Install backend dependencies
+      - name: Install backend dependencies (lockfile-exact)
         working-directory: backend
-        run: npm install
+        run: npm ci
 
-      # ── Run tests ────────────────────────────────────────────────────────────
-      - name: Run tests
+      - name: Run backend tests
         working-directory: backend
         env:
           NODE_ENV: test
@@ -78,8 +71,71 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: npm test -- --forceExit --testTimeout=30000
 
-      # ── Stop mocks ───────────────────────────────────────────────────────────
       - name: Stop mock servers
         if: always()
         run: |
           kill $ADP_PID $FH_PID 2>/dev/null || true
+
+  frontend:
+    name: Frontend tests + production build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies (lockfile-exact)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+  migrations:
+    name: Migrations + schema contract (real PostgreSQL)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies (lockfile-exact)
+        working-directory: backend
+        run: npm ci
+
+      # Applies every migration in filename order to a clean database,
+      # re-applies the hardening migration (idempotency), then runs the
+      # schema-contract integration assertions — code that writes a
+      # column no migration created fails HERE, not in production.
+      - name: Apply migrations + run schema-contract integration tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: node backend/scripts/migration-contract-test.js
