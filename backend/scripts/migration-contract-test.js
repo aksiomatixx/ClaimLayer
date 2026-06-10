@@ -96,8 +96,8 @@ async function main() {
     }
   }
 
-  console.log('── Re-applying the hardening migration (idempotency)');
-  const hardening = files.filter(f => f.includes('production_hardening'));
+  console.log('── Re-applying the hardening-era migrations (idempotency)');
+  const hardening = files.filter(f => f.startsWith('20260611'));
   for (const f of hardening) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8');
     await client.query(sql);
@@ -137,6 +137,18 @@ async function main() {
                                     package_kind, pdf_buffer_b64, rejection_reason, resolved_by, resolved_at)
        VALUES ('doc_ct_1', 'claim_ct_1', 'C&R package (v1)', 'settlement', 'filed', 'none',
                'cnr_10214c', 'JVBERi0=', NULL, NULL, NULL)`));
+
+  await check('claim_documents carries the PDF-intake fields (extraction method + channel envelope)', () =>
+    client.query(
+      `INSERT INTO claim_documents (id, claim_id, title, category, status, triage_status,
+                                    pdf_buffer_b64, extraction_method, channel_metadata)
+       VALUES ('doc_ct_pdf', 'claim_ct_1', 'Emailed PR-2.pdf', 'medical', 'filed', 'none',
+               'JVBERi0=', 'document_vision', '{"from":"clinic@example.com","subject":"PR-2"}')`));
+
+  await expectViolation(client,
+    'extraction_method outside the controlled pair is rejected',
+    `INSERT INTO claim_documents (id, title, category, status, triage_status, extraction_method)
+     VALUES ('doc_ct_pdf_bad', 'x', 'other', 'filed', 'none', 'ocr_maybe')`);
 
   await check("claim_documents supports the transient 'resolving' triage state + supersede chain", async () => {
     await client.query(

@@ -89,6 +89,16 @@ export async function ingestClaimDocument(claimId, payload) {
   return _json(await fetch(`${BASE}/claims/${claimId}/documents/ingest`, _opts('POST', payload)));
 }
 
+export async function ingestClaimFile(claimId, file) {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  return _json(await fetch(`${BASE}/claims/${claimId}/documents/ingest-file`, {
+    method: 'POST',
+    credentials: 'include',
+    body: form, // browser sets the multipart boundary
+  }));
+}
+
 export async function fetchDocumentTriage() {
   const data = await _json(await fetch(`${BASE}/documents/triage`, _opts()));
   return data.documents ?? [];

@@ -185,13 +185,32 @@ async function ingestDocument(input, actorEmail) {
     claimIdHint: claim_id || null,
   });
 
+  return _persistClassified({
+    classification,
+    receivedAt,
+    explicitClaimId: claim_id || null,
+    fields: {
+      title: title || filename || 'Untitled document',
+      source: source || 'upload',
+      pages: input.pages || null,
+      content_text: String(content_text),
+    },
+  }, actorEmail);
+}
+
+/**
+ * The shared back half of ingestion (text and PDF paths converge here):
+ * claim resolution → guardrail/triage routing → document insert →
+ * the compensated document+diary+event filing unit.
+ */
+async function _persistClassified({ classification, receivedAt, explicitClaimId, fields }, actorEmail) {
   const { category, confidence, summary, key_fields } = classification;
   const signals = key_fields?.signals || [];
 
   // Claim resolution: explicit channel claim wins; otherwise the agent's
   // verbatim-extracted claim number, verified against the claims table.
-  let resolvedClaimId = claim_id || null;
-  let matchBasis = claim_id ? 'channel' : null;
+  let resolvedClaimId = explicitClaimId || null;
+  let matchBasis = explicitClaimId ? 'channel' : null;
   if (!resolvedClaimId && classification.claim_number) {
     resolvedClaimId = await _matchClaimByNumber(classification.claim_number);
     matchBasis = resolvedClaimId ? 'extracted_claim_number' : null;
@@ -206,15 +225,11 @@ async function ingestDocument(input, actorEmail) {
   const doc = {
     id: _id(),
     claim_id: resolvedClaimId,
-    title: title || filename || 'Untitled document',
     category,
-    source: source || 'upload',
     received_at: receivedAt,
-    pages: input.pages || null,
     status: needsTriage ? 'triage' : 'filed',
     ai_summary: summary,
     relevant_to: needsTriage ? [] : [_resolveRule(category, signals).diary_type],
-    content_text: String(content_text),
     key_fields: key_fields || null,
     classification_confidence: confidence,
     classification_model: config.anthropic.model,
@@ -227,6 +242,7 @@ async function ingestDocument(input, actorEmail) {
     version: 1,
     created_at: now,
     updated_at: now,
+    ...fields,
   };
 
   const { data: inserted, error } = await supabase
@@ -265,6 +281,117 @@ async function ingestDocument(input, actorEmail) {
   }
 
   return { document: inserted, diary, routed: 'filed' };
+}
+
+// ── PDF intake (Tier 1.5 #1) ─────────────────────────────────────────────────
+
+const PDF_MAX_BYTES = 15 * 1024 * 1024;
+// Below this many extracted characters the text layer is considered
+// unusable (scanned/image PDF) and classification falls back to sending
+// the document itself to the model as a document block.
+const PDF_MIN_TEXT_CHARS = 120;
+
+function _isPdf(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.length > 4 &&
+    buffer.slice(0, 5).toString('latin1').startsWith('%PDF-');
+}
+
+/**
+ * Extract the text layer from a PDF (pdfjs-dist legacy build — pure JS,
+ * no native binaries). Returns { text, pages }. Extraction failures
+ * return empty text rather than throwing: an unreadable text layer is
+ * exactly the case the document-block fallback exists for.
+ */
+async function extractPdfText(buffer) {
+  try {
+    // The v3 legacy build is CommonJS (works under Jest's CJS VM, no
+    // dynamic-ESM import needed). Render polyfill warnings on first
+    // require are harmless — only text extraction is used.
+    const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      isEvalSupported: false,
+    }).promise;
+    let text = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(it => it.str).join(' ') + '\n';
+    }
+    return { text: text.trim(), pages: doc.numPages };
+  } catch (e) {
+    logger.warn({ msg: 'extractPdfText: extraction failed — document-block fallback will classify', err: e.message });
+    return { text: '', pages: null };
+  }
+}
+
+/**
+ * Ingest an actual PDF file. Text-layer first: when the PDF carries a
+ * usable text layer it runs through the exact text-classification path;
+ * a scanned/image PDF (thin or failed extraction) falls back to
+ * classifying the document itself via a Claude document block. Both
+ * paths share every guardrail, the triage routing, and the
+ * receipt-anchored deterministic action translation. The original PDF
+ * is stored on the document so "open original" shows the real file.
+ *
+ * @param {object} input — { buffer, filename, title, source, claim_id,
+ *                           received_at, channel_metadata }
+ */
+async function ingestPdf(input, actorEmail) {
+  const { buffer, filename, title, source, claim_id } = input || {};
+  if (!_isPdf(buffer)) {
+    throw new Error('file must be a PDF (missing %PDF header)');
+  }
+  if (buffer.length > PDF_MAX_BYTES) {
+    throw new Error(`PDF exceeds the ${Math.round(PDF_MAX_BYTES / 1024 / 1024)}MB intake limit`);
+  }
+
+  const receivedAt = _resolveReceivedAt(input.received_at);
+
+  if (claim_id) {
+    const { data: claimRow, error: claimErr } = await supabase
+      .from('claims').select('id').eq('id', claim_id).single();
+    if (claimErr || !claimRow) {
+      throw new Error(`claim_id does not match a known claim: ${claim_id}`);
+    }
+  }
+
+  const aiService = require('./aiService');
+  const { text, pages } = await extractPdfText(buffer);
+
+  let classification;
+  let extractionMethod;
+  if (text.length >= PDF_MIN_TEXT_CHARS) {
+    extractionMethod = 'text_layer';
+    classification = await aiService.classifyDocument({
+      text, filename, source, claimIdHint: claim_id || null,
+    });
+  } else {
+    extractionMethod = 'document_vision';
+    logger.info({
+      msg: 'ingestPdf: text layer unusable — classifying via document block',
+      filename, extracted_chars: text.length,
+    });
+    classification = await aiService.classifyDocumentFromPdf({
+      pdfBuffer: buffer, filename, source, claimIdHint: claim_id || null,
+    });
+  }
+
+  return _persistClassified({
+    classification,
+    receivedAt,
+    explicitClaimId: claim_id || null,
+    fields: {
+      title: title || filename || 'Untitled document',
+      source: source || 'upload',
+      pages: pages,
+      content_text: text || null,
+      pdf_buffer_b64: buffer.toString('base64'),
+      extraction_method: extractionMethod,
+      channel_metadata: input.channel_metadata || null,
+    },
+  }, actorEmail);
 }
 
 /** Pending human-triage queue, oldest first. */
@@ -404,9 +531,13 @@ async function resolveTriage(docId, { action, claim_id, category, reason }, acto
 
 module.exports = {
   ingestDocument,
+  ingestPdf,
+  extractPdfText,
   listTriage,
   resolveTriage,
   CONFIDENCE_THRESHOLD,
+  PDF_MIN_TEXT_CHARS,
+  PDF_MAX_BYTES,
   DOC_ACTION_RULES,
   SIGNAL_OVERRIDES,
 };

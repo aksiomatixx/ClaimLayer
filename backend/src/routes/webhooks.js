@@ -24,10 +24,17 @@
 
 const express = require('express');
 const crypto  = require('crypto');
+const multer  = require('multer');
 const config  = require('../config');
 const logger  = require('../logger');
 
 const router = express.Router();
+
+// Inbound email posts are multipart (message fields + attachments).
+const emailUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 10 },
+});
 
 const LOB_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
@@ -169,6 +176,97 @@ router.post('/lob/delivery', express.raw({ type: '*/*' }), async (req, res) => {
     // 500 → Lob retries; processing is idempotent so a retry is safe.
     res.status(500).json({ error: 'Event processing failed' });
   }
+});
+
+// ── POST /webhooks/email/inbound — email-in document channel ─────────────────
+// Vendor-shaped receiver for SendGrid Inbound Parse / Mailgun Routes:
+// multipart posts carrying the message fields plus attachments. Every
+// PDF attachment runs through the standard ingestion pipeline (same
+// guardrails, triage routing, receipt-anchored deadlines) with
+// source 'email' and the sender/subject recorded on the document.
+//
+// Auth: these vendors don't HMAC-sign, so the contract is a shared
+// token (?token= or x-inbound-token). Production fails closed when
+// EMAIL_INBOUND_TOKEN is unset; outside production the bypass is
+// explicit and applies only when no token is configured.
+//
+// Idempotent on the email Message-ID (webhook_events) — vendor retries
+// of the same message are acknowledged without re-ingesting.
+function _validateInboundToken(req) {
+  const configured = config.webhooks.emailInboundToken;
+  if (!configured) return !_isProduction(); // explicit non-prod bypass
+  const presented = req.query.token || req.headers['x-inbound-token'] || '';
+  return _safeEqualHex(String(presented), String(configured));
+}
+
+function _parseMessageId(headersBlob) {
+  const m = /^message-id:\s*<?([^>\r\n]+)>?/im.exec(String(headersBlob || ''));
+  return m ? m[1].trim() : null;
+}
+
+router.post('/email/inbound', emailUpload.any(), async (req, res) => {
+  if (!_validateInboundToken(req)) {
+    logger.warn({ msg: 'email/inbound: token validation failed', ip: req.ip });
+    return res.status(401).json({ error: 'Invalid inbound token' });
+  }
+
+  const from    = req.body?.from || null;
+  const subject = req.body?.subject || null;
+  const messageId = _parseMessageId(req.body?.headers) || req.body?.['message-id'] || null;
+
+  const { supabase } = require('../services/supabase');
+  if (messageId) {
+    const { data: seen, error: seenErr } = await supabase
+      .from('webhook_events').select('id')
+      .eq('provider', 'email_inbound').eq('provider_event_id', messageId);
+    if (seenErr) {
+      logger.error({ msg: 'email/inbound: dedupe lookup failed', err: seenErr.message });
+      return res.status(500).json({ error: 'Dedupe lookup failed' });
+    }
+    if (seen && seen.length > 0) {
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+    const { error: insErr } = await supabase.from('webhook_events').insert({
+      id: `whk_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+      provider: 'email_inbound',
+      provider_event_id: messageId,
+      event_type: 'inbound_email',
+      payload: { from, subject, attachments: (req.files || []).map(f => f.originalname) },
+      received_at: new Date().toISOString(),
+    });
+    if (insErr) {
+      logger.error({ msg: 'email/inbound: dedupe insert failed', err: insErr.message });
+      return res.status(500).json({ error: 'Dedupe record failed' });
+    }
+  }
+
+  const ingestion = require('../services/documentIngestionService');
+  const outcomes = [];
+  for (const f of req.files || []) {
+    const isPdf = f.buffer && f.buffer.slice(0, 5).toString('latin1').startsWith('%PDF-');
+    if (!isPdf) {
+      outcomes.push({ filename: f.originalname, skipped: 'not_a_pdf' });
+      continue;
+    }
+    try {
+      const r = await ingestion.ingestPdf({
+        buffer: f.buffer,
+        filename: f.originalname,
+        source: 'email',
+        channel_metadata: { from, subject, message_id: messageId },
+      }, from ? `email:${from}` : 'email-inbound');
+      outcomes.push({ filename: f.originalname, routed: r.routed, document_id: r.document.id });
+    } catch (e) {
+      // One bad attachment must not fail the message; a 5xx would make
+      // the vendor redeliver everything (and the dedupe row would then
+      // skip the good attachments too).
+      logger.error({ msg: 'email/inbound: attachment ingest failed', filename: f.originalname, err: e.message });
+      outcomes.push({ filename: f.originalname, error: e.message });
+    }
+  }
+
+  logger.info({ msg: 'email/inbound: processed', from, subject, attachments: outcomes.length });
+  res.status(200).json({ received: true, from, subject, outcomes });
 });
 
 module.exports = router;
