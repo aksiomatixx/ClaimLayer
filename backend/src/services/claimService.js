@@ -432,36 +432,26 @@ async function _runAnalysis(claimId) {
       data:      analysis,
     });
 
-    // Push AI-suggested reserves to FileHandler (pending adjuster approval)
-    if (claim.filehandlerId && analysis.suggestedMedicalReserve != null) {
-      try {
-        await filehandler.setReserves(
-          claim.filehandlerId,
-          {
-            medical:   analysis.suggestedMedicalReserve,
-            indemnity: analysis.suggestedIndemnityReserve,
-            expense:   analysis.suggestedExpenseReserve,
-            reason:    `AI initial analysis — ${claim.injuryType} (score: ${analysis.compensabilityScore})`,
-          },
-          'AI_ENGINE',
-          null
-        );
-
-        await supabase.from('claim_events').insert({
-          claim_id:  claimId,
-          type:      'reserves_set',
-          timestamp: new Date().toISOString(),
-          data: {
-            source:    'AI_ENGINE',
-            medical:   analysis.suggestedMedicalReserve,
-            indemnity: analysis.suggestedIndemnityReserve,
-            expense:   analysis.suggestedExpenseReserve,
-            status:    'pending_adjuster_approval',
-          },
-        });
-      } catch (err) {
-        logger.error({ msg: '_runAnalysis: reserve set failed', claimId, err: err.message });
-      }
+    // Reserve recommendations stay LOCAL in the suggested state. The
+    // FileHandler ledger is the financial system of record — no external
+    // reserve mutation happens until a licensed adjuster approves through
+    // approveReserves (PATCH /claims/:id/reserves). The lifecycle is:
+    //   suggested (ai_analysis + this event) → pending adjuster review →
+    //   approved (reserves row, reserves_approved event, FileHandler write).
+    if (analysis.suggestedMedicalReserve != null) {
+      const { error: evErr } = await supabase.from('claim_events').insert({
+        claim_id:  claimId,
+        type:      'reserves_suggested',
+        timestamp: new Date().toISOString(),
+        data: {
+          source:    'AI_ENGINE',
+          status:    'suggested_pending_adjuster_approval',
+          medical:   analysis.suggestedMedicalReserve,
+          indemnity: analysis.suggestedIndemnityReserve,
+          expense:   analysis.suggestedExpenseReserve,
+        },
+      });
+      if (evErr) logger.error({ msg: '_runAnalysis: reserves_suggested event insert failed', claimId, err: evErr.message });
     }
 
     logger.info({ msg: '_runAnalysis: complete', claimId, compensability: analysis.compensability });
