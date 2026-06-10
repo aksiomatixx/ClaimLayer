@@ -250,13 +250,24 @@ router.post(
   '/:id/settlement-package',
   requireAuth,
   requireRole(['admin']),
-  [param('id').notEmpty(), body('kind').isIn(['cnr', 'stip'])],
+  [
+    param('id').notEmpty(),
+    body('kind').isIn(['cnr', 'stip']),
+    body('msa_document_id').optional().isString().isLength({ min: 1, max: 120 })
+      .withMessage('msa_document_id must be the id of the filed MSA document'),
+    body('disputes').optional().isArray().withMessage('disputes must be an array'),
+    body('disputes.*').optional().isIn(['future_medical', 'earnings', 'body_parts'])
+      .withMessage('disputes entries must be future_medical, earnings, or body_parts'),
+  ],
   validate,
   async (req, res) => {
     try {
       const settlementDocs = require('../services/settlementDocumentService');
       const result = req.body.kind === 'cnr'
-        ? await settlementDocs.generateCnRPackage(req.params.id, { msa_included: !!req.body.msa_included, disputes: req.body.disputes })
+        ? await settlementDocs.generateCnRPackage(req.params.id, {
+            msa_document_id: req.body.msa_document_id,
+            disputes: req.body.disputes,
+          })
         : await settlementDocs.generateStipPackage(req.params.id);
       res.status(201).json(result);
     } catch (err) {
