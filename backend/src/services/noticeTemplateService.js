@@ -321,13 +321,24 @@ async function generateNotice(noticeType, claimId, ctx = {}, opts = {}) {
     status: 'generated',
     method: null,
     delivery_attempts: 0,
+    // Aftermath idempotency: rows generated for a diary decision carry
+    // the source diary so a crashed-and-retried completion never
+    // generates the same notice twice (unique per
+    // source_diary_id/type/audience/language in the schema).
+    source_diary_id: opts.source_diary_id || null,
     created_at: now,
     updated_at: now,
   };
+  const _stampKey = (row) => ({
+    ...row,
+    idempotency_key: opts.source_diary_id
+      ? `not:${opts.source_diary_id}:${noticeType}:${row.audience}:${row.language}`
+      : null,
+  });
 
   if (template.audience === 'worker') {
-    rows.push({ ...baseRow, id: _nid(), audience: 'worker', language: 'en',
-      recipient: { name: workerName, address: emp.address || null } });
+    rows.push(_stampKey({ ...baseRow, id: _nid(), audience: 'worker', language: 'en',
+      recipient: { name: workerName, address: emp.address || null } }));
 
     // §9812(g): Spanish version required for worker-facing notices. We do
     // NOT synthesize translations — the row is created blocked, mirroring
@@ -339,22 +350,22 @@ async function generateNotice(noticeType, claimId, ctx = {}, opts = {}) {
         msg: 'Spanish notice required (§9812(g)) but no authoritative translation is committed — tracking row created blocked',
         noticeType, claimId,
       });
-      rows.push({ ...baseRow, id: _nid(), audience: 'worker', language: 'es',
+      rows.push(_stampKey({ ...baseRow, id: _nid(), audience: 'worker', language: 'es',
         document_id: null, status: 'blocked_pending_translation',
-        recipient: { name: workerName, address: emp.address || null } });
+        recipient: { name: workerName, address: emp.address || null } }));
     }
 
     if (represented) {
-      rows.push({ ...baseRow, id: _nid(), audience: 'attorney', language: 'en',
+      rows.push(_stampKey({ ...baseRow, id: _nid(), audience: 'attorney', language: 'en',
         recipient: {
           name: rawClaim?.attorney_name || 'Attorney of record',
           firm: rawClaim?.attorney_firm || null,
           email: rawClaim?.attorney_email || null,
-        } });
+        } }));
     }
   } else {
-    rows.push({ ...baseRow, id: _nid(), audience: 'provider', language: 'en',
-      recipient: ctx.provider || { name: ctx.provider_name || 'Treating provider' } });
+    rows.push(_stampKey({ ...baseRow, id: _nid(), audience: 'provider', language: 'en',
+      recipient: ctx.provider || { name: ctx.provider_name || 'Treating provider' } }));
   }
 
   for (const row of rows) {
