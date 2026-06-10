@@ -582,20 +582,9 @@ function _addCalendarDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
-/**
- * Represented check. Duplicates the 4-field OR-chain used by cnrService
- * and pdService. M17B will consolidate attorney_represented into a single
- * claim column and replace all three sites with a shared helper.
- */
-function _isRepresented(claim) {
-  if (!claim) return false;
-  return !!(
-    claim.attorney_represented ||
-    claim.attorneyName ||
-    claim.attorney_name ||
-    claim.representedBy
-  );
-}
+// Represented check — shared helper (M17B). Data-level consolidation onto a
+// single attorney_represented column is still pending.
+const _isRepresented = require('../utils/representation').isRepresented;
 
 /**
  * Resolve the retro-advance cap context for a claim.

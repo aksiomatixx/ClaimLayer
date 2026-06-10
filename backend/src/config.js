@@ -26,8 +26,9 @@ const config = {
 
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY,
-    // Always pin the exact model string — never use a bare alias
-    model: 'claude-sonnet-4-20250514',
+    // Pin the exact model ID. claude-sonnet-4-6 is the complete current ID
+    // (no date-suffixed variant exists for this generation).
+    model: 'claude-sonnet-4-6',
   },
 
   supabase: {
@@ -59,9 +60,9 @@ const config = {
   },
 
   adjuster: {
-    name:  process.env.ADJUSTER_NAME  || 'Akash Kumar',
-    phone: process.env.ADJUSTER_PHONE || '(800) XXX-XXXX',
-    email: process.env.ADJUSTER_EMAIL || 'akash.kumar@homecaretpa.com',
+    name:  process.env.ADJUSTER_NAME  || 'Demo Adjuster',
+    phone: process.env.ADJUSTER_PHONE || '(800) 555-0100',
+    email: process.env.ADJUSTER_EMAIL || 'adjuster@claimlayer.example',
   },
 
   magicLink: {

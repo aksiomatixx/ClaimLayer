@@ -8,7 +8,7 @@
 
 A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.
 
-`911 tests · 52 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`969 tests · 58 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -49,7 +49,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-911 automated tests across 52 suites, covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold.
+969 automated tests across 58 suites: 911 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 58 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
 
 ## Tech stack
 
@@ -65,9 +65,25 @@ A reference implementation and active project — not a live system processing r
 
 ## Try the demo
 
+### Prerequisites
+
+The demo runs against a real PostgreSQL database via Supabase — there is no in-memory fallback, because the audit trail and row-level security are part of what's being demonstrated.
+
+1. **Node.js 20+** (CI runs on 24).
+2. **A Supabase project** — either of:
+   - **Local (recommended):** install the [Supabase CLI](https://supabase.com/docs/guides/cli) and Docker, then run `supabase start` from the repo root. The repo ships a `supabase/config.toml`, so this spins up a full local stack and applies every migration in `supabase/migrations/` automatically. The command prints the `API URL`, `anon key`, and `service_role key` to put in `backend/.env`.
+   - **Hosted:** a free-tier project at [supabase.com](https://supabase.com); apply the migrations in `supabase/migrations/` in filename order (SQL editor, `psql`, or `supabase db push`).
+3. **Environment** — copy `backend/.env.example` to `backend/.env` and fill in at minimum:
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
+   - `JWT_SECRET` (any random string for local use)
+   - `ANTHROPIC_API_KEY` — optional; without it the app runs but agent analyses are unavailable
+   - ADP / FileHandler / SendGrid / Twilio / Lob keys are **not** required for the demo
+
+### Run it
+
 ```bash
 npm install
-npm run dev:demo      # seeds 8 synthetic claims and starts the app
+npm run dev:demo      # wipes demo-flagged rows, seeds 8 synthetic claims, starts backend (:3001) + frontend (:5173)
 ```
 
 Then open the `/architecture` and `/agents` views to see the agent registry, guardrail catalog, and live decision audit trail.

@@ -1,7 +1,7 @@
 {
-  "name": "homecare-tpa-backend",
+  "name": "claimlayer-backend",
   "version": "1.0.0",
-  "description": "HomeCare TPA — California WC claims administration backend",
+  "description": "ClaimLayer — California WC claims administration backend",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -9,14 +9,17 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.0",
     "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.103.0",
     "axios": "^1.7.2",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^8.5.2",
     "express-validator": "^7.1.0",
     "form-data": "^4.0.0",
+    "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "openai": "^6.34.0",

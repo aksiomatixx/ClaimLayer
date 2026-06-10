@@ -1,10 +1,10 @@
 {
-  "name": "frontend",
+  "name": "claimlayer-frontend",
   "version": "1.0.0",
-  "description": "",
+  "description": "ClaimLayer frontend — React/Vite claims workspace",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
@@ -17,5 +17,11 @@
     "react-dom": "^19.2.5",
     "react-i18next": "^17.0.2",
     "vite": "^8.0.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.8"
   }
 }

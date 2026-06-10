@@ -2,8 +2,11 @@
 
 require('dotenv').config();
 
+const crypto       = require('crypto');
 const express      = require('express');
 const cookieParser = require('cookie-parser');
+const helmet       = require('helmet');
+const rateLimit    = require('express-rate-limit');
 const config       = require('./config');
 const logger       = require('./logger');
 const { auditLog } = require('./middleware/audit');
@@ -34,9 +37,37 @@ const {
 const app = express();
 
 // ── Global middleware ────────────────────────────────────────────────────────
+
+// Request ID — honored from a trusted proxy header if present, otherwise
+// generated. Threaded through audit logs and error responses so any log
+// line can be correlated to one request.
+app.use((req, res, next) => {
+  req.id = req.get('x-request-id') || crypto.randomUUID();
+  res.set('x-request-id', req.id);
+  next();
+});
+
+app.use(helmet());
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(auditLog);
+
+// ── Rate limiting (disabled under test — supertest shares one IP) ────────────
+if (config.nodeEnv !== 'test') {
+  app.use('/api/', rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 1000,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }));
+  // Tighter bound on credential endpoints (login, magic links)
+  app.use('/api/v1/auth', rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 50,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }));
+}
 
 // ── Health check (unauthenticated) ───────────────────────────────────────────
 app.get('/health', (_req, res) =>
@@ -85,8 +116,8 @@ app.use((req, res) =>
 // ── Global error handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
-  logger.error({ msg: 'Unhandled error', err: err.message, stack: err.stack });
-  res.status(500).json({ error: 'Internal server error' });
+  logger.error({ msg: 'Unhandled error', requestId: req.id, err: err.message, stack: err.stack });
+  res.status(500).json({ error: 'Internal server error', requestId: req.id });
 });
 
 // ── Start ────────────────────────────────────────────────────────────────────

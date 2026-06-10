@@ -21,6 +21,7 @@ function auditLog(req, res, next) {
 
     logger.info({
       type:      'api_request',
+      requestId: req.id || null,
       method:    req.method,
       path:      req.path,
       status:    res.statusCode,
