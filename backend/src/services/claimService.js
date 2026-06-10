@@ -122,6 +122,18 @@ async function createClaim(froiData, employerId) {
 
   logger.info({ msg: 'createClaim: start', claimNumber, employerId });
 
+  // ── Step 0: Resolve the policy in force at DOI (Carrier & Policy Modeling).
+  // Non-fatal: claims without a resolvable policy fall back to employer-row
+  // insurer data in the WCIS payload, exactly as before this milestone.
+  let policyId = null;
+  try {
+    const policyService = require('./policyService');
+    const policy = await policyService.resolvePolicy(employerId, froiData.dateOfInjury);
+    if (policy) policyId = policy.id;
+  } catch (e) {
+    logger.warn({ msg: 'createClaim: policy resolution failed — falling back to employer insurer data', err: e.message });
+  }
+
   // ── Step 1: Pull ADP data ──────────────────────────────────────────────────
   let employee;
   try {
@@ -183,6 +195,7 @@ async function createClaim(froiData, employerId) {
     td_rate:          employee.tdRate,
     weeks_calculated: employee.weeksCalculated,
     date_of_injury:   froiData.dateOfInjury,
+    policy_id:        policyId,
     body_part:        froiData.bodyPart,
     injury_type:      froiData.injuryType,
     injury_description: froiData.injuryDescription,

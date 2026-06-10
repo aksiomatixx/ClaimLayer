@@ -240,7 +240,31 @@ async function wipeDemo() {
  * Seed all 8 demo claims. Idempotent: runs wipeDemo first.
  * Returns { count, ids, employers }.
  */
+async function _seedCarriersAndPolicies() {
+  // One carried employer (BrightCare via Pacific Compass) and one
+  // self-insured (Westside). DOI-windowed so resolvePolicy() exercises
+  // the date-interval logic on the demo book.
+  await supabase.from('insurers').insert({
+    id: 'ins_demo_pacific', fein: '954000001', name: 'Pacific Compass Insurance Co.',
+    naic_code: '12345', active: true,
+    created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
+  });
+  await supabase.from('policies').insert({
+    id: 'pol_demo_brightcare_2026', employer_id: EMPLOYER_BRIGHTCARE.id,
+    insurer_id: 'ins_demo_pacific', policy_number: 'WC-2026-88421',
+    effective_date: '2026-01-01', expiration_date: '2026-12-31', self_insured: false,
+    created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
+  });
+  await supabase.from('policies').insert({
+    id: 'pol_demo_westside_2026', employer_id: EMPLOYER_WESTSIDE.id,
+    insurer_id: null, policy_number: 'SI-CERT-04417',
+    effective_date: '2026-01-01', expiration_date: null, self_insured: true,
+    created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
+  });
+}
+
 async function seedDemo() {
+  await _seedCarriersAndPolicies();
   await wipeDemo();
 
   // Upsert employers so the FK is satisfied. Both rows are safe to
