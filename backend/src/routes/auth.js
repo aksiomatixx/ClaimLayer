@@ -53,21 +53,39 @@ router.post(
       return res.status(401).json({ error: 'invalid_token', message: 'This link is invalid or has expired.' });
     }
 
+    // 2. Token purpose: ONLY magic-link tokens validate here. A session
+    // or admin JWT replayed into this endpoint must never mint a new
+    // employee session.
+    if (payload.purpose !== 'magic_link') {
+      return res.status(401).json({ error: 'invalid_token', message: 'This link is invalid or has expired.' });
+    }
+
     if (!payload.claimId) {
       return res.status(401).json({ error: 'invalid_token', message: 'Token is missing required claim context.' });
     }
 
-    // 2. Check single-use (jti required for production; optional in dev)
-    if (payload.jti) {
-      const tokenRecord = await db.magicLinkTokens.findByJti(payload.jti);
-      if (!tokenRecord) {
-        return res.status(401).json({ error: 'invalid_token', message: 'This link is no longer valid.' });
-      }
-      if (tokenRecord.used_at) {
-        return res.status(410).json({ error: 'link_already_used', message: 'This link has already been used. Please contact your employer for a new link.' });
-      }
-      // Mark used atomically
-      await db.magicLinkTokens.markUsed(payload.jti);
+    // 3. Single use is enforced against PERSISTENT storage — jti is
+    // required, the row must exist, bind to the same claim + employee,
+    // be unexpired, and flip used_at atomically (two concurrent
+    // validations cannot both win).
+    if (!payload.jti) {
+      return res.status(401).json({ error: 'invalid_token', message: 'This link is invalid or has expired.' });
+    }
+    const tokenRecord = await db.magicLinkTokens.findByJti(payload.jti);
+    if (!tokenRecord) {
+      return res.status(401).json({ error: 'invalid_token', message: 'This link is no longer valid.' });
+    }
+    if (tokenRecord.claim_id !== payload.claimId ||
+        tokenRecord.adp_employee_id !== payload.adpEmployeeId) {
+      logger.warn({ msg: 'magic-link: token/record binding mismatch', jti: payload.jti });
+      return res.status(401).json({ error: 'invalid_token', message: 'This link is no longer valid.' });
+    }
+    if (tokenRecord.expires_at && new Date(tokenRecord.expires_at).getTime() <= Date.now()) {
+      return res.status(410).json({ error: 'link_expired', message: 'This link has expired. Please contact your employer for a new link.' });
+    }
+    const wonSingleUse = await db.magicLinkTokens.markUsedAtomic(payload.jti);
+    if (!wonSingleUse) {
+      return res.status(410).json({ error: 'link_already_used', message: 'This link has already been used. Please contact your employer for a new link.' });
     }
 
     // 3. Pull employee from ADP (or use cached record)
@@ -102,9 +120,11 @@ router.post(
       };
     }
 
-    // 6. Issue a session JWT for the employee (valid for 24h from link validation)
+    // 6. Issue a session JWT for the employee (valid for 24h from link
+    // validation). purpose 'employee_session' — cannot be replayed into
+    // this endpoint to mint further sessions.
     const sessionToken = jwt.sign(
-      { sub: payload.adpEmployeeId, role: 'employee', claimId: payload.claimId, employerId: claim.employerId },
+      { sub: payload.adpEmployeeId, role: 'employee', purpose: 'employee_session', claimId: payload.claimId, employerId: claim.employerId },
       config.jwtSecret,
       { expiresIn: '24h' }
     );

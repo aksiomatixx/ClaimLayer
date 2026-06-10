@@ -14,8 +14,15 @@ const db       = require('../services/db');
 const filehandler = require('../services/filehandler');
 const logger   = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireClaimScope } = require('../middleware/claimAccess');
 
 const router = express.Router();
+
+// For routes addressed by document id: resolve the owning claim first.
+const scopeByDocument = requireClaimScope(async (req) => {
+  const doc = await db.documents.findById(req.params.id);
+  return doc ? doc.claim_id : null;
+});
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg', 'image/png', 'image/heic', 'image/heif',
@@ -38,6 +45,7 @@ router.post(
   '/upload-url',
   requireAuth,
   requireRole(['employee', 'admin']),
+  requireClaimScope('body.claim_id'),
   [
     body('claim_id').notEmpty().withMessage('claim_id is required'),
     body('file_name').notEmpty().withMessage('file_name is required'),
@@ -55,7 +63,7 @@ router.post(
       const { claim_id, file_name, mime_type, file_size_bytes } = req.body;
 
       // Enforce 5-file limit
-      const existing = db.documents.findByClaim(claim_id).filter(d =>
+      const existing = (await db.documents.findByClaim(claim_id)).filter(d =>
         ['photo', 'video'].includes(d.doc_type)
       );
       if (existing.length >= MAX_FILES_PER_CLAIM) {
@@ -66,7 +74,7 @@ router.post(
       const docType     = mime_type.startsWith('video') ? 'video' : 'photo';
 
       // Create document record before upload
-      const doc = db.documents.create({
+      const doc = await db.documents.create({
         claim_id,
         doc_type:   docType,
         source:     'employee_upload',
@@ -96,11 +104,12 @@ router.post(
   '/:id/confirm-upload',
   requireAuth,
   requireRole(['employee', 'admin']),
+  scopeByDocument,
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
     try {
-      const doc = db.documents.findById(req.params.id);
+      const doc = await db.documents.findById(req.params.id);
       if (!doc) return res.status(404).json({ error: 'Document not found' });
 
       // Async: push to FileHandler
@@ -114,14 +123,14 @@ router.post(
             doc.doc_type.toUpperCase(),
             `${doc.doc_type} — ${doc.file_name || doc.storage_path}`
           );
-          db.documents.update(doc.id, { filehandler_pushed: true });
+          await db.documents.update(doc.id, { filehandler_pushed: true });
           logger.info({ msg: 'documents: FH push complete', docId: doc.id });
         } catch (err) {
           logger.error({ msg: 'documents: FH push failed', docId: doc.id, err: err.message });
         }
       });
 
-      db.documents.update(doc.id, { upload_confirmed_at: new Date().toISOString() });
+      await db.documents.update(doc.id, { upload_confirmed_at: new Date().toISOString() });
       res.json({ status: 'queued', document_id: doc.id });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -133,11 +142,12 @@ router.post(
 router.get(
   '/:id',
   requireAuth,
+  scopeByDocument,
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
     try {
-      const doc = db.documents.findById(req.params.id);
+      const doc = await db.documents.findById(req.params.id);
       if (!doc) return res.status(404).json({ error: 'Document not found' });
       // Strip large binary fields from the response
       const { pdf_buffer_b64, ...safeDoc } = doc;

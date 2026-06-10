@@ -39,6 +39,45 @@ router.post(
   }
 );
 
+// ── POST /api/v1/admin/workers/notice-delivery/run ───────────────────────────
+// Authenticated internal trigger for the notice-delivery worker — the
+// same entry point the production scheduler calls. Concurrency-safe:
+// rows are claimed with conditional updates inside the service.
+router.post(
+  '/workers/notice-delivery/run',
+  requireAuth,
+  requireRole(['admin']),
+  async (req, res) => {
+    try {
+      const worker = require('../cron/noticeDeliveryWorker');
+      const result = await worker.run(`admin-trigger_${req.user?.email || 'unknown'}`);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      logger.error({ msg: 'admin/workers/notice-delivery: run failed', err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/admin/workers/outbox/run ────────────────────────────────────
+// Authenticated internal trigger for the integration-outbox dispatcher
+// (FileHandler write-back retries).
+router.post(
+  '/workers/outbox/run',
+  requireAuth,
+  requireRole(['admin']),
+  async (req, res) => {
+    try {
+      const worker = require('../cron/outboxWorker');
+      const result = await worker.run(`admin-trigger_${req.user?.email || 'unknown'}`);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      logger.error({ msg: 'admin/workers/outbox: run failed', err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 // ── GET /api/v1/admin/demo-status ────────────────────────────────────────────
 // Lightweight check used by the frontend banner. Returns the count of
 // demo-flagged claims; the banner shows when count > 0.

@@ -87,7 +87,7 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
   };
   const genPackage=async(kind)=>{
     try{
-      const r=await generateSettlementPackage(claimId,{kind,msa_included:false});
+      const r=await generateSettlementPackage(claimId,{kind});
       refresh();notify(`${kind==='cnr'?'C&R':'Stip'} package v${r.document.version} generated (DRAFT)`);
     }catch(e){notify(e.message,'error');}
   };

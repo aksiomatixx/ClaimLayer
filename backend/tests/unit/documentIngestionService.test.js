@@ -201,11 +201,24 @@ describe('human triage resolution', () => {
     expect(result.diary.diary_type).toBe('TD_PAYMENT_REVIEW');
   });
 
-  it('rejecting marks the document rejected with no diary', async () => {
+  it('rejecting requires a documented reason and records actor + audit', async () => {
     const doc = await triagedDoc();
-    const result = await ingestion.resolveTriage(doc.id, { action: 'reject' }, 'adj@test');
+    await expect(ingestion.resolveTriage(doc.id, { action: 'reject' }, 'adj@test'))
+      .rejects.toThrow('rejection reason is required');
+
+    const result = await ingestion.resolveTriage(
+      doc.id, { action: 'reject', reason: 'spam fax, not claim-related' }, 'adj@test');
     expect(result.document.status).toBe('rejected');
+    expect(result.document.rejection_reason).toBe('spam fax, not claim-related');
+    expect(result.document.resolved_by).toBe('adj@test');
+    expect(result.document.resolved_at).toBeTruthy();
     expect(result.diary).toBeNull();
+
+    const { data: audit } = await supabase.from('audit_log').select('*');
+    const entry = audit.find(a => a.action === 'document_rejected' && a.resource_id === doc.id);
+    expect(entry).toBeTruthy();
+    expect(entry.actor).toBe('adj@test');
+    expect(entry.description).toContain('spam fax');
   });
 
   it('validates claim, category, and pending state', async () => {
@@ -214,8 +227,8 @@ describe('human triage resolution', () => {
       .rejects.toThrow('Claim not found');
     await expect(ingestion.resolveTriage(doc.id, { action: 'file', claim_id: CLAIM, category: 'bogus' }, 'a'))
       .rejects.toThrow('controlled list');
-    await ingestion.resolveTriage(doc.id, { action: 'reject' }, 'a');
-    await expect(ingestion.resolveTriage(doc.id, { action: 'reject' }, 'a'))
+    await ingestion.resolveTriage(doc.id, { action: 'reject', reason: 'unreadable' }, 'a');
+    await expect(ingestion.resolveTriage(doc.id, { action: 'reject', reason: 'again' }, 'a'))
       .rejects.toThrow('not pending triage');
   });
 
@@ -224,7 +237,7 @@ describe('human triage resolution', () => {
     await triagedDoc();
     const list = await ingestion.listTriage();
     expect(list).toHaveLength(2);
-    await ingestion.resolveTriage(list[0].id, { action: 'reject' }, 'a');
+    await ingestion.resolveTriage(list[0].id, { action: 'reject', reason: 'duplicate' }, 'a');
     expect(await ingestion.listTriage()).toHaveLength(1);
   });
 });

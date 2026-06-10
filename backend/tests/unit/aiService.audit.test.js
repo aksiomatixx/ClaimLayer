@@ -63,15 +63,17 @@ describe('analyzeCompensability', () => {
     expect(rows[0].guardrail_actions).toEqual([]);
   });
 
-  it('still returns the AI result when logDecision insert fails', async () => {
+  it('FAILS the analysis when the required audit row cannot be persisted (regulated decision)', async () => {
     mockClaudeResponse({
       compensability: 'Likely Compensable', compensabilityScore: 88, priority: 'Medium',
       suggestedMedicalReserve: 25000, suggestedIndemnityReserve: 18000, suggestedExpenseReserve: 4500,
     });
     const spy = jest.spyOn(aid, 'logDecision').mockRejectedValue(new Error('boom'));
-    const result = await aiService.analyzeCompensability(baseClaim);
-    expect(result.compensability).toBe('Likely Compensable');
-    spy.mockRestore();
+    try {
+      await expect(aiService.analyzeCompensability(baseClaim)).rejects.toThrow('boom');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

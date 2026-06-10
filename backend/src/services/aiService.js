@@ -128,22 +128,21 @@ async function analyzeCompensability(claim) {
     throw new Error(`Claude compensability response missing fields: ${missing.join(', ')}`);
   }
 
-  // Audit log — best-effort; never breaks the AI return
-  try {
-    const aid = require('./aiDecisionsService');
-    await aid.logDecision({
-      claim_id:       claim.id || null,
-      decision_type:  'compensability',
-      prompt_name:    'compensability_analysis',
-      model:          config.anthropic.model,
-      input_snapshot: inputSnapshot,
-      output_parsed:  result,
-      output_raw:     raw,
-      ...meta,
-      confidence:     typeof result.compensabilityScore === 'number' ? result.compensabilityScore : null,
-      guardrail_actions: [],
-    });
-  } catch (e) { logger.warn({ msg: 'analyzeCompensability: audit log failed', err: e.message }); }
+  // Regulated decision: audit persistence is required — a failure fails
+  // the analysis rather than continuing unaudited.
+  const aid = require('./aiDecisionsService');
+  await aid.logDecision({
+    claim_id:       claim.id || null,
+    decision_type:  'compensability',
+    prompt_name:    'compensability_analysis',
+    model:          config.anthropic.model,
+    input_snapshot: inputSnapshot,
+    output_parsed:  result,
+    output_raw:     raw,
+    ...meta,
+    confidence:     typeof result.compensabilityScore === 'number' ? result.compensabilityScore : null,
+    guardrail_actions: [],
+  }, { required: true });
 
   return result;
 }
@@ -196,21 +195,21 @@ async function evaluateRFA(rfa, claim) {
     guardrails.push({ rule: 'no_auto_deny', triggered: false });
   }
 
-  try {
-    const aid = require('./aiDecisionsService');
-    await aid.logDecision({
-      claim_id:       claim.id || null,
-      decision_type:  'rfa_mtus',
-      prompt_name:    'rfa_mtus_evaluation',
-      model:          config.anthropic.model,
-      input_snapshot: inputSnapshot,
-      output_parsed:  result,
-      output_raw:     raw,
-      ...meta,
-      confidence:        typeof result.confidence === 'number' ? result.confidence : null,
-      guardrail_actions: guardrails,
-    });
-  } catch (e) { logger.warn({ msg: 'evaluateRFA: audit log failed', err: e.message }); }
+  // Regulated decision: audit persistence is required — a failure fails
+  // the evaluation rather than continuing unaudited.
+  const aid = require('./aiDecisionsService');
+  await aid.logDecision({
+    claim_id:       claim.id || null,
+    decision_type:  'rfa_mtus',
+    prompt_name:    'rfa_mtus_evaluation',
+    model:          config.anthropic.model,
+    input_snapshot: inputSnapshot,
+    output_parsed:  result,
+    output_raw:     raw,
+    ...meta,
+    confidence:        typeof result.confidence === 'number' ? result.confidence : null,
+    guardrail_actions: guardrails,
+  }, { required: true });
 
   return result;
 }
@@ -323,21 +322,22 @@ async function classifyDocument({ text, filename, source, claimIdHint }) {
   }
   result.confidence = Math.max(0, Math.min(100, Number(result.confidence) || 0));
 
-  try {
-    const aid = require('./aiDecisionsService');
-    await aid.logDecision({
-      claim_id:       claimIdHint || null,
-      decision_type:  'doc_classification',
-      prompt_name:    'document_classification',
-      model:          config.anthropic.model,
-      input_snapshot: { filename: filename || null, source: source || null, text_chars: String(text || '').length },
-      output_parsed:  result,
-      output_raw:     raw,
-      ...meta,
-      confidence:     result.confidence,
-      guardrail_actions: guardrails,
-    });
-  } catch (e) { logger.warn({ msg: 'classifyDocument: audit log failed', err: e.message }); }
+  // Regulated decision: the audit row is part of the contract. A
+  // persistence failure fails the classification — never a silent
+  // continue with an unaudited model decision.
+  const aid = require('./aiDecisionsService');
+  await aid.logDecision({
+    claim_id:       claimIdHint || null,
+    decision_type:  'doc_classification',
+    prompt_name:    'document_classification',
+    model:          config.anthropic.model,
+    input_snapshot: { filename: filename || null, source: source || null, text_chars: String(text || '').length },
+    output_parsed:  result,
+    output_raw:     raw,
+    ...meta,
+    confidence:     result.confidence,
+    guardrail_actions: guardrails,
+  }, { required: true });
 
   return { ...result, guardrails };
 }

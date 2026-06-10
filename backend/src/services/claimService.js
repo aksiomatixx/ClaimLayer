@@ -145,7 +145,7 @@ async function createClaim(froiData, employerId) {
   }
 
   // ── Step 2: Upsert the employee record ─────────────────────────────────────
-  const { data: empRow } = await supabase
+  const { data: empRow, error: empErr } = await supabase
     .from('employees')
     .upsert(
       {
@@ -170,6 +170,9 @@ async function createClaim(froiData, employerId) {
     )
     .select()
     .single();
+  if (empErr) {
+    throw new Error(`createClaim: employee upsert failed — ${empErr.message}`);
+  }
 
   // Build the employee snapshot stored inside the claim row (JSONB)
   const employeeSnapshot = {
@@ -212,7 +215,14 @@ async function createClaim(froiData, employerId) {
     updated_at:           now,
   };
 
-  await supabase.from('claims').insert(claimRow);
+  // The local claim record must be durably stored BEFORE any external
+  // side effect (FileHandler create, WCIS enqueue, notices) fires — an
+  // unchecked insert here could create a ledger claim with no local
+  // system-of-record row behind it.
+  const { error: claimInsErr } = await supabase.from('claims').insert(claimRow);
+  if (claimInsErr) {
+    throw new Error(`createClaim: claim insert failed — ${claimInsErr.message}`);
+  }
 
   // ── Step 4: Insert initial events ──────────────────────────────────────────
   const initEvents = [
@@ -229,7 +239,13 @@ async function createClaim(froiData, employerId) {
       data:      { aww: employee.aww, tdRate: employee.tdRate, weeks: employee.weeksCalculated },
     },
   ];
-  await supabase.from('claim_events').insert(initEvents);
+  const { error: evInsErr } = await supabase.from('claim_events').insert(initEvents);
+  if (evInsErr) {
+    // Compensate: no external side effect has fired yet, so remove the
+    // half-created claim rather than leaving it without its event log.
+    await supabase.from('claims').delete().eq('id', claimId);
+    throw new Error(`createClaim: initial events insert failed — ${evInsErr.message}`);
+  }
 
   // ── Step 5: FileHandler sync ────────────────────────────────────────────────
   let filehandlerId = null;
@@ -357,6 +373,11 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
       diary_type:  'COMPENSABILITY_DECISION_DUE',
       due_date:    new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
                      .toISOString().split('T')[0],
+      // The immutable statutory ceiling: delays may reschedule the
+      // review but never beyond this date (LC §5402 presumption).
+      statutory_deadline: new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
+                     .toISOString().split('T')[0],
+      no_snooze:   true,
       assigned_to: config.adjuster.email,
       priority:    'CRITICAL',
       notes:       `LC §5402 — claim presumed compensable by operation of law if not accepted or denied within 90 calendar days. DOI: ${doi}. Missing this deadline is a critical compliance failure.`,
@@ -432,36 +453,26 @@ async function _runAnalysis(claimId) {
       data:      analysis,
     });
 
-    // Push AI-suggested reserves to FileHandler (pending adjuster approval)
-    if (claim.filehandlerId && analysis.suggestedMedicalReserve != null) {
-      try {
-        await filehandler.setReserves(
-          claim.filehandlerId,
-          {
-            medical:   analysis.suggestedMedicalReserve,
-            indemnity: analysis.suggestedIndemnityReserve,
-            expense:   analysis.suggestedExpenseReserve,
-            reason:    `AI initial analysis — ${claim.injuryType} (score: ${analysis.compensabilityScore})`,
-          },
-          'AI_ENGINE',
-          null
-        );
-
-        await supabase.from('claim_events').insert({
-          claim_id:  claimId,
-          type:      'reserves_set',
-          timestamp: new Date().toISOString(),
-          data: {
-            source:    'AI_ENGINE',
-            medical:   analysis.suggestedMedicalReserve,
-            indemnity: analysis.suggestedIndemnityReserve,
-            expense:   analysis.suggestedExpenseReserve,
-            status:    'pending_adjuster_approval',
-          },
-        });
-      } catch (err) {
-        logger.error({ msg: '_runAnalysis: reserve set failed', claimId, err: err.message });
-      }
+    // Reserve recommendations stay LOCAL in the suggested state. The
+    // FileHandler ledger is the financial system of record — no external
+    // reserve mutation happens until a licensed adjuster approves through
+    // approveReserves (PATCH /claims/:id/reserves). The lifecycle is:
+    //   suggested (ai_analysis + this event) → pending adjuster review →
+    //   approved (reserves row, reserves_approved event, FileHandler write).
+    if (analysis.suggestedMedicalReserve != null) {
+      const { error: evErr } = await supabase.from('claim_events').insert({
+        claim_id:  claimId,
+        type:      'reserves_suggested',
+        timestamp: new Date().toISOString(),
+        data: {
+          source:    'AI_ENGINE',
+          status:    'suggested_pending_adjuster_approval',
+          medical:   analysis.suggestedMedicalReserve,
+          indemnity: analysis.suggestedIndemnityReserve,
+          expense:   analysis.suggestedExpenseReserve,
+        },
+      });
+      if (evErr) logger.error({ msg: '_runAnalysis: reserves_suggested event insert failed', claimId, err: evErr.message });
     }
 
     logger.info({ msg: '_runAnalysis: complete', claimId, compensability: analysis.compensability });

@@ -44,11 +44,15 @@ async function getLossRun(employerId) {
 }
 
 function _toLossRunRow(row) {
-  // Compute total incurred from reserves (latest approved set wins)
+  // Compute total incurred from reserves (latest approved set wins).
+  // reserveBasis distinguishes adjuster-approved figures from the
+  // AI-suggested fallback so reports never present a suggestion as an
+  // approved reserve.
   const reserves = row.reserves || [];
   let totalMedical   = 0;
   let totalIndemnity = 0;
   let totalExpense   = 0;
+  let reserveBasis   = 'none';
 
   if (reserves.length > 0) {
     // Use the most recent reserve entry
@@ -58,11 +62,13 @@ function _toLossRunRow(row) {
     totalMedical   = parseFloat(latest.medical   || 0);
     totalIndemnity = parseFloat(latest.indemnity  || 0);
     totalExpense   = parseFloat(latest.expense    || 0);
+    reserveBasis   = 'adjuster_approved';
   } else if (row.ai_analysis) {
     // Fall back to AI-suggested reserves if no adjuster-approved reserves exist
     totalMedical   = row.ai_analysis.suggestedMedicalReserve   || 0;
     totalIndemnity = row.ai_analysis.suggestedIndemnityReserve || 0;
     totalExpense   = row.ai_analysis.suggestedExpenseReserve   || 0;
+    reserveBasis   = 'ai_suggested_pending_approval';
   }
 
   const totalIncurred = totalMedical + totalIndemnity + totalExpense;
@@ -88,6 +94,7 @@ function _toLossRunRow(row) {
     indemnity:      totalIndemnity,
     expense:        totalExpense,
     totalIncurred,
+    reserveBasis,
     tdWeeksPaid:    tdWeeks,
     filedAt:        row.filed_at     || row.created_at,
     isOpen:         !['closed', 'denied'].includes(row.status),

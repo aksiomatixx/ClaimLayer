@@ -44,10 +44,12 @@ function requireRole(roles) {
 
 // ── generateMagicToken ────────────────────────────────────────────────────────
 // Issues a 72-hour single-use JWT for the employee intake flow.
-// Payload should include: { claimId, employerId, adpEmployeeId }
+// Payload should include: { claimId, employerId, adpEmployeeId, jti }
+// purpose: 'magic_link' — the validate endpoint accepts ONLY this
+// purpose, so a session/admin token can never be replayed into it.
 function generateMagicToken(payload) {
   return jwt.sign(
-    { ...payload, role: 'employee' },
+    { ...payload, role: 'employee', purpose: 'magic_link' },
     config.jwtSecret,
     { expiresIn: '72h' }
   );

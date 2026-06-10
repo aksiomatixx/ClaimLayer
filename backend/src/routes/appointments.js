@@ -3,7 +3,9 @@
 const express              = require('express');
 const { body, param, validationResult } = require('express-validator');
 const appointmentService   = require('../services/appointmentService');
+const db                   = require('../services/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireClaimScope } = require('../middleware/claimAccess');
 
 const router = express.Router();
 
@@ -18,6 +20,7 @@ router.post(
   '/',
   requireAuth,
   requireRole(['employee', 'admin']),
+  requireClaimScope('body.claim_id'),
   [
     body('claim_id').notEmpty().withMessage('claim_id is required'),
     body('provider_id').notEmpty().withMessage('provider_id is required'),
@@ -52,6 +55,7 @@ router.post(
   '/:claimId/mpn-acknowledge',
   requireAuth,
   requireRole(['employee', 'admin']),
+  requireClaimScope('params.claimId'),
   [param('claimId').notEmpty()],
   validate,
   async (req, res) => {
@@ -73,6 +77,11 @@ router.patch(
   '/:id/confirm',
   requireAuth,
   requireRole(['employee', 'admin']),
+  // The claim hangs off the appointment — resolve it, then scope-check.
+  requireClaimScope(async (req) => {
+    const appt = await db.appointments.findById(req.params.id);
+    return appt ? appt.claim_id : null;
+  }),
   [
     param('id').notEmpty(),
     body('confirmation_number')
