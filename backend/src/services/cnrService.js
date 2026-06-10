@@ -29,6 +29,7 @@
  */
 
 const { supabase } = require('./supabase');
+const config = require('../config');
 const logger       = require('../logger');
 const { isRepresented } = require('../utils/representation');
 
@@ -103,10 +104,9 @@ async function _createDiary(claimId, diaryType, dueDate, priority, notes, opts =
     claim_id:   claimId,
     diary_type: diaryType,
     due_date:   dueDate,
-    // M17B: resolveAssignee() will route CRITICAL/license-gated diaries
     // (CNR_ADJUSTER_SIGN, CNR_PAYMENT_DUE, CNR_OFFER_DECISION) to the
     // licensed adjuster on the claim instead of the system inbox.
-    assigned_to: 'system@homecaretpa.com',
+    assigned_to: config.adjuster.email,
     priority,
     notes,
     status:      'open',
@@ -278,7 +278,6 @@ async function recordWorkerAcceptance(offerId) {
   await _closeDiary(offer.claim_id, 'CNR_WORKER_FOLLOWUP');
   await _closeDiary(offer.claim_id, 'CNR_ATTORNEY_TRANSMIT');
 
-  // M17B: reassign CNR_ADJUSTER_SIGN to the licensed adjuster on the claim.
   await _createDiary(
     offer.claim_id, 'CNR_ADJUSTER_SIGN',
     _addCalendarDays(now.split('T')[0], 3), 'HIGH',
@@ -391,7 +390,6 @@ async function recordOACRReceived(offerId, { oacrDate }) {
 
   await _closeDiary(offer.claim_id, 'CNR_OACR_FOLLOWUP');
 
-  // M17B: CNR_PAYMENT_DUE reassigns to licensed adjuster (LC §5814 exposure).
   await _createDiary(
     offer.claim_id, 'CNR_PAYMENT_DUE',
     paymentDueDate, 'CRITICAL',

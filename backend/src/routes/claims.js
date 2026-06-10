@@ -251,6 +251,46 @@ router.get(
   }
 );
 
+// ── POST /api/v1/claims/:id/representation — set/clear attorney (M17B) ───────
+router.post(
+  '/:id/representation',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), body('represented').isBoolean()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.setAttorneyRepresentation(
+        req.params.id,
+        { represented: req.body.represented, attorney: req.body.attorney },
+        req.user?.email
+      );
+      res.json({ claim });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/reopen — reopen a closed claim (M17B) ────────────
+router.post(
+  '/:id/reopen',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), body('reason').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.reopenClaim(req.params.id, req.body.reason, req.user?.email);
+      res.json({ claim });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
 // ── GET /api/v1/claims/:id/documents — ingested documents w/ AI summaries ────
 router.get(
   '/:id/documents',

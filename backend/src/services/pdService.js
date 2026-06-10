@@ -152,7 +152,7 @@ async function _writeAuditLog(action, resourceType, resourceId, description, new
 async function _createDiary(claimId, diaryType, dueDate, priority, notes, opts = {}) {
   const row = {
     claim_id: claimId, diary_type: diaryType, due_date: dueDate,
-    assigned_to: 'system@homecaretpa.com', priority, notes,
+    assigned_to: config.adjuster.email, priority, notes,
     status: 'open', no_snooze: opts.noSnooze || false,
     fh_diary_id: `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     created_at: new Date().toISOString(),

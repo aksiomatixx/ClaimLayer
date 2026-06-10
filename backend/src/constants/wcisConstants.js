@@ -132,11 +132,9 @@ const TRIGGER_EVENT_TO_MTC = {
   froi_data_changed: {
     mtc_family: 'FROI', mtc_code: '02',
     deadline_type: 'next_submission',
-    // Guide Section N pg 86 — FROI 02 "Change". Deferred: no
-    // claimService.updateClaimData function exists; FROI_DATA_CHANGE_FIELDS
-    // list below is used when the function is added.
-    wired: false,
-    deferral: 'claimService.updateClaimData does not exist.',
+    // Guide Section N pg 86 — FROI 02 "Change". Wired by M17B for the
+    // claim-reopen pathway (claimService.reopenClaim).
+    wired: true, // M17B remainder milestone
   },
   froi_incomplete_fill: {
     mtc_family: 'FROI', mtc_code: '02',
@@ -268,10 +266,7 @@ const TRIGGER_EVENT_TO_MTC = {
     deadline_type: 'business_days_15',
     // Guide Section N pg 87 — SROI 02 "Change" (representation
     // and other non-rate claim data changes).
-    wired: false,
-    deferral:
-      'Deferred to M17B — representation workflow not implemented ' +
-      'in production (no attorney columns in claims schema).',
+    wired: true, // M17B remainder milestone — claimService.setAttorneyRepresentation
   },
 };
 

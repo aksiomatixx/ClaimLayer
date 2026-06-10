@@ -62,14 +62,16 @@ describe('resolveMtc', () => {
       mtc_code: 'CO', deadline_type: 'calendar_days_60',
     });
   });
-  test('marks TD-family as not wired', () => {
-    expect(wcis.resolveMtc({ trigger_event: 'td_rate_changed' }).wired).toBe(false);
-    expect(wcis.resolveMtc({ trigger_event: 'td_first_payment' }).wired).toBe(false);
-    expect(wcis.resolveMtc({ trigger_event: 'td_suspended_rtw' }).wired).toBe(false);
-    expect(wcis.resolveMtc({ trigger_event: 'salary_continuation' }).wired).toBe(false);
+  test('marks TD-family as wired (tdService completion milestone)', () => {
+    expect(wcis.resolveMtc({ trigger_event: 'td_rate_changed' }).wired).toBe(true);
+    expect(wcis.resolveMtc({ trigger_event: 'td_first_payment' }).wired).toBe(true);
+    expect(wcis.resolveMtc({ trigger_event: 'td_suspended_rtw' }).wired).toBe(true);
+    expect(wcis.resolveMtc({ trigger_event: 'salary_continuation' }).wired).toBe(true);
+    expect(wcis.resolveMtc({ trigger_event: 'td_reinstated' }).mtc_code).toBe('RB');
   });
-  test('marks representation_changed as not wired', () => {
-    expect(wcis.resolveMtc({ trigger_event: 'representation_changed' }).wired).toBe(false);
+  test('marks representation_changed + froi_data_changed as wired (M17B)', () => {
+    expect(wcis.resolveMtc({ trigger_event: 'representation_changed' }).wired).toBe(true);
+    expect(wcis.resolveMtc({ trigger_event: 'froi_data_changed' }).wired).toBe(true);
   });
   test('throws on unknown trigger_event', () => {
     expect(() => wcis.resolveMtc({ trigger_event: 'not_a_real_event' })).toThrow(/unknown/);

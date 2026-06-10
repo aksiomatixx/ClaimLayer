@@ -24,6 +24,7 @@
  */
 
 const { supabase } = require('../services/supabase');
+const config = require('../config');
 const logger       = require('../logger');
 
 // ── Personas ──────────────────────────────────────────────────────────────────
@@ -772,7 +773,7 @@ function _buildDiaries(claimId, plan) {
     claim_id:    claimId,
     diary_type:  type,
     due_date:    inDays(dueOffset),
-    assigned_to: 'system@homecaretpa.com',
+    assigned_to: config.adjuster.email,
     priority,
     notes,
     status:      'open',

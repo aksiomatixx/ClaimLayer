@@ -91,7 +91,7 @@ async function createAppointment({ claimId, providerId, appointmentType, schedul
       await filehandler.createDiary(claim.filehandlerId, {
         type:       'NEXT_APPOINTMENT',
         dueDate:    scheduledDate,
-        assignedTo: 'system@homecaretpa.com',
+        assignedTo: config.adjuster.email,
         priority:   'HIGH',
         notes:      `Initial eval at ${provider.name} (${provider.phone}) — Appt ID: ${appointment.id}`,
       });
