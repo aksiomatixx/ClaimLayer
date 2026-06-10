@@ -2,6 +2,7 @@
 // UTILITIES (extracted verbatim from App.jsx)
 // ═══════════════════════════════════════════════════════════
 import { MPN_PROVIDERS } from './mockData.js';
+import { C } from './theme.js';
 
 export const fmt$=(n)=>n!=null?`$${Number(n).toLocaleString()}`:"—";
 
@@ -22,3 +23,16 @@ export function dayLabel(off){
   const d=new Date(); d.setDate(d.getDate()+off);
   return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 }
+
+// ── Link status derived from claim.events ──────────────────────────
+export function linkStatus(claim){
+  const evts=claim.events||[];
+  if(evts.some(e=>e.type==='intake_complete')) return {label:'Completed',color:C.green,bg:C.greenF};
+  if(evts.some(e=>e.type==='magic_link_validated')) return {label:'Opened',color:C.cyan,bg:C.tealF};
+  if(evts.some(e=>e.type==='magic_link_sent')) return {label:'Sent',color:C.amber,bg:C.amberF};
+  return {label:'Not Sent',color:C.muted,bg:'transparent'};
+}
+
+// ═══════════════════════════════════════════════════════════
+// EMPLOYER LOGIN
+// ═══════════════════════════════════════════════════════════

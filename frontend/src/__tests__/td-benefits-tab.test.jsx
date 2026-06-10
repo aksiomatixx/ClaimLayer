@@ -22,7 +22,7 @@ import {
   createTdPeriod,
   closeTdPeriod,
   reinstateTdPeriod,
-} from '../App.jsx';
+} from '../services/td.js';
 
 function jsonRes(body, ok = true, status = 200) {
   return {

@@ -52,7 +52,7 @@ const fetchPromptText = vi.fn(async (name) => ({
   text: 'You are a California workers compensation compensability analyst…',
 }));
 
-vi.mock('../App.jsx', () => ({
+vi.mock('../services/aiDecisions.js', () => ({
   fetchAiDecisionStats: (...a) => fetchAiDecisionStats(...a),
   fetchAiDecisions: (...a) => fetchAiDecisions(...a),
   fetchPromptText: (...a) => fetchPromptText(...a),

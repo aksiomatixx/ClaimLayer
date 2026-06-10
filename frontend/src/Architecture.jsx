@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchAiDecisionStats, fetchAiDecisions, fetchPromptText } from './App.jsx';
+import { fetchAiDecisionStats, fetchAiDecisions, fetchPromptText } from './services/aiDecisions.js';
 import sourcesJson from '../../docs/regulatory/sources.json';
 
 const C = {
