@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { approveReserves, fetchClaim, fetchDiaries, triggerAnalysis, updateClaimStatus, fetchClaimDocuments, fetchDecisionBrief, documentFileUrl, fetchAftermathPreview, completeDiaryAction, ingestClaimDocument, generateSettlementPackage } from '../services/claims.js';
+import { approveReserves, fetchClaim, fetchDiaries, triggerAnalysis, updateClaimStatus, fetchClaimDocuments, fetchDecisionBrief, documentFileUrl, fetchAftermathPreview, completeDiaryAction, declineDiaryAction, editDiaryAction, ingestClaimDocument, generateSettlementPackage } from '../services/claims.js';
 import { dismissMMIEvaluation, evaluateMMISignals, fetchMMIEvaluations, fetchPR4Solicitations, recordPR4Response, solicitPR4 } from '../services/mmi.js';
 import { calculatePD, createStipulation, fetchPDData, initiatePDAdvances, recordAdjusterSignature, recordEAMSFiled, recordPDAdvancePayment, recordWorkerSignature, sendStipToWorker, waivePDAdvance } from '../services/pd.js';
 import { approveSupplemental, dismissSupplemental, fetchPanelsForClaim, fetchSupplementalRequests, issuePanel, markReportReceived, recordStrikes, requestPanel, scheduleQmeAppointment } from '../services/qme.js';
@@ -41,6 +41,8 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
   const docById=Object.fromEntries((documents||[]).map(d=>[d.id,d]));
   const [confirming,setConfirming]=useState(null);   // {diaryId, preview}
   const [ingesting,setIngesting]=useState(false);
+  const [declineReason,setDeclineReason]=useState('');
+  const [editDue,setEditDue]=useState('');
   const [ingestText,setIngestText]=useState('');
   const refresh=()=>{['decision-brief','claim-diaries','claim','claim-documents'].forEach(k=>qc.invalidateQueries({queryKey:[k,claimId]}));qc.invalidateQueries({queryKey:['claims']});};
 
@@ -58,6 +60,20 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
       if(result.status_transition)bits.push(`status → ${result.status_transition}`);
       notify(`Action completed${bits.length?' — '+bits.join(' · '):''}`);
     }catch(e){notify(`Complete failed: ${e.message}`,'error');}
+  };
+  const runDecline=async(diaryId)=>{
+    try{
+      await declineDiaryAction(diaryId,declineReason);
+      setConfirming(null);setDeclineReason('');refresh();
+      notify('Action declined — reason documented');
+    }catch(e){notify(`Decline failed: ${e.message}`,'error');}
+  };
+  const runEdit=async(diaryId)=>{
+    try{
+      await editDiaryAction(diaryId,{due_date:editDue});
+      setConfirming(null);setEditDue('');refresh();
+      notify(`Due date moved to ${editDue} (audited)`);
+    }catch(e){notify(`Edit failed: ${e.message}`,'error');}
   };
   const runIngest=async()=>{
     try{
@@ -114,6 +130,18 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
                     </ul>
                   </div>
                 ))}
+                <div style={{borderTop:`1px solid ${C.border}`,marginTop:10,paddingTop:10}}>
+                  <div style={{fontSize:10,fontFamily:C.mono,fontWeight:700,color:C.red,letterSpacing:".06em",marginBottom:6}}>DECLINE (DOCUMENTED — NEVER DROPPED)</div>
+                  <div style={{display:"flex",gap:6,marginBottom:10}}>
+                    <input value={declineReason} onChange={e=>setDeclineReason(e.target.value)} placeholder="Reason (required)" style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,fontSize:11.5,padding:"6px 9px"}}/>
+                    <Btn small variant="ghost" disabled={!declineReason.trim()} onClick={()=>runDecline(a.diary_id)}>Decline</Btn>
+                  </div>
+                  <div style={{fontSize:10,fontFamily:C.mono,fontWeight:700,color:C.muted,letterSpacing:".06em",marginBottom:6}}>EDIT DUE DATE (AUDITED)</div>
+                  <div style={{display:"flex",gap:6,marginBottom:10}}>
+                    <input type="date" value={editDue} onChange={e=>setEditDue(e.target.value)} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,fontSize:11.5,padding:"5px 9px"}}/>
+                    <Btn small variant="ghost" disabled={!editDue} onClick={()=>runEdit(a.diary_id)}>Move</Btn>
+                  </div>
+                </div>
                 <Btn small variant="ghost" onClick={()=>setConfirming(null)}>Cancel</Btn>
               </div>)}
           </div>

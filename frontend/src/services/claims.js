@@ -113,3 +113,11 @@ export async function generateSettlementPackage(claimId, payload) {
 export async function fetchWcisQualityMetrics() {
   return _json(await fetch(`${BASE}/wcis/quality-metrics`, _opts()));
 }
+
+export async function declineDiaryAction(diaryId, reason) {
+  return _json(await fetch(`${BASE}/diaries/${encodeURIComponent(diaryId)}/decline`, _opts('POST', { reason })));
+}
+
+export async function editDiaryAction(diaryId, patch) {
+  return _json(await fetch(`${BASE}/diaries/${encodeURIComponent(diaryId)}`, _opts('PATCH', patch)));
+}
