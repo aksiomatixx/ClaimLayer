@@ -370,10 +370,15 @@ router.get(
     try {
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
-      const diaries = await claimService.getDiaries(req.params.id).catch(() => []);
+      // RAW diary rows, not the mapped shape: the mapping prefers
+      // fh_diary_id for its diaryId field, which is the system-of-record
+      // mirror id — the drawer needs OUR diary id to drive the
+      // aftermath endpoints.
+      const { data: diaryRows } = await supabase
+        .from('diaries').select('*').eq('claim_id', req.params.id);
       const { data: documents } = await supabase
         .from('claim_documents').select('*').eq('claim_id', req.params.id);
-      const brief = decisionBriefService.buildBrief({ claim, diaries, documents: documents || [] });
+      const brief = decisionBriefService.buildBrief({ claim, diaries: diaryRows || [], documents: documents || [] });
       res.json(brief);
     } catch (err) {
       res.status(500).json({ error: err.message });

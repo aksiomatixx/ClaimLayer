@@ -31,6 +31,7 @@ async function seed() {
   await supabase.from('diaries').insert({
     id: 'diy_test_comp', claim_id: CLAIM_ID, diary_type: 'COMPENSABILITY_DECISION_DUE',
     due_date: '2026-07-15', priority: 'CRITICAL', status: 'open', notes: 'LC §5402',
+    fh_diary_id: 'fhd_mirror_99', // regression: brief must carry OUR id, not the mirror's
   });
   await supabase.from('claim_documents').insert({
     id: 'doc_test_pr1', claim_id: CLAIM_ID, title: 'Initial treating physician report (PR-1)',
@@ -87,6 +88,9 @@ describe('GET /api/v1/claims/:id/decision-brief', () => {
     expect(res.body.actions[0].action).toMatch(/compensability/i);
     expect(res.body.actions[0].why).toContain('LC §5402');
     expect(res.body.actions[0].document_ids).toEqual(['doc_test_pr1']);
+    // the action must be drivable: diary_id is the local diaries.id, never
+    // the FileHandler mirror id
+    expect(res.body.actions[0].diary_id).toBe('diy_test_comp');
   });
 
   it('404s for an unknown claim', async () => {
