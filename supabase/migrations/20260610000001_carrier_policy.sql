@@ -28,7 +28,9 @@ CREATE INDEX IF NOT EXISTS insurers_fein_idx ON insurers (fein);
 
 CREATE TABLE IF NOT EXISTS policies (
   id              TEXT PRIMARY KEY,
-  employer_id     TEXT NOT NULL REFERENCES employers(id),
+  -- employers.id is UUID in the production schema (claims.id is TEXT) —
+  -- caught by local-Postgres validation before the hosted apply.
+  employer_id     UUID NOT NULL REFERENCES employers(id),
   insurer_id      TEXT REFERENCES insurers(id),   -- NULL when self-insured
   policy_number   TEXT NOT NULL,
   effective_date  DATE NOT NULL,
