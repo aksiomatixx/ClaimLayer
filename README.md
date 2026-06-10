@@ -73,7 +73,7 @@ The demo runs against a real PostgreSQL database via Supabase — there is no in
 2. **A Supabase project** — either of:
    - **Local (recommended):** install the [Supabase CLI](https://supabase.com/docs/guides/cli) and Docker, then run `supabase start` from the repo root. The repo ships a `supabase/config.toml`, so this spins up a full local stack and applies every migration in `supabase/migrations/` automatically. The command prints the `API URL`, `anon key`, and `service_role key` to put in `backend/.env`.
    - **Hosted:** a free-tier project at [supabase.com](https://supabase.com); apply the migrations in `supabase/migrations/` in filename order (SQL editor, `psql`, or `supabase db push`).
-4. **Environment** — copy `backend/.env.example` to `backend/.env` and fill in at minimum:
+3. **Environment** — copy `backend/.env.example` to `backend/.env` and fill in at minimum:
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
    - `JWT_SECRET` (any random string for local use)
    - `ANTHROPIC_API_KEY` — optional; without it the app runs but agent analyses are unavailable
