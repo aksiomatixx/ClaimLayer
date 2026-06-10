@@ -8,7 +8,7 @@
 
 A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.
 
-`911 tests · 52 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`952 tests · 57 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -49,7 +49,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-911 automated tests across 52 suites, covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold.
+952 automated tests across 57 suites: 911 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 41 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
 
 ## Tech stack
 
