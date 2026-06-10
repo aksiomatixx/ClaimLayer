@@ -8,8 +8,11 @@
  * decision with input snapshot, parsed output, token / latency
  * stats, guardrail outcomes, and human override links.
  *
- * logDecision() never throws — logging failures are warnings; the
- * caller's AI return value is unchanged regardless.
+ * logDecision() is best-effort by default. For REGULATED decisions
+ * (compensability, RFA/MTUS, document classification — anything that
+ * feeds a statutory determination) callers pass { required: true }:
+ * the audit row is then part of the operation's contract and a
+ * persistence failure throws instead of silently continuing.
  */
 
 const { supabase } = require('./supabase');
@@ -17,7 +20,7 @@ const logger       = require('../logger');
 
 // ── logDecision ───────────────────────────────────────────────────────────────
 
-async function logDecision(input) {
+async function logDecision(input, { required = false } = {}) {
   const row = {
     claim_id:          input.claim_id || null,
     decision_type:     input.decision_type,
@@ -43,6 +46,10 @@ async function logDecision(input) {
     if (error) throw new Error(error.message);
     return data;
   } catch (err) {
+    if (required) {
+      logger.error({ msg: 'aiDecisionsService.logDecision: REQUIRED audit insert failed', err: err.message, decision_type: row.decision_type });
+      throw new Error(`AI decision audit persistence failed for ${row.decision_type}: ${err.message}`);
+    }
     logger.warn({ msg: 'aiDecisionsService.logDecision: insert failed (non-fatal)', err: err.message, decision_type: row.decision_type });
     return null;
   }

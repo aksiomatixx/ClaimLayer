@@ -112,6 +112,7 @@ class QueryBuilder {
 
   eq(col, val) { this._filters.push({ col, val, op: 'eq' }); return this; }
   neq(col, val) { this._filters.push({ col, val, op: 'neq' }); return this; }
+  is(col, val) { this._filters.push({ col, val, op: 'is' }); return this; }
 
   order(col, opts = {}) {
     this._orderBy = { col, desc: opts.ascending === false };
@@ -143,6 +144,8 @@ class QueryBuilder {
     return this._filters.every(f => {
       if (f.op === 'eq')  return row[f.col] === f.val;
       if (f.op === 'neq') return row[f.col] !== f.val;
+      // PostgREST semantics: NULL comparisons require .is()
+      if (f.op === 'is')  return f.val === null ? row[f.col] == null : row[f.col] === f.val;
       return true;
     });
   }

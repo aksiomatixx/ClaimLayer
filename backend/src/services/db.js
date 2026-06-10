@@ -215,6 +215,20 @@ const magicLinkTokens = {
       .update({ used_at: new Date().toISOString() })
       .eq('jti', jti);
   },
+
+  /**
+   * Atomic single use: flips used_at only when it is still NULL and
+   * reports whether THIS caller won. Two concurrent validations of the
+   * same link cannot both succeed.
+   */
+  async markUsedAtomic(jti) {
+    const { data, error } = await supabase.from('magic_link_tokens')
+      .update({ used_at: new Date().toISOString() })
+      .eq('jti', jti).is('used_at', null)
+      .select();
+    if (error) throw new Error(error.message);
+    return (data || []).length > 0;
+  },
 };
 
 // ── employees (ADP cache) ─────────────────────────────────────────────────────
