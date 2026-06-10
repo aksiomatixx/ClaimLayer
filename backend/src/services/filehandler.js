@@ -183,11 +183,22 @@ async function recordPayment(fhClaimId, payment) {
 /**
  * Retrieve the full financial audit ledger for a claim.
  */
+/**
+ * Write a claim note to the system of record (the auditable ledger).
+ * POST /claims/:id/notes — noteType 'diary' for decision notes.
+ */
+async function addNote(fhClaimId, noteText, addedBy, noteType = 'diary') {
+  return request('POST', `/claims/${fhClaimId}/notes`, {
+    noteText, noteType, addedBy, isPrivate: false,
+  }, fhClaimId);
+}
+
 async function getLedger(fhClaimId) {
   return request('get', `/claims/${fhClaimId}/ledger`, undefined, fhClaimId);
 }
 
 module.exports = {
+  addNote,
   createClaim,
   setReserves,
   attachDocument,

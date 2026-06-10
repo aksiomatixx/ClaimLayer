@@ -52,4 +52,35 @@ router.post(
   }
 );
 
+router.post(
+  '/diaries/:id/decline',
+  requireAuth, requireRole(['admin']),
+  [param('id').notEmpty(), body('reason').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      res.json(await diaryActionService.declineAction(req.params.id, { reason: req.body.reason }, req.user?.email));
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+router.patch(
+  '/diaries/:id',
+  requireAuth, requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const diary = await diaryActionService.editAction(req.params.id, req.body, req.user?.email);
+      res.json({ diary });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
 module.exports = router;

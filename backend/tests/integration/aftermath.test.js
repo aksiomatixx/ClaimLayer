@@ -9,6 +9,13 @@
 
 jest.mock('../../src/services/supabase', () => require('../__mocks__/supabaseClient'));
 
+const mockFhAddNote = jest.fn().mockResolvedValue({ noteId: 'nte-1' });
+const mockFhCompleteDiary = jest.fn().mockResolvedValue({ ok: true });
+jest.mock('../../src/services/filehandler', () => ({
+  addNote: (...a) => mockFhAddNote(...a),
+  completeDiary: (...a) => mockFhCompleteDiary(...a),
+}));
+
 const request                = require('supertest');
 const app                    = require('../../src/index');
 const { supabase }           = require('../../src/services/supabase');
@@ -165,5 +172,111 @@ describe('preview = execution (the drawer promise)', () => {
       .send({ action: 'followed_up', note: 'spoke with counsel' });
     expect(done.status).toBe(200);
     expect(done.body.successor_diaries[0].diary_type).toBe('CNR_OFFER_FOLLOWUP');
+  });
+});
+
+
+describe('step 9 — system-of-record write-back on approval', () => {
+  beforeEach(() => { mockFhAddNote.mockClear(); mockFhCompleteDiary.mockClear(); });
+
+  it('writes the claim note to FileHandler and completes the mirrored diary', async () => {
+    await supabase.from('claims').update({ filehandler_id: 'FH-100' }).eq('id', CLAIM);
+    await supabase.from('diaries').insert({
+      id: 'diy_fh', claim_id: CLAIM, diary_type: 'TD_PAYMENT_REVIEW',
+      due_date: '2026-06-20', priority: 'HIGH', status: 'open', fh_diary_id: 'fhd-9',
+    });
+
+    await svc.completeAction('diy_fh', { action: 'continue', note: 'worker still TTD' }, 'adjuster@test');
+
+    expect(mockFhAddNote).toHaveBeenCalledTimes(1);
+    const [fhId, noteText, author] = mockFhAddNote.mock.calls[0];
+    expect(fhId).toBe('FH-100');
+    expect(noteText).toContain('TD_PAYMENT_REVIEW');
+    expect(noteText).toContain('worker still TTD');
+    expect(author).toBe('adjuster@test');
+
+    expect(mockFhCompleteDiary).toHaveBeenCalledWith('FH-100', 'fhd-9', 'worker still TTD', 'adjuster@test');
+  });
+
+  it('write-back failure never blocks the decision', async () => {
+    await supabase.from('claims').update({ filehandler_id: 'FH-100' }).eq('id', CLAIM);
+    mockFhAddNote.mockRejectedValueOnce(new Error('ledger down'));
+    const diaryId = await seedDiary('TD_PAYMENT_REVIEW', 'diy_fh2');
+    const result = await svc.completeAction(diaryId, { action: 'continue' }, 'adjuster@test');
+    expect(result.successor_diaries).toHaveLength(1);
+  });
+
+  it('claims with no FileHandler id skip write-back silently', async () => {
+    const diaryId = await seedDiary('TD_PAYMENT_REVIEW', 'diy_nofh');
+    await svc.completeAction(diaryId, { action: 'continue' }, 'adjuster@test');
+    expect(mockFhAddNote).not.toHaveBeenCalled();
+  });
+});
+
+describe('step 8 — decline and edit', () => {
+  it('decline requires a documented reason, cancels with no aftermath, and writes the SOR note', async () => {
+    await supabase.from('claims').update({ filehandler_id: 'FH-100' }).eq('id', CLAIM);
+    const diaryId = await seedDiary('TD_PAYMENT_REVIEW', 'diy_decl');
+
+    await expect(svc.declineAction(diaryId, {}, 'a')).rejects.toThrow('reason is required');
+
+    const result = await svc.declineAction(diaryId, { reason: 'duplicate of existing review' }, 'adjuster@test');
+    expect(result.status).toBe('cancelled');
+
+    const { data: diary } = await supabase.from('diaries').select('*').eq('id', diaryId).single();
+    expect(diary.status).toBe('cancelled');
+    expect(diary.decision_action).toBe('declined');
+    expect(diary.decision_note).toBe('duplicate of existing review');
+
+    // no aftermath: no successor diaries, no notices
+    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', CLAIM);
+    expect(diaries.filter(d => d.status === 'open')).toHaveLength(0);
+    const { data: notices } = await supabase.from('benefit_notices').select('*').eq('claim_id', CLAIM);
+    expect(notices).toHaveLength(0);
+
+    // documented + written back
+    const { data: events } = await supabase.from('claim_events').select('*').eq('claim_id', CLAIM);
+    expect(events.some(e => e.type === 'action_declined')).toBe(true);
+    expect(mockFhAddNote).toHaveBeenCalled();
+
+    // a cancelled diary cannot be completed afterwards
+    await expect(svc.completeAction(diaryId, { action: 'continue' }, 'a')).rejects.toThrow('not open');
+  });
+
+  it('edit changes due date/priority with a full audit trail', async () => {
+    const diaryId = await seedDiary('TD_PAYMENT_REVIEW', 'diy_edit');
+    const updated = await svc.editAction(diaryId, { due_date: '2026-07-01', priority: 'MEDIUM' }, 'adjuster@test');
+    expect(updated.due_date).toBe('2026-07-01');
+    expect(updated.priority).toBe('MEDIUM');
+
+    const { data: events } = await supabase.from('claim_events').select('*').eq('claim_id', CLAIM);
+    const edit = events.find(e => e.type === 'action_edited');
+    expect(edit.data.changes.due_date).toEqual({ from: '2026-06-20', to: '2026-07-01' });
+  });
+
+  it('no-snooze diaries refuse a later due date', async () => {
+    await supabase.from('diaries').insert({
+      id: 'diy_ns', claim_id: CLAIM, diary_type: 'PD_ADVANCE_DUE',
+      due_date: '2026-06-20', priority: 'CRITICAL', status: 'open', no_snooze: true,
+    });
+    await expect(svc.editAction('diy_ns', { due_date: '2026-08-01' }, 'a'))
+      .rejects.toThrow('NO_SNOOZE_DIARY');
+    // pulling it EARLIER is fine
+    const earlier = await svc.editAction('diy_ns', { due_date: '2026-06-15' }, 'a');
+    expect(earlier.due_date).toBe('2026-06-15');
+  });
+
+  it('routes: POST /diaries/:id/decline and PATCH /diaries/:id', async () => {
+    const d1 = await seedDiary('TD_PAYMENT_REVIEW', 'diy_r1');
+    const declined = await auth(request(app).post(`/api/v1/diaries/${d1}/decline`))
+      .send({ reason: 'handled by phone' });
+    expect(declined.status).toBe(200);
+    expect(declined.body.status).toBe('cancelled');
+
+    const d2 = await seedDiary('TD_PAYMENT_REVIEW', 'diy_r2');
+    const edited = await auth(request(app).patch(`/api/v1/diaries/${d2}`))
+      .send({ priority: 'LOW' });
+    expect(edited.status).toBe(200);
+    expect(edited.body.diary.priority).toBe('LOW');
   });
 });
