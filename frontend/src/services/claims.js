@@ -78,5 +78,7 @@ export async function fetchDecisionBrief(id) {
 }
 
 export function documentFileUrl(claimId, docId) {
+  // Static demo builds ship the document PDFs as files next to the bundle.
+  if (import.meta.env.VITE_DEMO) return `files/${docId}.pdf`;
   return `${BASE}/claims/${claimId}/documents/${docId}/file`;
 }

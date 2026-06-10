@@ -149,7 +149,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 <nav><div class="wrap nav-i">
   <a class="brand" href="#top"><img src="assets/mark.png" alt=""/>ClaimLayer</a>
   <div class="nav-l">
-    <a href="#video">Tour</a><a href="#features">Product</a><a href="#how">How it works</a>
+    <a href="demo/" target="_blank" rel="noopener">Live Demo</a><a href="#video">Tour</a><a href="#features">Product</a><a href="#how">How it works</a>
     <a href="#stories">Stories</a><a href="#screens">Screenshots</a><a href="#about">About</a><a href="#contact">Contact</a>
   </div>
   <a class="btn small ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">GitHub ↗</a>
@@ -160,13 +160,13 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <p>ClaimLayer is a regulatory-aware execution layer that runs Claude-powered agents on top of your existing claims system — drafting the analysis, applying the statutory math, generating the notices, and tracking the deadlines, inside guardrails enforced in code.</p>
   <div class="hero-cta">
     <a class="btn" href="#video">▶ &nbsp;Watch the 4-minute tour</a>
-    <a class="btn ghost" href="#contact">Request a walkthrough</a>
+    <a class="btn ghost" href="demo/" target="_blank" rel="noopener">🖱 &nbsp;Launch the interactive demo</a>
   </div>
   <div class="chips">
     <div class="chip"><b>5</b> specialized Claude agents</div>
     <div class="chip"><b>100%</b> of model calls audit-logged</div>
     <div class="chip"><b>0</b> auto-deny pathways — by construction</div>
-    <div class="chip"><b>969</b> automated tests · 58 suites</div>
+    <div class="chip"><b>982</b> automated tests · 60 suites</div>
   </div>
 </div></header>
 
@@ -191,13 +191,27 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="card"><div class="glyph">🛡️</div><h3>Guardrails in code, not prompts</h3><p>The model physically cannot deny treatment, exceed settlement bounds, or invent a statutory value. Hard limits live in the service layer, where no prompt injection can reach them.</p></div>
     <div class="card"><div class="glyph">🔌</div><h3>A layer, not a replacement</h3><p>Pluggable adapters sit on top of your retained system of record — ingesting claims, pushing diaries, documents, and notices back. No migration project required.</p></div>
   </div>
+
+  <div class="grid2" style="margin-top:26px">
+    <div class="card" style="border-color:rgba(244,112,103,.25)">
+      <div class="kicker" style="color:var(--red)">Before — react to paperwork</div>
+      <p style="line-height:2">Medical reports pile into an inbox · work status reports wait to be read · legal documents get filed by hand · the adjuster works out what each one requires · notices and diaries typed one at a time.</p>
+    </div>
+    <div class="card" style="border-color:rgba(232,163,61,.45)">
+      <div class="kicker" style="color:var(--green)">After — decide, then it executes</div>
+      <p style="line-height:2;color:var(--text)">Every document ingested, labeled, and filed to the claim · the required action queued as a prepared decision · the adjuster reviews and decides · decision documented, notices mailed, diaries completed, the next diaries set — automatically.</p>
+    </div>
+  </div>
+  <div style="margin-top:22px;background:var(--amber-f);border:1px solid rgba(232,163,61,.4);border-radius:12px;padding:18px 24px;font-size:15.5px;color:var(--amber);font-weight:600">
+    The operating contract: as long as the adjuster works the generated action queue, statutory timelines are met and penalties are avoided.
+  </div>
 </div></section>
 
 <section id="features"><div class="wrap reveal">
   <div class="kicker">Platform</div>
   <h2>Everything a regulated claims operation needs</h2>
   <div class="feat">
-    <div class="card"><span class="tag amber">AI Agent</span><h3>Compensability analysis</h3><p>Score, priority, suggested medical / indemnity / expense reserves, red flags, and written rationale on every new claim. Accept or deny stays a licensed-human action.</p></div>
+    <div class="card"><span class="tag amber">AI Agent</span><h3>Compensability analysis</h3><p>Score, priority, suggested reserves, red flags, and written rationale on every new claim — presented as a plain-language decision brief with the source documents and their AI summaries one click away. Accept or deny stays a licensed-human action.</p></div>
     <div class="card"><span class="tag amber">AI Agent</span><h3>MTUS treatment authorization</h3><p>Every RFA reviewed against California treatment guidelines. The agent can only return <span class="mono" style="font-size:12px">auto_approve</span> or <span class="mono" style="font-size:12px">physician_review</span> — denial doesn't exist in its vocabulary.</p></div>
     <div class="card"><span class="tag amber">AI Agent</span><h3>Settlement pricing &amp; MSA screening</h3><p>C&amp;R offers priced inside a hard 1.15×–5.0× band of stipulated value, gated by a deterministic Medicare-interest screen that runs before the model ever sees the file.</p></div>
     <div class="card"><span class="tag blue">Engine</span><h3>Statutory benefits engine</h3><p>TD at two-thirds AWW with the 104-week cap, PD rating and advances, waiting periods, and calendar- vs business-day deadlines per code section — version-pinned to DWC sources.</p></div>
@@ -259,7 +273,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <p class="sub">Captured live from the application on demo data. Click any screenshot to enlarge.</p>
   <div class="gal">
     <figure class="shot" data-full="assets/dashboard.jpg"><img src="assets/dashboard.jpg" loading="lazy" alt="Adjuster console with ranked action queue"/><figcaption><b>Adjuster console</b>Ranked action queue with AI priority, reserves, and deadlines</figcaption></figure>
-    <figure class="shot" data-full="assets/drawer.jpg"><img src="assets/drawer.jpg" loading="lazy" alt="Claim file with AI compensability analysis"/><figcaption><b>Claim file</b>AI compensability analysis with score, reserves, and rationale</figcaption></figure>
+    <figure class="shot" data-full="assets/drawer.jpg"><img src="assets/drawer.jpg" loading="lazy" alt="Claim file with AI compensability analysis"/><figcaption><b>Claim file — decision support</b>Plain-language brief, source documents with AI summaries, originals one click away</figcaption></figure>
     <figure class="shot" data-full="assets/benefits.jpg"><img src="assets/benefits.jpg" loading="lazy" alt="TD benefit periods timeline"/><figcaption><b>Benefits tracking</b>TD periods against the 104-week statutory cap</figcaption></figure>
     <figure class="shot" data-full="assets/agents.jpg"><img src="assets/agents.jpg" loading="lazy" alt="AI decision audit trail"/><figcaption><b>Agents console</b>Every model call logged — overrides, guardrails, latency</figcaption></figure>
     <figure class="shot" data-full="assets/rfas.jpg"><img src="assets/rfas.jpg" loading="lazy" alt="RFA treatment authorization center"/><figcaption><b>RFA center</b>MTUS evaluation — auto-approve or physician review only</figcaption></figure>
@@ -282,7 +296,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
       <div class="fact"><span>Domain</span><b>California workers' compensation</b></div>
       <div class="fact"><span>AI</span><b>Anthropic Claude (5 agents)</b></div>
       <div class="fact"><span>Stack</span><b>Node / Express · React · PostgreSQL</b></div>
-      <div class="fact"><span>Tests</span><b>969 across 58 suites</b></div>
+      <div class="fact"><span>Tests</span><b>982 across 60 suites</b></div>
       <div class="fact"><span>Audit trail</span><b>Every model call, queryable</b></div>
       <div class="fact"><span>Status</span><b>Reference implementation · demo data</b></div>
       <div class="fact"><span>Source</span><b><a href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">github.com/aksiomatixx/ClaimLayer</a></b></div>
@@ -307,7 +321,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div>
       <div class="c-card"><b>📬 &nbsp;Email</b><span><a href="mailto:hello@claimlayer.example">hello@claimlayer.example</a></span></div>
       <div class="c-card"><b>🐙 &nbsp;GitHub</b><span>Source, issues, and discussions at <a href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">aksiomatixx/ClaimLayer</a></span></div>
-      <div class="c-card"><b>🎥 &nbsp;Self-serve demo</b><span>Clone the repo and run <span class="mono" style="font-size:12px">supabase start&nbsp;+&nbsp;npm run dev:demo</span> — eight synthetic claims, full audit trail, no keys required.</span></div>
+      <div class="c-card"><b>🖱 &nbsp;Interactive demo</b><span><a href="demo/" target="_blank" rel="noopener">Launch the demo in your browser</a> — the real application on synthetic claims, no install, no keys. Or clone the repo and run <span class="mono" style="font-size:12px">supabase start&nbsp;+&nbsp;npm run dev:demo</span> for the full stack.</span></div>
     </div>
   </div>
 </div></section>
