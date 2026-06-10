@@ -333,8 +333,8 @@ function Architecture() {
   };
 
   useEffect(() => {
-    document.title = 'Architecture · HomeCare TPA';
-    return () => { document.title = 'HomeCare TPA'; };
+    document.title = 'Architecture · ClaimLayer';
+    return () => { document.title = 'ClaimLayer'; };
   }, []);
 
   return (

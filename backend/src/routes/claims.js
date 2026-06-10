@@ -251,6 +251,28 @@ router.get(
   }
 );
 
+// ── POST /api/v1/claims/:id/settlement-package — generate 10214 package ──────
+router.post(
+  '/:id/settlement-package',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), body('kind').isIn(['cnr', 'stip'])],
+  validate,
+  async (req, res) => {
+    try {
+      const settlementDocs = require('../services/settlementDocumentService');
+      const result = req.body.kind === 'cnr'
+        ? await settlementDocs.generateCnRPackage(req.params.id, { msa_included: !!req.body.msa_included, disputes: req.body.disputes })
+        : await settlementDocs.generateStipPackage(req.params.id);
+      res.status(201).json(result);
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404
+        : err.message.includes('BLOCKED') || err.message.includes('No ') ? 409 : 500;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
 // ── POST /api/v1/claims/:id/representation — set/clear attorney (M17B) ───────
 router.post(
   '/:id/representation',

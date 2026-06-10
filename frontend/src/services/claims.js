@@ -82,3 +82,34 @@ export function documentFileUrl(claimId, docId) {
   if (import.meta.env.VITE_DEMO) return `files/${docId}.pdf`;
   return `${BASE}/claims/${claimId}/documents/${docId}/file`;
 }
+
+// ── Tier-1 build: ingestion, aftermath, settlement packages, WCIS quality ────
+
+export async function ingestClaimDocument(claimId, payload) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/documents/ingest`, _opts('POST', payload)));
+}
+
+export async function fetchDocumentTriage() {
+  const data = await _json(await fetch(`${BASE}/documents/triage`, _opts()));
+  return data.documents ?? [];
+}
+
+export async function resolveDocumentTriage(docId, payload) {
+  return _json(await fetch(`${BASE}/documents/${docId}/triage-resolve`, _opts('POST', payload)));
+}
+
+export async function fetchAftermathPreview(diaryId) {
+  return _json(await fetch(`${BASE}/diaries/${encodeURIComponent(diaryId)}/aftermath-preview`, _opts()));
+}
+
+export async function completeDiaryAction(diaryId, payload) {
+  return _json(await fetch(`${BASE}/diaries/${encodeURIComponent(diaryId)}/complete`, _opts('POST', payload)));
+}
+
+export async function generateSettlementPackage(claimId, payload) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/settlement-package`, _opts('POST', payload)));
+}
+
+export async function fetchWcisQualityMetrics() {
+  return _json(await fetch(`${BASE}/wcis/quality-metrics`, _opts()));
+}
