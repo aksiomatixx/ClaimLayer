@@ -9,6 +9,16 @@
 -- ============================================================
 
 -- ── Employers ─────────────────────────────────────────────────────────────────
+-- ORDER-INDEPENDENCE RETROFIT: this seed was extended with insurer fields
+-- when the M22A prebuild landed, which broke fresh-database installs (the
+-- columns are added by 20260102000005, which sorts AFTER this file). The
+-- guarded ADD COLUMNs below make the chain order-clean on a fresh apply;
+-- on databases where this migration already ran they never re-execute,
+-- and 20260102000005's own IF NOT EXISTS statements remain no-ops.
+ALTER TABLE employers ADD COLUMN IF NOT EXISTS insurer_fein VARCHAR(9);
+ALTER TABLE employers ADD COLUMN IF NOT EXISTS insurer_name VARCHAR(200);
+ALTER TABLE employers ADD COLUMN IF NOT EXISTS self_insured BOOLEAN NOT NULL DEFAULT FALSE;
+
 INSERT INTO employers (id, name, address_line1, address_city, address_state, address_zip, phone, primary_contact_email, fein, self_insured, insurer_name, insurer_fein)
 VALUES
     ('a1b2c3d4-e5f6-7890-abcd-ef1234567801', 'BrightCare Home Health',
