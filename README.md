@@ -8,7 +8,7 @@
 
 A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.
 
-`982 tests · 60 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,138 tests · 75 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -32,13 +32,15 @@ The deeper change is to the shape of the adjuster's day. Traditional adjusting i
 
 The adjuster stops being a router of paperwork and becomes what the license is for: the decision-maker.
 
+That loop is implemented end to end: a document is ingested and classified into a controlled category by a Claude agent (every call logged to the audit trail); it is matched to its claim — or routed to a **human triage queue** when confidence is low, never silently filed; key fields are extracted and an AI summary attached; a **deterministic rules table** translates the document into the action it requires; the action surfaces in the claim drawer with the source document one click away; the adjuster sees a dry-run of **exactly what completing will do**, then approves, edits (audited — penalty diaries refuse to move), or declines with a documented reason; on approval the decision note writes back to the retained system of record, the diary completes, the successor deadline is set, and the statutory notice generates and queues. One integration test walks all ten steps.
+
 The wedge is agentic execution within hard regulatory limits, where every AI decision is bounded, auditable, and reversible by a human.
 
 ## Architecture at a glance
 
 The system is a layer, not a replacement: it runs agentic workflows on top of a customer's retained system of record via a pluggable integration layer. ([Full architecture writeup →](docs/architecture.md) and an in-app `/architecture` view.)
 
-- **Five specialized agents** — compensability assessment, MTUS treatment authorization, C&R settlement pricing, MSA screening, and voice-intake extraction — each with authored prompts, explicit invocation triggers, and bounded output schemas.
+- **Six specialized agents** — compensability assessment, MTUS treatment authorization, C&R settlement pricing, MSA screening, voice-intake extraction, and inbound document classification — each with authored prompts, explicit invocation triggers, and bounded output schemas.
 - **Guardrails enforced in code** — not in prompts. The model cannot take certain actions regardless of what it returns (see below).
 - **Human-in-the-loop checkpoints** at every compensability, authorization, and settlement decision, backed by a licensed adjuster's judgment.
 - **Full AI decision audit trail** — every model call is logged with its input snapshot, output, guardrails triggered, and human-override status, surfaced in an in-app `/agents` review console.
@@ -57,7 +59,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-982 automated tests across 60 suites: 924 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 58 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
+1,138 automated tests across 75 suites: 1,072 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 66 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
 
 ## Tech stack
 

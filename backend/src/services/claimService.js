@@ -20,6 +20,7 @@
  */
 
 const { supabase }         = require('./supabase');
+const config = require('../config');
 const filehandler          = require('./filehandler');
 const adp                  = require('./adp');
 const aiService            = require('./aiService');
@@ -122,6 +123,18 @@ async function createClaim(froiData, employerId) {
 
   logger.info({ msg: 'createClaim: start', claimNumber, employerId });
 
+  // ── Step 0: Resolve the policy in force at DOI (Carrier & Policy Modeling).
+  // Non-fatal: claims without a resolvable policy fall back to employer-row
+  // insurer data in the WCIS payload, exactly as before this milestone.
+  let policyId = null;
+  try {
+    const policyService = require('./policyService');
+    const policy = await policyService.resolvePolicy(employerId, froiData.dateOfInjury);
+    if (policy) policyId = policy.id;
+  } catch (e) {
+    logger.warn({ msg: 'createClaim: policy resolution failed — falling back to employer insurer data', err: e.message });
+  }
+
   // ── Step 1: Pull ADP data ──────────────────────────────────────────────────
   let employee;
   try {
@@ -183,6 +196,7 @@ async function createClaim(froiData, employerId) {
     td_rate:          employee.tdRate,
     weeks_calculated: employee.weeksCalculated,
     date_of_injury:   froiData.dateOfInjury,
+    policy_id:        policyId,
     body_part:        froiData.bodyPart,
     injury_type:      froiData.injuryType,
     injury_description: froiData.injuryDescription,
@@ -314,28 +328,28 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
     {
       diary_type:  'DWC1_ISSUE',
       due_date:    addBusinessDays(doi, 1).toISOString().split('T')[0],
-      assigned_to: 'system@homecaretpa.com',
+      assigned_to: config.adjuster.email,
       priority:    'HIGH',
       notes:       `DWC-1 must be issued — date of injury ${doi}`,
     },
     {
       diary_type:  'TD_PAYMENT_SETUP',
       due_date:    addBusinessDays(doi, 14).toISOString().split('T')[0],
-      assigned_to: 'system@homecaretpa.com',
+      assigned_to: config.adjuster.email,
       priority:    'HIGH',
       notes:       `First TD payment due within 14 days of disability onset — LC §4650. AWW: $${aww}, TD rate: $${tdRate}/wk`,
     },
     {
       diary_type:  'PR2_FOLLOW_UP',
       due_date:    addBusinessDays(doi, 7).toISOString().split('T')[0],
-      assigned_to: 'system@homecaretpa.com',
+      assigned_to: config.adjuster.email,
       priority:    'MEDIUM',
       notes:       `PR-2 expected from treating physician within 5 business days of first visit`,
     },
     {
       diary_type:  'DWC7_NOTICE',
       due_date:    addBusinessDays(doi, 1).toISOString().split('T')[0],
-      assigned_to: 'system@homecaretpa.com',
+      assigned_to: config.adjuster.email,
       priority:    'HIGH',
       notes:       `DWC-7 notice of rights must be mailed within 1 business day of claim creation`,
     },
@@ -343,7 +357,7 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
       diary_type:  'COMPENSABILITY_DECISION_DUE',
       due_date:    new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
                      .toISOString().split('T')[0],
-      assigned_to: 'system@homecaretpa.com',
+      assigned_to: config.adjuster.email,
       priority:    'CRITICAL',
       notes:       `LC §5402 — claim presumed compensable by operation of law if not accepted or denied within 90 calendar days. DOI: ${doi}. Missing this deadline is a critical compliance failure.`,
     },
@@ -351,7 +365,7 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
       diary_type:  'DELAY_NOTICE_DUE',
       due_date:    new Date(new Date(filedAt).getTime() + 14 * 24 * 60 * 60 * 1000)
                      .toISOString().split('T')[0],
-      assigned_to: 'system@homecaretpa.com',
+      assigned_to: config.adjuster.email,
       priority:    'HIGH',
       notes:       `LC §4650/§4652 — if compensability decision is not made within 14 days of FROI receipt (${filedAt.split('T')[0]}), a delay notice must be sent to the employee. Clock starts at FROI filing, not injury date.`,
     },
@@ -765,8 +779,116 @@ function _resetClaims() {
   }
 }
 
+// ── M17B: attorney representation as a first-class claim operation ──────────
+
+/**
+ * Set or clear attorney representation on a claim. The authoritative
+ * source is claims.attorney_represented; legacy ad-hoc fields remain
+ * readable via utils/representation.js during the transition. Fires
+ * SROI 02 (representation change) when the represented state actually
+ * changes — a same-state update (e.g. correcting the firm name) does not.
+ */
+async function setAttorneyRepresentation(claimId, { represented, attorney }, changedBy) {
+  const claim = await getClaim(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+
+  const { data: row } = await supabase
+    .from('claims').select('attorney_represented').eq('id', claimId).single();
+  const wasRepresented = !!(row && row.attorney_represented);
+  const nowRepresented = !!represented;
+
+  const now = new Date().toISOString();
+  const update = {
+    attorney_represented: nowRepresented,
+    attorney_name:  nowRepresented ? (attorney?.name  || null) : null,
+    attorney_firm:  nowRepresented ? (attorney?.firm  || null) : null,
+    attorney_email: nowRepresented ? (attorney?.email || null) : null,
+    attorney_phone: nowRepresented ? (attorney?.phone || null) : null,
+    updated_at: now,
+  };
+  await supabase.from('claims').update(update).eq('id', claimId);
+
+  await supabase.from('claim_events').insert({
+    claim_id: claimId,
+    type: 'representation_changed',
+    timestamp: now,
+    data: { represented: nowRepresented, attorney_name: update.attorney_name, changed_by: changedBy },
+  });
+
+  if (wasRepresented !== nowRepresented) {
+    // WCIS HOOK — SROI 02 (M17B). Non-fatal: a queue failure never
+    // blocks the representation change.
+    try {
+      const wcis = require('./wcisTriggerService');
+      await wcis.enqueueIfReportable({
+        claim_id:         claimId,
+        trigger_event:    'representation_changed',
+        source_service:   'claimService',
+        source_record_id: claimId,
+        event_date:       now.split('T')[0],
+        payload_context:  { represented: nowRepresented },
+      });
+    } catch (e) {
+      logger.error({ msg: 'setAttorneyRepresentation: WCIS enqueue failed (non-fatal)', claimId, err: e.message });
+    }
+  }
+
+  return getClaim(claimId);
+}
+
+/**
+ * Reopen a closed claim (worker condition worsened). Sets the claim
+ * back to active_medical, records the reopen event, and fires FROI 02
+ * (data change) per the M17B reopen pathway. TD reinstatement, if any,
+ * follows separately through tdPeriodsService (SROI RB).
+ */
+async function reopenClaim(claimId, reason, changedBy) {
+  const claim = await getClaim(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  if (!['closed', 'future_medical_only'].includes(claim.status)) {
+    throw new Error(`Only closed claims can be reopened (status: ${claim.status})`);
+  }
+  if (!reason) throw new Error('A reopen reason is required');
+
+  const now = new Date().toISOString();
+  await supabase.from('claims')
+    .update({ status: 'active_medical', updated_at: now })
+    .eq('id', claimId);
+
+  await supabase.from('claim_events').insert({
+    claim_id: claimId,
+    type: 'claim_reopened',
+    timestamp: now,
+    data: { from_status: claim.status, reason, changed_by: changedBy },
+  });
+
+  await supabase.from('audit_log').insert({
+    action: 'claim_reopened', resource_type: 'claim', resource_id: claimId,
+    description: `Claim reopened from ${claim.status}: ${reason}`,
+    actor: changedBy || null, created_at: now,
+  });
+
+  try {
+    const wcis = require('./wcisTriggerService');
+    await wcis.enqueueIfReportable({
+      claim_id:         claimId,
+      trigger_event:    'froi_data_changed',
+      source_service:   'claimService',
+      source_record_id: claimId,
+      event_date:       now.split('T')[0],
+      payload_context:  { reason: 'claim_reopened', from_status: claim.status },
+    });
+  } catch (e) {
+    logger.error({ msg: 'reopenClaim: WCIS enqueue failed (non-fatal)', claimId, err: e.message });
+  }
+
+  return getClaim(claimId);
+}
+
 module.exports = {
   createClaim,
+  setAttorneyRepresentation,
+  reopenClaim,
   getClaim,
   listClaims,
   approveReserves,

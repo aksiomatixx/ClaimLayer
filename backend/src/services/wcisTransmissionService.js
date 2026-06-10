@@ -25,6 +25,7 @@
  */
 
 const { supabase } = require('./supabase');
+const config = require('../config');
 const logger       = require('../logger');
 const wcisTriggerService = require('./wcisTriggerService');
 
@@ -356,14 +357,13 @@ async function _updateOpenBenefitCodes(txn) {
 }
 
 async function _createCriticalDiary(txn, diaryType, notes) {
-  // TODO(M17B): reassign to licensed adjuster instead of
   // system@homecaretpa.com. See existing pattern in
   // pdService/cnrService/disbursementService.
   const row = {
     claim_id:    txn.claim_id,
     diary_type:  diaryType,
     due_date:    new Date().toISOString().slice(0, 10),
-    assigned_to: 'system@homecaretpa.com',
+    assigned_to: config.adjuster.email,
     priority:    'CRITICAL',
     notes,
     status:      'open',

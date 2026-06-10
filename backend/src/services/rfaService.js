@@ -20,6 +20,7 @@
  */
 
 const { supabase }        = require('./supabase');
+const config = require('../config');
 const enlyte              = require('./enlyteService');
 const logger              = require('../logger');
 const { addBusinessDays } = require('../utils/businessDays');
@@ -139,7 +140,7 @@ async function _seedRFADiary(claimId, rfaId, deadline) {
     claim_id:           claimId,
     diary_type:         'RFA_RESPONSE_DUE',
     due_date:           deadline.split('T')[0],
-    assigned_to:        'system@homecaretpa.com',
+    assigned_to:        config.adjuster.email,
     priority:           'HIGH',
     status:             'open',
     notes:              `RFA response due — CCR §9792.9.1. RFA ID: ${rfaId}`,

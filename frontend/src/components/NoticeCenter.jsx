@@ -123,7 +123,7 @@ export function NoticeCenter({claims,jsPdfReady,notify}){
               <div style={{color:C.muted}}>POST https://api.lob.com/v1/letters</div>
               <div>{`"description": "${lobModal.label}"`}</div>
               <div>{`"to": { "name": "${lobModal.claim.claimant}", "address": "${lobModal.addr}" }`}</div>
-              <div>{`"from": { "name": "HomeCare TPA", ... }`}</div>
+              <div>{`"from": { "name": "ClaimLayer", ... }`}</div>
               <div>{`"mail_type": "usps_first_class"`}</div>
               <div>{`"color": false, "double_sided": false`}</div>
               <div style={{color:C.green,marginTop:4}}>{`// Estimated cost: $1.11 | Delivery: 3-5 business days`}</div>

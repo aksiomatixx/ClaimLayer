@@ -178,11 +178,13 @@ async function evaluateRFA(rfa, claim) {
 
   const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, JSON.stringify(inputSnapshot), 1000);
 
-  // Safety guard: AI must never return a denial
+  // Safety guard: AI must never return a denial — and a missing/falsy
+  // action is equally unsafe (fail-closed: adversarial harness caught the
+  // earlier `original && ...` guard letting null through unforced).
   const guardrails = [];
   const original = result.recommendedAction;
   const validActions = ['auto_approve', 'physician_review'];
-  if (original && !validActions.includes(original)) {
+  if (!validActions.includes(original)) {
     logger.error({ msg: 'Claude RFA: unexpected recommendedAction', value: original });
     result.recommendedAction = 'physician_review';
     guardrails.push({
@@ -273,8 +275,76 @@ async function callClaudeWithDocument(systemPrompt, pdfBuffer, userInstruction, 
   }
 }
 
+// ── Document classification (Inbound Document Ingestion agent) ───────────────
+
+const DOCUMENT_CLASS_CATEGORIES = [
+  'medical','bill','legal','qme','state_form','rfa','pharmacy',
+  'correspondence','surveillance','wage','work_status','settlement','other',
+];
+
+/**
+ * Classify one inbound document. Returns
+ *   { category, confidence, claim_number, summary, key_fields, guardrails }
+ *
+ * Guardrails (enforced here, not in the prompt):
+ *   - category outside the controlled list → forced to 'other' with a
+ *     guardrail_actions entry; the ingestion service routes it to triage.
+ *   - missing required output fields → throw (manual handling, never
+ *     silent filing).
+ * Every call is logged to ai_decisions as decision_type 'doc_classification'.
+ */
+async function classifyDocument({ text, filename, source, claimIdHint }) {
+  const systemPrompt = loadPrompt('document_classification');
+  const userContent = JSON.stringify({
+    filename: filename || null,
+    source:   source || null,
+    text:     String(text || '').slice(0, 28_000), // bound input size
+  });
+
+  const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, userContent, 1200);
+
+  const required = ['category', 'confidence', 'summary'];
+  const missing = required.filter(f => !(f in result));
+  if (missing.length) {
+    throw new Error(`Claude document classification missing fields: ${missing.join(', ')}`);
+  }
+
+  const guardrails = [];
+  if (!DOCUMENT_CLASS_CATEGORIES.includes(result.category)) {
+    logger.error({ msg: 'classifyDocument: category outside controlled list', value: result.category });
+    guardrails.push({
+      rule: 'controlled_category_list', triggered: true,
+      original: result.category, forced_to: 'other',
+    });
+    result.category = 'other';
+    result.confidence = Math.min(Number(result.confidence) || 0, 30);
+  } else {
+    guardrails.push({ rule: 'controlled_category_list', triggered: false });
+  }
+  result.confidence = Math.max(0, Math.min(100, Number(result.confidence) || 0));
+
+  try {
+    const aid = require('./aiDecisionsService');
+    await aid.logDecision({
+      claim_id:       claimIdHint || null,
+      decision_type:  'doc_classification',
+      prompt_name:    'document_classification',
+      model:          config.anthropic.model,
+      input_snapshot: { filename: filename || null, source: source || null, text_chars: String(text || '').length },
+      output_parsed:  result,
+      output_raw:     raw,
+      ...meta,
+      confidence:     result.confidence,
+      guardrail_actions: guardrails,
+    });
+  } catch (e) { logger.warn({ msg: 'classifyDocument: audit log failed', err: e.message }); }
+
+  return { ...result, guardrails };
+}
+
 module.exports = {
   analyzeCompensability,
+  classifyDocument,
   evaluateRFA,
   _callClaude:             callClaude,             // exported for voiceService structured extraction
   _callClaudeMeta:         callClaudeMeta,         // exported for callers that want token + latency metadata

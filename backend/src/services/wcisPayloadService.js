@@ -189,10 +189,19 @@ async function _buildBasePayload(claim_id, environment) {
     throw new Error(`wcisPayloadService: claim not found: ${claim_id}`);
   }
 
-  // FEINs: prefer claim-level override, fall back to employer table.
+  // FEINs: prefer claim-level override, then the resolved policy's insurer
+  // (Carrier & Policy Modeling), then fall back to the employer table.
   let insurerFein = claim.insurer_fein;
   let claimAdminFein = claim.claim_administrator_fein;
   let employerFein = claim.employer_fein;
+  if (claim.policy_id && (!insurerFein || !claimAdminFein)) {
+    const policyService = require('./policyService');
+    const ctx = await policyService.insurerContextForClaim(claim).catch(() => null);
+    if (ctx) {
+      insurerFein = insurerFein || ctx.insurer_fein;
+      claimAdminFein = claimAdminFein || ctx.claim_administrator_fein;
+    }
+  }
   if (!insurerFein || !claimAdminFein || !employerFein) {
     const { data: employer } = await supabase
       .from('employers')

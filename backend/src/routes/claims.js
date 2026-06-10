@@ -251,6 +251,68 @@ router.get(
   }
 );
 
+// ── POST /api/v1/claims/:id/settlement-package — generate 10214 package ──────
+router.post(
+  '/:id/settlement-package',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), body('kind').isIn(['cnr', 'stip'])],
+  validate,
+  async (req, res) => {
+    try {
+      const settlementDocs = require('../services/settlementDocumentService');
+      const result = req.body.kind === 'cnr'
+        ? await settlementDocs.generateCnRPackage(req.params.id, { msa_included: !!req.body.msa_included, disputes: req.body.disputes })
+        : await settlementDocs.generateStipPackage(req.params.id);
+      res.status(201).json(result);
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404
+        : err.message.includes('BLOCKED') || err.message.includes('No ') ? 409 : 500;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/representation — set/clear attorney (M17B) ───────
+router.post(
+  '/:id/representation',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), body('represented').isBoolean()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.setAttorneyRepresentation(
+        req.params.id,
+        { represented: req.body.represented, attorney: req.body.attorney },
+        req.user?.email
+      );
+      res.json({ claim });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/reopen — reopen a closed claim (M17B) ────────────
+router.post(
+  '/:id/reopen',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty(), body('reason').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.reopenClaim(req.params.id, req.body.reason, req.user?.email);
+      res.json({ claim });
+    } catch (err) {
+      const status = err.message.includes('not found') ? 404 : 400;
+      res.status(status).json({ error: err.message });
+    }
+  }
+);
+
 // ── GET /api/v1/claims/:id/documents — ingested documents w/ AI summaries ────
 router.get(
   '/:id/documents',
@@ -308,10 +370,15 @@ router.get(
     try {
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
-      const diaries = await claimService.getDiaries(req.params.id).catch(() => []);
+      // RAW diary rows, not the mapped shape: the mapping prefers
+      // fh_diary_id for its diaryId field, which is the system-of-record
+      // mirror id — the drawer needs OUR diary id to drive the
+      // aftermath endpoints.
+      const { data: diaryRows } = await supabase
+        .from('diaries').select('*').eq('claim_id', req.params.id);
       const { data: documents } = await supabase
         .from('claim_documents').select('*').eq('claim_id', req.params.id);
-      const brief = decisionBriefService.buildBrief({ claim, diaries, documents: documents || [] });
+      const brief = decisionBriefService.buildBrief({ claim, diaries: diaryRows || [], documents: documents || [] });
       res.json(brief);
     } catch (err) {
       res.status(500).json({ error: err.message });

@@ -23,6 +23,7 @@
  */
 
 const { supabase } = require('../services/supabase');
+const config = require('../config');
 const logger       = require('../logger');
 const wcisTransmissionService = require('../services/wcisTransmissionService');
 const { addBusinessDays } = require('../utils/businessDays');
@@ -129,7 +130,7 @@ async function _createDiary(claimId, diaryType, dueDate, notes) {
     claim_id:    claimId,
     diary_type:  diaryType,
     due_date:    dueDate,
-    assigned_to: 'system@homecaretpa.com',
+    assigned_to: config.adjuster.email,
     priority:    'CRITICAL',
     notes,
     status:      'open',

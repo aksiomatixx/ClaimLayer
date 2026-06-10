@@ -26,6 +26,7 @@
  */
 
 const { supabase } = require('./supabase');
+const config = require('../config');
 const logger       = require('../logger');
 
 // Lazy requires to break cycles.
@@ -243,7 +244,6 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
   if (error) throw new Error(`disbursementService.proposeDisbursement: insert failed — ${error.message}`);
 
   // (15) CRITICAL approval diary.
-  // M17B TODO: reassign to licensed adjuster — this is a license-level action
   // (authorizes a WC payment). For now routed to system@homecaretpa.com.
   const payBy       = _computeStatutoryPayBy(awardType, awardServiceDate);
   const diaryDue    = _addCalendarDays(payBy, -DISBURSEMENT_POLICY.APPROVAL_DIARY_LEAD_DAYS);
@@ -251,7 +251,7 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
     claim_id:    claimId,
     diary_type:  'DISBURSEMENT_APPROVAL',
     due_date:    diaryDue,
-    assigned_to: 'system@homecaretpa.com',
+    assigned_to: config.adjuster.email,
     priority:    'CRITICAL',
     notes:       `Disbursement bundle ready for approval. Pay-by ${payBy}. Net-now $${netToWorkerNow.toLocaleString()}. Flags: ${flags.join(', ') || 'none'}.`,
     status:      'open',

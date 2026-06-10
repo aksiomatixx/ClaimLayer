@@ -111,7 +111,7 @@ const STORIES = {
   },
   admin: {
     persona: "Akash Kumar",
-    role: "Owner & Supervising Adjuster, HomeCare TPA",
+    role: "Owner & Supervising Adjuster, ClaimLayer",
     avatar: "AK",
     color: C.amber,
     bg: C.amberLight,
@@ -172,7 +172,7 @@ function WireframeShell({ title, subtitle, children, topBar }) {
         <div style={{ background: "#1a1a1a", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 24, height: 24, background: C.amber, borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#000" }}>H</div>
-            <span style={{ fontFamily: C.mono, fontSize: 11, color: "#fff", fontWeight: 600 }}>HomeCare TPA</span>
+            <span style={{ fontFamily: C.mono, fontSize: 11, color: "#fff", fontWeight: 600 }}>ClaimLayer</span>
           </div>
           <div style={{ fontSize: 10, fontFamily: C.mono, color: "#888" }}>{subtitle}</div>
         </div>
@@ -526,7 +526,7 @@ export default function App() {
       <div style={{ background: "#1a1a1a", padding: "18px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, background: C.amber, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: C.mono, fontWeight: 700, fontSize: 16, color: "#000" }}>H</div>
-          <div><div style={{ fontFamily: C.mono, fontWeight: 600, fontSize: 14, color: "#fff" }}>HomeCare TPA</div><div style={{ fontSize: 10, color: "#888" }}>Product Wireframes & User Stories</div></div>
+          <div><div style={{ fontFamily: C.mono, fontWeight: 600, fontSize: 14, color: "#fff" }}>ClaimLayer</div><div style={{ fontSize: 10, color: "#888" }}>Product Wireframes & User Stories</div></div>
         </div>
         <div style={{ fontSize: 11, fontFamily: C.mono, color: "#888" }}>Confidential — For Technical Review</div>
       </div>

@@ -51,6 +51,8 @@ const DOCUMENT_CATEGORIES = [
   'correspondence',
   'surveillance',
   'wage',
+  'work_status',   // off-work orders / RTW releases (action-distinct from medical)
+  'settlement',    // C&R drafts, stips, OACRs (Document Ingestion milestone)
   'other',
 ];
 

@@ -3,10 +3,11 @@
 /**
  * Shared attorney-representation check (M17B consolidation).
  *
- * Historically claims have recorded representation in four places —
- * attorney_represented (the formal column), attorneyName / attorney_name
- * (camel/snake variants), and representedBy. Until the data is migrated
- * onto attorney_represented alone, "represented" means any of them is set.
+ * claims.attorney_represented is the authoritative column (M17B,
+ * written by claimService.setAttorneyRepresentation). The legacy ad-hoc
+ * fields (attorneyName / attorney_name / representedBy) remain readable
+ * as fallback until historical rows are migrated; any of them set means
+ * represented.
  *
  * Single source of truth for pdService, cnrService, and
  * disbursementService — do not re-inline this OR-chain.

@@ -1,17 +1,17 @@
 // App shell — session/auth handling, role switching, and view routing.
 // Feature components live in src/components/; API helpers in src/services/.
 
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import Architecture from './Architecture.jsx';
+const Architecture = lazy(() => import('./Architecture.jsx'));
 import AdminDashboard from './components/AdminDashboard.jsx';
-import { AdminReports } from './components/AdminReports.jsx';
-import { AgentsConsole } from './components/AgentsConsole.jsx';
+const AdminReports = lazy(() => import('./components/AdminReports.jsx').then(m => ({ default: m.AdminReports })));
+const AgentsConsole = lazy(() => import('./components/AgentsConsole.jsx').then(m => ({ default: m.AgentsConsole })));
 import { ClaimDrawer } from './components/ClaimDrawer.jsx';
 import { DemoBanner } from './components/DemoBanner.jsx';
 import EmployeeIntakeWizard from './components/EmployeeIntakeWizard.jsx';
 import { EmployerPortal } from './components/EmployerPortal.jsx';
-import { IntegrationsConsole } from './components/IntegrationsConsole.jsx';
+const IntegrationsConsole = lazy(() => import('./components/IntegrationsConsole.jsx').then(m => ({ default: m.IntegrationsConsole })));
 import { NoticeCenter } from './components/NoticeCenter.jsx';
 import { RFACenter } from './components/RFACenter.jsx';
 import { TopNav } from './components/TopNav.jsx';
@@ -97,14 +97,14 @@ export default function App(){
             ?<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>
             :claimsError
               ?<div style={{paddingTop:32,color:C.red,fontSize:13}}>Failed to load claims: {claimsError.message}</div>
-              :<AdminDashboard claims={claims} onSelect={setSelectedId} onGenPDF={()=>{}} onPushCMS={()=>{}} jsPdfReady={jsPdfReady}/>
+              :<AdminDashboard claims={claims} onSelect={setSelectedId} onGenPDF={()=>{}} onPushCMS={()=>{}} jsPdfReady={jsPdfReady} notify={notify}/>
         )}
         {role==="admin"&&adminView==="rfas"&&<RFACenter notify={notify}/>}
         {role==="admin"&&adminView==="notices"&&<NoticeCenter claims={claims} jsPdfReady={jsPdfReady} notify={notify}/>}
-        {role==="admin"&&adminView==="agents"&&<AgentsConsole notify={notify}/>}
-        {role==="admin"&&adminView==="integrations"&&<IntegrationsConsole notify={notify}/>}
-        {role==="admin"&&adminView==="reports"&&<AdminReports onSelect={setSelectedId}/>}
-        {role==="admin"&&adminView==="architecture"&&<Architecture/>}
+        {role==="admin"&&adminView==="agents"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><AgentsConsole notify={notify}/></Suspense>}
+        {role==="admin"&&adminView==="integrations"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><IntegrationsConsole notify={notify}/></Suspense>}
+        {role==="admin"&&adminView==="reports"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><AdminReports onSelect={setSelectedId}/></Suspense>}
+        {role==="admin"&&adminView==="architecture"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><Architecture/></Suspense>}
         {role==="employer"&&<EmployerPortal employerUser={employerUser} setEmployerUser={setEmployerUser} onSelect={setSelectedId}/>}
         {role==="employee"&&(
           <div style={{paddingTop:32,maxWidth:660,animation:"fadeUp .3s ease"}}>

@@ -24,6 +24,7 @@
  */
 
 const { supabase } = require('../services/supabase');
+const config = require('../config');
 const logger       = require('../logger');
 
 // ── Personas ──────────────────────────────────────────────────────────────────
@@ -32,6 +33,8 @@ const logger       = require('../logger');
 // last-4-only per data-model.md). DOIs are computed at runtime as
 // today - N days so the demo never goes stale.
 //
+const SEED_MODEL = 'claude-sonnet-4-6';
+
 const EMPLOYER_BRIGHTCARE = {
   id:   'employer-brightcare-001',
   name: 'BrightCare Home Health, Inc.',
@@ -240,7 +243,56 @@ async function wipeDemo() {
  * Seed all 8 demo claims. Idempotent: runs wipeDemo first.
  * Returns { count, ids, employers }.
  */
+async function _seedTriageDocument() {
+  // A low-confidence inbound fax the agent refused to file — sits in the
+  // human triage queue (the pipeline's core guardrail on display).
+  await supabase.from('claim_documents').insert({
+    id: 'doc_demo_triage_001',
+    claim_id: null,
+    title: 'Faxed medical note — illegible header',
+    category: 'other',
+    source: 'fax',
+    received_at: isoDaysAgo(1),
+    pages: 1,
+    status: 'triage',
+    ai_summary: 'Single-page handwritten clinical note. Patient name partially legible; no claim number found in text. Appears to reference knee treatment.',
+    relevant_to: [],
+    classification_confidence: 41,
+    classification_model: SEED_MODEL,
+    triage_status: 'pending',
+    triage_reason: 'confidence_below_threshold (41 < 70)',
+    version: 1,
+    created_at: isoDaysAgo(1),
+    updated_at: isoDaysAgo(1),
+  });
+}
+
+async function _seedCarriersAndPolicies() {
+  // One carried employer (BrightCare via Pacific Compass) and one
+  // self-insured (Westside). DOI-windowed so resolvePolicy() exercises
+  // the date-interval logic on the demo book.
+  await supabase.from('insurers').insert({
+    id: 'ins_demo_pacific', fein: '954000001', name: 'Pacific Compass Insurance Co.',
+    naic_code: '12345', active: true,
+    created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
+  });
+  await supabase.from('policies').insert({
+    id: 'pol_demo_brightcare_2026', employer_id: EMPLOYER_BRIGHTCARE.id,
+    insurer_id: 'ins_demo_pacific', policy_number: 'WC-2026-88421',
+    effective_date: '2026-01-01', expiration_date: '2026-12-31', self_insured: false,
+    created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
+  });
+  await supabase.from('policies').insert({
+    id: 'pol_demo_westside_2026', employer_id: EMPLOYER_WESTSIDE.id,
+    insurer_id: null, policy_number: 'SI-CERT-04417',
+    effective_date: '2026-01-01', expiration_date: null, self_insured: true,
+    created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
+  });
+}
+
 async function seedDemo() {
+  await _seedCarriersAndPolicies();
+  await _seedTriageDocument();
   await wipeDemo();
 
   // Upsert employers so the FK is satisfied. Both rows are safe to
@@ -518,8 +570,19 @@ async function _seedOneClaim(id, idx, plan, persona) {
   }
 
   // Documents appropriate to status (with AI summaries for the decision brief)
-  for (const doc of _buildDocuments(id, idx, plan)) {
+  const docRows = _buildDocuments(id, idx, plan);
+  for (const doc of docRows) {
     await supabase.from('claim_documents').insert(doc);
+  }
+
+  // Link open diaries to the source documents that queued them — the
+  // document-to-action demo path the drawer renders end to end.
+  for (const doc of docRows) {
+    for (const dtype of (doc.relevant_to || [])) {
+      await supabase.from('diaries')
+        .update({ source_document_id: doc.id })
+        .eq('claim_id', id).eq('diary_type', dtype).eq('status', 'open');
+    }
   }
 
   // RFA if specified
@@ -748,7 +811,7 @@ function _buildDiaries(claimId, plan) {
     claim_id:    claimId,
     diary_type:  type,
     due_date:    inDays(dueOffset),
-    assigned_to: 'system@homecaretpa.com',
+    assigned_to: config.adjuster.email,
     priority,
     notes,
     status:      'open',
@@ -805,13 +868,17 @@ function _buildDocuments(claimId, idx, plan) {
     source:      'inbound_mail',
     pages:       fields.pages || 2,
     status:      'filed',
+    classification_confidence: fields.classification_confidence ?? 88 + (offset % 10),
+    classification_model: SEED_MODEL,
+    triage_status: 'none',
+    version:     1,
     created_at:  isoDaysAgo(offset),
     ...fields,
   });
 
   const common = [
     doc('froi', plan.daysAgo, {
-      title: 'DWC-1 / First Report of Injury', category: 'claim_form', source: 'employer', pages: 3,
+      title: 'DWC-1 / First Report of Injury', category: 'state_form', source: 'employer', pages: 3,
       ai_summary: 'Employer first report. Injury reported same day; mechanism consistent with the worker statement. No witnesses listed; employer does not contest.',
       relevant_to: ['DWC1_ISSUE', 'COMPENSABILITY_DECISION_DUE'],
     }),
@@ -822,26 +889,26 @@ function _buildDocuments(claimId, idx, plan) {
       return common;
     case 'intake_complete':
       return [...common, doc('intake_media', plan.daysAgo - 1, {
-        title: 'Worker intake — voice transcript & photos', category: 'intake', source: 'employee_portal',
+        title: 'Worker intake — voice transcript & photos', category: 'correspondence', source: 'employee_portal',
         ai_summary: 'Voice intake transcript (Spanish, auto-translated). Worker describes lifting injury during patient transfer; photos of the work area attached. Extraction confidence high; all fields pending human verification.',
         relevant_to: ['AI_ANALYSIS_PENDING'],
       })];
     case 'under_investigation':
       return [...common,
         doc('med_initial', plan.daysAgo - 3, {
-          title: 'Initial treating physician report (PR-1)', category: 'medical_report', source: 'provider', pages: 6,
+          title: 'Initial treating physician report (PR-1)', category: 'medical', source: 'provider', pages: 6,
           ai_summary: 'First visit report. Dx: lumbar strain; objective findings limited to reduced ROM. Work restrictions: no lifting >10 lbs for 2 weeks. Causation attributed to the reported incident.',
           relevant_to: ['COMPENSABILITY_DECISION_DUE'],
         }),
         doc('wage_stmt', plan.daysAgo - 2, {
-          title: 'Wage statement (12 months)', category: 'wage_statement', source: 'employer',
+          title: 'Wage statement (12 months)', category: 'wage', source: 'employer',
           ai_summary: 'Payroll export covering 52 weeks. Supports the calculated AWW; two unpaid gaps consistent with scheduled leave, not disputed time.',
           relevant_to: ['COMPENSABILITY_DECISION_DUE'],
         })];
     case 'active_medical':
       return [...common,
         doc('pr2', 4, {
-          title: 'PR-2 progress report', category: 'medical_report', source: 'provider', pages: 4,
+          title: 'PR-2 progress report', category: 'medical', source: 'provider', pages: 4,
           ai_summary: 'Treating physician progress report. Symptoms improving with PT; remains TTD. Next re-evaluation in 3 weeks. No new body parts claimed.',
           relevant_to: ['TD_PAYMENT_REVIEW'],
         }),
@@ -854,7 +921,7 @@ function _buildDocuments(claimId, idx, plan) {
     case 'pd_evaluation':
       return [...common,
         doc('pr4', 6, {
-          title: 'PR-4 permanent & stationary report', category: 'medical_report', source: 'provider', pages: 9,
+          title: 'PR-4 permanent & stationary report', category: 'medical', source: 'provider', pages: 9,
           ai_summary: 'P&S report. WPI 8% lumbar spine with apportionment 90/10 industrial. Future medical: PRN flare-ups. Supports moving to PD rating.',
           relevant_to: ['PD_ADVANCE_DUE'],
         }),
@@ -876,7 +943,7 @@ function _buildDocuments(claimId, idx, plan) {
           relevant_to: ['CNR_OFFER_FOLLOWUP'],
         }),
         doc('pr4', 12, {
-          title: 'PR-4 permanent & stationary report', category: 'medical_report', source: 'provider', pages: 9,
+          title: 'PR-4 permanent & stationary report', category: 'medical', source: 'provider', pages: 9,
           ai_summary: 'P&S report underlying the rating. WPI 8% with standard apportionment; future medical limited to PRN care — priced into the C&R.',
           relevant_to: ['CNR_OFFER_FOLLOWUP'],
         })];

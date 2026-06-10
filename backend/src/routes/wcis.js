@@ -147,4 +147,49 @@ router.post('/admin/transactions/:id/abandon', async (req, res) => {
   }
 });
 
+// ── GET /api/v1/wcis/quality-metrics — DWC Audit-Unit-style dashboard ───────
+// Rejection/TE rates, late + ack-overdue counts, claims with no accepted
+// FROI, and per-MTC-family rejection breakdown. Metrics become meaningful
+// once a real adapter produces production acks; on the stub they reflect
+// synthesized acks.
+router.get('/quality-metrics', requireAuth, requireRole(['admin']), async (_req, res) => {
+  try {
+    const { data: txData }   = await supabase.from('wcis_transactions').select('*');
+    const { data: qData } = await supabase.from('wcis_trigger_queue').select('*');
+    const { data: sData } = await supabase.from('wcis_claim_state').select('*');
+    const txs = txData || [], queue = qData || [], states = sData || [];
+
+    const transmitted = txs.filter(t =>
+      ['transmitted', 'stub_transmitted', 'accepted', 'accepted_with_error', 'rejected'].includes(t.status));
+    const rejected = txs.filter(t => t.status === 'rejected');
+    const te       = txs.filter(t => t.status === 'accepted_with_error');
+    const today = new Date().toISOString().split('T')[0];
+    const ackOverdue = txs.filter(t =>
+      ['transmitted', 'stub_transmitted'].includes(t.status) && !t.ack_received_at);
+    const lateQueue = queue.filter(q =>
+      q.status === 'pending' && q.deadline_date && q.deadline_date < today);
+
+    const byFamily = {};
+    for (const t of transmitted) {
+      const fam = t.mtc_family || 'UNKNOWN';
+      byFamily[fam] = byFamily[fam] || { transmitted: 0, rejected: 0, te: 0 };
+      byFamily[fam].transmitted += 1;
+      if (t.status === 'rejected') byFamily[fam].rejected += 1;
+      if (t.status === 'accepted_with_error') byFamily[fam].te += 1;
+    }
+
+    const pct = (n, d) => d === 0 ? 0 : Math.round((n / d) * 1000) / 10;
+    res.json({
+      transmitted_total: transmitted.length,
+      rejection_rate_pct: pct(rejected.length, transmitted.length),
+      te_rate_pct: pct(te.length, transmitted.length),
+      ack_overdue_count: ackOverdue.length,
+      late_pending_triggers: lateQueue.length,
+      claims_without_accepted_froi: states.filter(s => !s.first_froi_accepted_at).length,
+      by_mtc_family: byFamily,
+      adapter_note: 'Metrics reflect the configured WCIS adapter; stub-synthesized acks are not production data.',
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
