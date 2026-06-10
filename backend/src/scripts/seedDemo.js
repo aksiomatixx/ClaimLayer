@@ -570,8 +570,19 @@ async function _seedOneClaim(id, idx, plan, persona) {
   }
 
   // Documents appropriate to status (with AI summaries for the decision brief)
-  for (const doc of _buildDocuments(id, idx, plan)) {
+  const docRows = _buildDocuments(id, idx, plan);
+  for (const doc of docRows) {
     await supabase.from('claim_documents').insert(doc);
+  }
+
+  // Link open diaries to the source documents that queued them — the
+  // document-to-action demo path the drawer renders end to end.
+  for (const doc of docRows) {
+    for (const dtype of (doc.relevant_to || [])) {
+      await supabase.from('diaries')
+        .update({ source_document_id: doc.id })
+        .eq('claim_id', id).eq('diary_type', dtype).eq('status', 'open');
+    }
   }
 
   // RFA if specified
