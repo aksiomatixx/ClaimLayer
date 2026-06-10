@@ -357,6 +357,11 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
       diary_type:  'COMPENSABILITY_DECISION_DUE',
       due_date:    new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
                      .toISOString().split('T')[0],
+      // The immutable statutory ceiling: delays may reschedule the
+      // review but never beyond this date (LC §5402 presumption).
+      statutory_deadline: new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
+                     .toISOString().split('T')[0],
+      no_snooze:   true,
       assigned_to: config.adjuster.email,
       priority:    'CRITICAL',
       notes:       `LC §5402 — claim presumed compensable by operation of law if not accepted or denied within 90 calendar days. DOI: ${doi}. Missing this deadline is a critical compliance failure.`,

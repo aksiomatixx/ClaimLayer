@@ -81,8 +81,15 @@ const AFTERMATH_RULES = {
       delay: {
         describe: 'Delay the decision within the LC §5402 window',
         notices: [],
+        // The ceiling makes the LC §5402 deadline immutable: a delay can
+        // reschedule the review, never the statute. Successors are capped
+        // at the original statutory deadline (stored on the diary at
+        // creation, derived from DOI+90 as the fallback); if the deadline
+        // has already passed, no successor is created — a CRITICAL
+        // escalation surfaces instead.
         successors: [{ diary_type: 'COMPENSABILITY_DECISION_DUE', due_days: 30, priority: 'CRITICAL',
-                       notes: 'Delayed decision — LC §5402 90-day window still running.' }],
+                       notes: 'Delayed decision — LC §5402 90-day window still running.',
+                       ceiling: { basis: 'doi_plus_days', days: 90, cite: 'LC §5402' } }],
         ai_link: 'compensability',
       },
     },
@@ -179,7 +186,7 @@ async function previewAftermath(diaryId) {
         'Complete this diary and document the decision',
         ...(o.ai_link ? [`Link your decision to the ${o.ai_link} AI recommendation in the audit trail`] : []),
         ...o.notices.map(n => `Generate + queue the "${n.type}" statutory notice (attorney copy if represented)`),
-        ...o.successors.map(s => `Set the next diary: ${s.diary_type} due in ${s.due_days} days (${s.priority})`),
+        ...o.successors.map(s => `Set the next diary: ${s.diary_type} due in ${s.due_days} days (${s.priority}${s.ceiling ? `; capped at the ${s.ceiling.cite} statutory deadline` : ''})`),
         ...(o.status_to ? [`Transition the claim to "${o.status_to}" (WCIS reporting fires automatically)`] : []),
       ],
     };
@@ -289,6 +296,7 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
   const created = { noticeIds: [], noticeDocIds: [], successorIds: [], eventIds: [], outboxIds: [], prevStatus: null };
   const noticesGenerated = [];
   const successors = [];
+  const escalations = [];
   let statusTransition = null;
 
   try {
@@ -322,6 +330,9 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
     }
 
     // 2. Set the successor diaries (idempotent on the successor key).
+    //    Successors with a statutory ceiling are capped at the immutable
+    //    original deadline; a deadline already in the past produces a
+    //    CRITICAL escalation instead of a successor (Finding 6).
     for (const s of outcome.successors) {
       const idemKey = `succ:${diaryId}:${s.diary_type}`;
       const { data: existing, error: exErr } = await supabase
@@ -331,13 +342,61 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
         successors.push(existing[0]);
         continue;
       }
+
+      let dueDate = _addDays(s.due_days);
+      let statutoryDeadline = null;
+      if (s.ceiling) {
+        statutoryDeadline = diary.statutory_deadline ||
+          await _deriveCeiling(claimId, s.ceiling);
+        const today = new Date().toISOString().split('T')[0];
+        if (statutoryDeadline && statutoryDeadline < today) {
+          // The statutory deadline has PASSED — never reschedule past
+          // it. Surface an immediate critical escalation instead.
+          const esc = {
+            id: _rid('diy'),
+            claim_id: claimId,
+            diary_type: 'STATUTORY_DEADLINE_ESCALATION',
+            due_date: today,
+            assigned_to: config.adjuster.email,
+            priority: 'CRITICAL', status: 'open', no_snooze: true,
+            parent_diary_id: diaryId,
+            idempotency_key: `esc:${diaryId}:${s.diary_type}`,
+            statutory_deadline: statutoryDeadline,
+            notes: `${s.ceiling.cite} statutory deadline ${statutoryDeadline} has PASSED — ` +
+                   `the ${s.diary_type} decision cannot be delayed further. ` +
+                   'Presumption/penalty exposure: resolve immediately.',
+            created_at: now,
+          };
+          const { error: escErr } = await supabase.from('diaries').insert(esc);
+          if (escErr) throw new Error(`escalation insert failed: ${escErr.message}`);
+          created.successorIds.push(esc.id);
+          escalations.push(esc);
+
+          const breachEv = {
+            id: _rid('evt'),
+            claim_id: claimId, type: 'statutory_deadline_breached', timestamp: now,
+            data: { diary_id: diaryId, diary_type: s.diary_type, cite: s.ceiling.cite,
+                    statutory_deadline: statutoryDeadline, escalation_diary_id: esc.id },
+          };
+          const { error: bevErr } = await supabase.from('claim_events').insert(breachEv);
+          if (bevErr) throw new Error(`breach event insert failed: ${bevErr.message}`);
+          created.eventIds.push(breachEv.id);
+          continue;
+        }
+        if (statutoryDeadline && dueDate > statutoryDeadline) {
+          dueDate = statutoryDeadline; // capped at the immutable original deadline
+        }
+      }
+
       const row = {
         id: _rid('diy'),
         claim_id: claimId, diary_type: s.diary_type,
-        due_date: _addDays(s.due_days), assigned_to: config.adjuster.email,
+        due_date: dueDate, assigned_to: config.adjuster.email,
         priority: s.priority, status: 'open', notes: s.notes,
         parent_diary_id: diaryId,
         idempotency_key: idemKey,
+        statutory_deadline: statutoryDeadline,
+        ...(statutoryDeadline ? { no_snooze: true } : {}),
         created_at: now,
       };
       const { error: insErr } = await supabase.from('diaries').insert(row);
@@ -419,9 +478,25 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
     diary_type: diary.diary_type,
     action: action || 'complete',
     notices_generated: noticesGenerated,
-    successor_diaries: successors.map(s => ({ id: s.id, diary_type: s.diary_type, due_date: s.due_date })),
+    successor_diaries: successors.map(s => ({ id: s.id, diary_type: s.diary_type, due_date: s.due_date, statutory_deadline: s.statutory_deadline || null })),
+    escalations: escalations.map(e => ({ id: e.id, diary_type: e.diary_type, due_date: e.due_date, statutory_deadline: e.statutory_deadline })),
     status_transition: statusTransition,
   };
+}
+
+/**
+ * Derive a successor's statutory ceiling when the parent diary does not
+ * carry one (legacy rows): doi_plus_days anchors to the claim's
+ * date_of_injury — immutable, so the ceiling cannot drift.
+ */
+async function _deriveCeiling(claimId, ceiling) {
+  if (ceiling.basis !== 'doi_plus_days') return null;
+  const { data: claim, error } = await supabase
+    .from('claims').select('date_of_injury').eq('id', claimId).single();
+  if (error || !claim?.date_of_injury) return null;
+  const d = new Date(`${claim.date_of_injury}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + ceiling.days);
+  return d.toISOString().split('T')[0];
 }
 
 // ── System-of-record write-back (outbox rows) ────────────────────────────────
@@ -539,6 +614,11 @@ async function editAction(diaryId, { due_date, priority, notes } = {}, actorEmai
   if (diary.status !== 'open') throw new Error('Diary is not open');
   if (diary.no_snooze && due_date && due_date > diary.due_date) {
     throw new Error('NO_SNOOZE_DIARY — statutory penalty diaries cannot be pushed out');
+  }
+  if (diary.statutory_deadline && due_date && due_date > diary.statutory_deadline) {
+    throw new Error(
+      `STATUTORY_DEADLINE_CEILING — this diary's statutory deadline is ${diary.statutory_deadline}; ` +
+      'it cannot be rescheduled beyond it');
   }
 
   const patch = { updated_at: new Date().toISOString() };
