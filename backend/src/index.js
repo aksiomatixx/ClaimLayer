@@ -48,6 +48,13 @@ app.use((req, res, next) => {
 });
 
 app.use(helmet());
+
+// Webhook receivers verify HMAC signatures over the EXACT raw request
+// bytes, so they mount BEFORE any body parsing — a JSON-parsed and
+// re-serialized body would change whitespace/key order and break
+// signature verification.
+app.use('/webhooks', webhooksRouter);
+
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(auditLog);
@@ -101,7 +108,7 @@ app.use('/api/v1',               require('./routes/ai-decisions'));
 app.use('/api/v1',               require('./routes/integrations'));
 app.use('/api/v1',               require('./routes/policies'));
 app.use('/api/v1',               require('./routes/diaries'));
-app.use('/webhooks',             webhooksRouter);
+// (webhooks router is mounted above, before body parsing)
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────
 try {

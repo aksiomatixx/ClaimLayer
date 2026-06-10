@@ -6,9 +6,20 @@
  *   • Enlyte UR              →  /webhooks/enlyte/determination
  *   • Lob.com delivery       →  /webhooks/lob/delivery
  *
- * HMAC validation is performed on raw bytes (express.raw) so we never
- * accidentally validate against a re-serialised body.
- * If no secret is configured (local dev / mocks), validation is skipped.
+ * Signature policy (Finding 8 of the production-hardening pass):
+ *   - This router mounts BEFORE the global express.json() so every
+ *     route receives the exact raw request bytes (express.raw) and HMAC
+ *     verification can never run against a re-serialized body.
+ *   - Production fails CLOSED: a missing secret or missing signature is
+ *     a 401, always.
+ *   - Outside production the bypass is explicit and narrow: only when
+ *     no secret is configured for that webhook. If a secret IS
+ *     configured (as in the signature tests), verification runs the
+ *     same code path as production.
+ *
+ * Lob signs per its documented scheme: Lob-Signature is the hex
+ * HMAC-SHA256 of `${Lob-Signature-Timestamp}.${raw body}`; stale
+ * timestamps are rejected to bound replays.
  */
 
 const express = require('express');
@@ -18,41 +29,60 @@ const logger  = require('../logger');
 
 const router = express.Router();
 
-// ── HMAC helper ───────────────────────────────────────────────────────────────
-function validateHMAC(secret, rawBody, signature) {
-  // Skip validation entirely outside production (test / mock servers don't sign)
-  if (process.env.NODE_ENV !== 'production') return true;
+const LOB_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
-  if (!secret || !signature) return false;
+function _isProduction() {
+  return process.env.NODE_ENV === 'production';
+}
 
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(rawBody)
-    .digest('hex');
-
+function _safeEqualHex(a, b) {
   try {
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   } catch {
     return false; // length mismatch → invalid
   }
 }
 
-function parseJSON(rawBody) {
-  // express.raw() gives a Buffer; express.json() (applied globally) gives an object.
-  // Handle both so the route works whether or not the body was pre-parsed.
-  if (Buffer.isBuffer(rawBody)) {
-    try { return JSON.parse(rawBody); } catch { return null; }
+// ── Generic HMAC-SHA256 over the exact raw request bytes ─────────────────────
+function validateHMAC(secret, rawBody, signature) {
+  if (!secret) {
+    if (_isProduction()) return false; // fail closed: production requires a secret
+    return true; // explicit non-production bypass — no secret configured
   }
-  if (typeof rawBody === 'object' && rawBody !== null) return rawBody;
-  if (typeof rawBody === 'string') {
-    try { return JSON.parse(rawBody); } catch { return null; }
+  if (!signature || !Buffer.isBuffer(rawBody)) return false;
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  return _safeEqualHex(signature, expected);
+}
+
+// ── Lob signature: HMAC-SHA256 of `${timestamp}.${raw body}` ─────────────────
+function validateLobSignature(secret, rawBody, timestamp, signature) {
+  if (!secret) {
+    if (_isProduction()) return false;
+    return true; // explicit non-production bypass — no secret configured
+  }
+  if (!signature || !timestamp || !Buffer.isBuffer(rawBody)) return false;
+
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts)) return false;
+  if (Math.abs(Date.now() - ts) > LOB_TIMESTAMP_TOLERANCE_MS) return false;
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(Buffer.concat([Buffer.from(`${timestamp}.`), rawBody]))
+    .digest('hex');
+  return _safeEqualHex(signature, expected);
+}
+
+function parseJSON(rawBody) {
+  if (Buffer.isBuffer(rawBody)) {
+    try { return JSON.parse(rawBody.toString('utf8')); } catch { return null; }
   }
   return null;
 }
 
 // ── POST /webhooks/dxf/adt — Manifest MedEx ADT event ────────────────────────
 // A01 = Admit, A02 = Transfer, A03 = Discharge
-router.post('/dxf/adt', express.raw({ type: 'application/json' }), (req, res) => {
+router.post('/dxf/adt', express.raw({ type: '*/*' }), (req, res) => {
   const sig = req.headers['x-medex-signature'] || '';
 
   if (!validateHMAC(config.webhooks.dxfSecret, req.body, sig)) {
@@ -78,7 +108,7 @@ router.post('/dxf/adt', express.raw({ type: 'application/json' }), (req, res) =>
 });
 
 // ── POST /webhooks/enlyte/determination — UR determination ───────────────────
-router.post('/enlyte/determination', express.raw({ type: 'application/json' }), (req, res) => {
+router.post('/enlyte/determination', express.raw({ type: '*/*' }), (req, res) => {
   const sig = req.headers['x-enlyte-signature'] || '';
 
   if (!validateHMAC(config.webhooks.enlyteSecret, req.body, sig)) {
@@ -107,24 +137,40 @@ router.post('/enlyte/determination', express.raw({ type: 'application/json' }), 
   res.status(202).json({ received: true });
 });
 
-// ── POST /webhooks/lob/delivery — Letter delivery confirmation ────────────────
-// Lob uses its own signature scheme; validate using LOB_WEBHOOK_SECRET if set.
-router.post('/lob/delivery', express.json(), (req, res) => {
-  const event = req.body;
+// ── POST /webhooks/lob/delivery — letter delivery events ─────────────────────
+// Only a verified provider delivery event may move physical mail to
+// delivered; processing is idempotent on Lob's event id (duplicate
+// webhook deliveries are acknowledged without reprocessing).
+router.post('/lob/delivery', express.raw({ type: '*/*' }), async (req, res) => {
+  const sig = req.headers['lob-signature'] || '';
+  const ts  = req.headers['lob-signature-timestamp'] || '';
+
+  if (!validateLobSignature(config.webhooks.lobSecret, req.body, ts, sig)) {
+    logger.warn({ msg: 'Lob delivery: signature validation failed', ip: req.ip });
+    return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
+  const event = parseJSON(req.body);
+  if (!event) return res.status(400).json({ error: 'Invalid JSON body' });
 
   logger.info({
     msg:         'Lob delivery event',
-    letterId:    event.id,
-    eventType:   event.event_type,
-    claimNumber: event.metadata?.claim_id,
-    noticeType:  event.metadata?.notice_type,
+    eventId:     event.id,
+    letterId:    event.body?.id || event.reference_id,
+    eventType:   event.event_type?.id || event.event_type,
   });
 
-  // TODO M8:
-  //   1. Update notice.status → 'delivered' in DB
-  //   2. Complete the relevant statutory-deadline diary in FileHandler
-
-  res.status(200).json({ received: true });
+  try {
+    const delivery = require('../services/noticeDeliveryService');
+    const result = await delivery.recordLobEvent(event);
+    res.status(200).json({ received: true, ...result });
+  } catch (err) {
+    logger.error({ msg: 'Lob delivery: event processing failed', err: err.message });
+    // 500 → Lob retries; processing is idempotent so a retry is safe.
+    res.status(500).json({ error: 'Event processing failed' });
+  }
 });
 
 module.exports = router;
+module.exports.validateHMAC = validateHMAC;
+module.exports.validateLobSignature = validateLobSignature;
