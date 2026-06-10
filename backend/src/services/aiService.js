@@ -178,11 +178,13 @@ async function evaluateRFA(rfa, claim) {
 
   const { parsed: result, raw, meta } = await callClaudeMeta(systemPrompt, JSON.stringify(inputSnapshot), 1000);
 
-  // Safety guard: AI must never return a denial
+  // Safety guard: AI must never return a denial — and a missing/falsy
+  // action is equally unsafe (fail-closed: adversarial harness caught the
+  // earlier `original && ...` guard letting null through unforced).
   const guardrails = [];
   const original = result.recommendedAction;
   const validActions = ['auto_approve', 'physician_review'];
-  if (original && !validActions.includes(original)) {
+  if (!validActions.includes(original)) {
     logger.error({ msg: 'Claude RFA: unexpected recommendedAction', value: original });
     result.recommendedAction = 'physician_review';
     guardrails.push({

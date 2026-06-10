@@ -74,11 +74,13 @@ describe('DOCUMENT_CATEGORIES', () => {
     'other',
   ];
 
-  it('contains exactly 11 controlled values', () => {
-    expect(DOCUMENT_CATEGORIES).toHaveLength(11);
+  it('contains exactly 13 controlled values (11 from M7 + work_status/settlement from Document Ingestion)', () => {
+    expect(DOCUMENT_CATEGORIES).toHaveLength(13);
+    expect(DOCUMENT_CATEGORIES).toContain('work_status');
+    expect(DOCUMENT_CATEGORIES).toContain('settlement');
   });
 
-  it('accepts all 11 controlled category values', () => {
+  it('accepts all 13 controlled category values', () => {
     EXPECTED.forEach(cat => {
       expect(DOCUMENT_CATEGORIES).toContain(cat);
     });

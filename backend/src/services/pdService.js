@@ -179,8 +179,14 @@ function _addCalendarDays(dateStr, days) {
 }
 
 // ── PD weekly rate helper ────────────────────────────────────────────────────
+// Bracket-crossing fix (M14.5 cleanup): final ratings land on 0.25% steps,
+// but computed pdPercent can fall strictly between the low band's ceiling
+// (69.75) and the high band's floor (70) after apportionment rounding.
+// The bands must be airtight: anything ABOVE the low band's ceiling uses
+// the high tier — the previous `>= 70` test silently dropped 69.76–69.99
+// into the low band.
 function _computePDWeeklyRate(aww, pdPercent) {
-  const tier = pdPercent >= PD_RATES_2026.high.threshold ? PD_RATES_2026.high : PD_RATES_2026.low;
+  const tier = pdPercent > PD_RATES_2026.low.threshold ? PD_RATES_2026.high : PD_RATES_2026.low;
   const raw  = (aww || 0) * (2 / 3);
   return Math.round(Math.max(tier.min, Math.min(tier.max, raw)) * 100) / 100;
 }
