@@ -50,9 +50,10 @@ describe('seedDemo', () => {
     expect(out.ids[0]).toBe('claim_demo_001');
     expect(out.ids[7]).toBe('claim_demo_008');
 
-    // 8 from LIFECYCLE_PLANS + 1 pre-migrated legacy example (LEG-000).
+    // 8 from LIFECYCLE_PLANS + 1 pre-migrated legacy example (LEG-000)
+    // + the linked 2024 prior Rosa Mendez claim (CL-DEMO2).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
   });
 
   it('every seeded claim has metadata.demo === true', async () => {
@@ -79,9 +80,10 @@ describe('seedDemo', () => {
     const b = await seedDemo();
     expect(b.count).toBe(8);
     expect(b.ids).toEqual(a.ids);
-    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000).
+    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
+    // + the linked 2024 prior claim (CL-DEMO2).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
   });
 
   it('writes claim_events and diaries per plan', async () => {
@@ -294,9 +296,10 @@ describe('POST /api/v1/admin/demo-reset', () => {
     expect(res.body.ok).toBe(true);
     expect(res.body.count).toBe(8);
 
-    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000).
+    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
+    // + the linked 2024 prior claim (CL-DEMO2).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
   });
 
   it('401 without admin token', async () => {
@@ -329,12 +332,85 @@ describe('GET /api/v1/admin/demo-status', () => {
     expect(res.body.count).toBe(0);
   });
 
-  it('reports demo=true and count=9 after seed', async () => {
-    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000).
+  it('reports demo=true and count=10 after seed', async () => {
+    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
+    // + the linked 2024 prior claim (CL-DEMO2).
     await seedDemo();
     const res = await request(app).get('/api/v1/admin/demo-status').set('Cookie', `token=${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.demo).toBe(true);
-    expect(res.body.count).toBe(9);
+    expect(res.body.count).toBe(10);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+describe('CL-DEMO2 — linked prior claim + body-part consistency', () => {
+  const CURRENT = makeClaimId(2);     // Rosa Mendez 2026
+  const PRIOR   = 'claim_demo_009';   // Rosa Mendez 2024
+
+  beforeEach(async () => { await seedDemo(); });
+
+  it('both Rosa Mendez claims load: same worker, right shoulder, 2024 one closed', async () => {
+    const { data: cur } = await supabase.from('claims').select('*').eq('id', CURRENT).single();
+    const { data: prior } = await supabase.from('claims').select('*').eq('id', PRIOR).single();
+
+    expect(prior.claim_number).toBe('HHW-2024-D09');
+    expect(prior.status).toBe('closed');
+    expect(prior.date_of_injury).toBe('2024-03-12');
+    expect(prior.body_part).toBe('Shoulder');
+    expect(prior.employee.adpEmployeeId).toBe('DEMO-3');
+    expect(cur.employee.adpEmployeeId).toBe('DEMO-3'); // SAME worker
+    expect(prior.metadata.resolution).toBe('stipulated_award');
+  });
+
+  it('the link resolves in both directions through the real service', async () => {
+    const claimLinks = require('../../src/services/claimLinkService');
+    const from2026 = await claimLinks.listLinks(CURRENT);
+    const from2024 = await claimLinks.listLinks(PRIOR);
+
+    expect(from2026).toHaveLength(1);
+    expect(from2026[0].linked_claim.claim_number).toBe('HHW-2024-D09');
+    expect(from2026[0].linked_claim.status).toBe('closed');
+    expect(from2024).toHaveLength(1);
+    expect(from2024[0].linked_claim.id).toBe(CURRENT);
+  });
+
+  it('the descriptions cross-reference each other by claim number', async () => {
+    const { data: cur } = await supabase.from('claims').select('*').eq('id', CURRENT).single();
+    const { data: prior } = await supabase.from('claims').select('*').eq('id', PRIOR).single();
+    expect(cur.injury_description).toContain('HHW-2024-D09');
+    expect(prior.injury_description).toContain(cur.claim_number);
+  });
+
+  it("the 2026 red flag cites the linked 2024 claim number — traceable, not vague", async () => {
+    const { data: cur } = await supabase.from('claims').select('*').eq('id', CURRENT).single();
+    expect(cur.ai_analysis.redFlags.join(' ')).toContain('HHW-2024-D09');
+    expect(cur.ai_analysis.rationale).toContain('HHW-2024-D09');
+  });
+
+  it('the body-part discrepancy is fixed: PR-1 reads right shoulder, never lumbar', async () => {
+    const { data: docs } = await supabase.from('claim_documents').select('*').eq('claim_id', CURRENT);
+    const pr1 = docs.find(d => d.title.includes('PR-1'));
+    expect(pr1.ai_summary).toContain('right shoulder');
+    expect(pr1.ai_summary).toContain('no lifting >10 lbs');
+    for (const d of docs) {
+      expect(String(d.ai_summary || '')).not.toMatch(/lumbar/i);
+      expect(String(d.content_text || '')).not.toMatch(/lumbar/i);
+    }
+  });
+
+  it('the 2024 claim carries a closed file: completed diaries, documents, an approved worksheet', async () => {
+    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', PRIOR);
+    expect(diaries.length).toBeGreaterThanOrEqual(3);
+    expect(diaries.every(d => d.status === 'completed')).toBe(true);
+
+    const { data: docs } = await supabase.from('claim_documents').select('*').eq('claim_id', PRIOR);
+    expect(docs.some(d => d.title.includes('Stipulations'))).toBe(true);
+    for (const d of docs) expect(String(d.ai_summary || '')).toMatch(/right shoulder|shoulder/i);
+
+    const worksheet = require('../../src/services/reserveWorksheetService');
+    const ws = await worksheet.getWorksheet(PRIOR);
+    expect(ws.grand_total).toBeGreaterThan(0);
+    expect(ws.proposal.status).toBe('approved'); // closed file: reserves match the worksheet
   });
 });

@@ -124,6 +124,13 @@ export async function fetchWcisQualityMetrics() {
   return _json(await fetch(`${BASE}/wcis/quality-metrics`, _opts()));
 }
 
+// ── Claim links (CL-DEMO2) ───────────────────────────────────────────────────
+
+export async function fetchClaimLinks(claimId) {
+  const data = await _json(await fetch(`${BASE}/claims/${claimId}/links`, _opts()));
+  return data.links ?? [];
+}
+
 // ── Itemized reserve worksheets (CL-RSV1) ────────────────────────────────────
 
 export async function fetchReserveWorksheet(claimId) {

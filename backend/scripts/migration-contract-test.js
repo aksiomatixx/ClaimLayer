@@ -229,6 +229,27 @@ async function main() {
     `INSERT INTO reserve_line_items (id, claim_id, category, label, shape, total)
      VALUES ('rli_ct_bad2', 'claim_ct_1', 'medical', 'x', 'quantity', 0)`);
 
+  await check('claim_links stores a symmetric pair once', async () => {
+    await client.query(
+      `INSERT INTO claims (id, claim_number, employer_id, status, date_of_injury)
+       VALUES ('claim_ct_2', 'HHW-2024-CT2', 'employer-ct', 'closed', '2024-03-12')`);
+    await client.query(
+      `INSERT INTO claim_links (id, claim_id_a, claim_id_b, relation_type, note)
+       VALUES ('clk_ct_1', 'claim_ct_1', 'claim_ct_2', 'prior_claim_same_worker', 'same worker')`);
+  });
+  await expectViolation(client,
+    'a duplicate link for the same pair is rejected',
+    `INSERT INTO claim_links (id, claim_id_a, claim_id_b)
+     VALUES ('clk_ct_2', 'claim_ct_1', 'claim_ct_2')`);
+  await expectViolation(client,
+    'self-links are rejected',
+    `INSERT INTO claim_links (id, claim_id_a, claim_id_b)
+     VALUES ('clk_ct_3', 'claim_ct_1', 'claim_ct_1')`);
+  await expectViolation(client,
+    'unknown relation types are rejected',
+    `INSERT INTO claim_links (id, claim_id_a, claim_id_b, relation_type)
+     VALUES ('clk_ct_4', 'claim_ct_2', 'claim_ct_1', 'duplicate_of')`);
+
   await check('magic-link single use is atomic (conditional update wins exactly once)', async () => {
     await client.query(
       `INSERT INTO magic_link_tokens (jti, claim_id, adp_employee_id, expires_at)
