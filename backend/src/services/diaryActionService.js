@@ -61,10 +61,22 @@ function _addDays(n) {
 // outcome := { notices: [{type, ctx}], successors: [{diary_type, due_days,
 //              priority, notes}], status_to, ai_link: decision_type }
 const AFTERMATH_RULES = {
-  COMPENSABILITY_DECISION_DUE: {
+  // Initial compensability posture (corrected model, per the licensed
+  // adjuster): on claim knowledge / claim form receipt the adjuster must
+  // ACCEPT, DENY, or DELAY within 14 calendar days. Only a DELAY inside
+  // that window creates the 90-day decision diary — anchored to claim
+  // form receipt, the LC §5402 presumption date. Accept/deny within 14
+  // days means the 90-day diary never exists.
+  // REGULATORY-PENDING: the controlling sections for the 14-day
+  // accept/deny/delay-notice requirement and the LC §5402 90-day
+  // presumption are NOT committed under docs/regulatory/ — citations
+  // here are carried from existing repo copy and remain PENDING
+  // verification against a committed source.
+  COMPENSABILITY_NOTICE_DUE: {
     decisions: {
       accept: {
         describe: 'Accept the claim',
+        requires_note: true,
         notices: [{ type: 'claim_accepted' }],
         successors: [{ diary_type: 'TD_PAYMENT_SETUP', due_days: 3, priority: 'HIGH',
                        notes: 'Claim accepted — set up TD benefits if the worker is losing time.' }],
@@ -73,23 +85,44 @@ const AFTERMATH_RULES = {
       },
       deny: {
         describe: 'Deny the claim (licensed-human-only action)',
+        requires_note: true,
         notices: [{ type: 'claim_denied' }],
         successors: [],
         status_to: 'denied',
         ai_link: 'compensability',
       },
       delay: {
-        describe: 'Delay the decision within the LC §5402 window',
-        notices: [],
-        // The ceiling makes the LC §5402 deadline immutable: a delay can
-        // reschedule the review, never the statute. Successors are capped
-        // at the original statutory deadline (stored on the diary at
-        // creation, derived from DOI+90 as the fallback); if the deadline
-        // has already passed, no successor is created — a CRITICAL
-        // escalation surfaces instead.
-        successors: [{ diary_type: 'COMPENSABILITY_DECISION_DUE', due_days: 30, priority: 'CRITICAL',
-                       notes: 'Delayed decision — LC §5402 90-day window still running.',
-                       ceiling: { basis: 'doi_plus_days', days: 90, cite: 'LC §5402' } }],
+        describe: 'Delay the decision — the delay notice issues and the LC §5402 90-day clock sets the final decision diary',
+        requires_note: true,
+        notices: [{ type: 'claim_delay' }],
+        // The successor lands ON the presumption date: 90 calendar days
+        // from claim form receipt (claims.filed_at), immutable.
+        successors: [{ diary_type: 'COMPENSABILITY_DECISION_DUE', priority: 'CRITICAL',
+                       notes: 'Delayed within the 14-day window — final accept/deny due by the LC §5402 presumption date (90 calendar days from claim form receipt).',
+                       due_basis: { anchor: 'claim_form_receipt', days: 90, cite: 'LC §5402' } }],
+        ai_link: 'compensability',
+      },
+    },
+  },
+  // The post-delay final decision. Delay is no longer available here:
+  // the presumption date cannot be moved.
+  COMPENSABILITY_DECISION_DUE: {
+    decisions: {
+      accept: {
+        describe: 'Accept the claim',
+        requires_note: true,
+        notices: [{ type: 'claim_accepted' }],
+        successors: [{ diary_type: 'TD_PAYMENT_SETUP', due_days: 3, priority: 'HIGH',
+                       notes: 'Claim accepted — set up TD benefits if the worker is losing time.' }],
+        status_to: 'accepted',
+        ai_link: 'compensability',
+      },
+      deny: {
+        describe: 'Deny the claim (licensed-human-only action)',
+        requires_note: true,
+        notices: [{ type: 'claim_denied' }],
+        successors: [],
+        status_to: 'denied',
         ai_link: 'compensability',
       },
     },
@@ -182,11 +215,15 @@ async function previewAftermath(diaryId) {
     return {
       action,
       describe: o.describe,
+      requires_note: !!o.requires_note,
       will: [
         'Complete this diary and document the decision',
+        ...(o.requires_note ? ['Record your decision rationale (required — validated server-side)'] : []),
         ...(o.ai_link ? [`Link your decision to the ${o.ai_link} AI recommendation in the audit trail`] : []),
         ...o.notices.map(n => `Generate + queue the "${n.type}" statutory notice (attorney copy if represented)`),
-        ...o.successors.map(s => `Set the next diary: ${s.diary_type} due in ${s.due_days} days (${s.priority}${s.ceiling ? `; capped at the ${s.ceiling.cite} statutory deadline` : ''})`),
+        ...o.successors.map(s => s.due_basis
+          ? `Set the next diary: ${s.diary_type} due ON the ${s.due_basis.cite} presumption date (${s.due_basis.days} calendar days from claim form receipt; ${s.priority})`
+          : `Set the next diary: ${s.diary_type} due in ${s.due_days} days (${s.priority}${s.ceiling ? `; capped at the ${s.ceiling.cite} statutory deadline` : ''})`),
         ...(o.status_to ? [`Transition the claim to "${o.status_to}" (WCIS reporting fires automatically)`] : []),
       ],
     };
@@ -288,6 +325,14 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
       `Unknown action "${action}" for ${diary.diary_type}. Valid: ${_validActions(diary.diary_type).join(', ')}`);
   }
 
+  // Consequential decisions (compensability accept/deny/delay) require
+  // a documented rationale — validated here, server-side, before the
+  // diary is even claimed.
+  if (outcome.requires_note && !String(note || '').trim()) {
+    throw new Error(
+      `A decision rationale is required for "${action}" on ${diary.diary_type} — consequential decisions are documented, never bare.`);
+  }
+
   // The concurrency gate: only one completion may claim the diary.
   if (!(await _claimDiary(diary))) throw new Error('Diary is not open');
 
@@ -343,13 +388,25 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
         continue;
       }
 
-      let dueDate = _addDays(s.due_days);
+      let dueDate = s.due_days != null ? _addDays(s.due_days) : null;
       let statutoryDeadline = null;
-      if (s.ceiling) {
+      if (s.due_basis) {
+        // The successor lands ON the statutory date (e.g. the LC §5402
+        // presumption: 90 calendar days from claim form receipt). The
+        // date is immutable — derived from the claim record, never from
+        // when the delay decision happened to be made.
+        statutoryDeadline = await _deriveAnchorDate(claimId, s.due_basis);
+        if (!statutoryDeadline) {
+          throw new Error(`successor ${s.diary_type}: cannot derive the ${s.due_basis.cite} date — claim has no receipt date`);
+        }
+        dueDate = statutoryDeadline;
+      } else if (s.ceiling) {
         statutoryDeadline = diary.statutory_deadline ||
           await _deriveCeiling(claimId, s.ceiling);
+      }
+      if (statutoryDeadline) {
         const today = new Date().toISOString().split('T')[0];
-        if (statutoryDeadline && statutoryDeadline < today) {
+        if (statutoryDeadline < today) {
           // The statutory deadline has PASSED — never reschedule past
           // it. Surface an immediate critical escalation instead.
           const esc = {
@@ -362,7 +419,7 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
             parent_diary_id: diaryId,
             idempotency_key: `esc:${diaryId}:${s.diary_type}`,
             statutory_deadline: statutoryDeadline,
-            notes: `${s.ceiling.cite} statutory deadline ${statutoryDeadline} has PASSED — ` +
+            notes: `${(s.due_basis || s.ceiling).cite} statutory deadline ${statutoryDeadline} has PASSED — ` +
                    `the ${s.diary_type} decision cannot be delayed further. ` +
                    'Presumption/penalty exposure: resolve immediately.',
             created_at: now,
@@ -375,7 +432,7 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
           const breachEv = {
             id: _rid('evt'),
             claim_id: claimId, type: 'statutory_deadline_breached', timestamp: now,
-            data: { diary_id: diaryId, diary_type: s.diary_type, cite: s.ceiling.cite,
+            data: { diary_id: diaryId, diary_type: s.diary_type, cite: (s.due_basis || s.ceiling).cite,
                     statutory_deadline: statutoryDeadline, escalation_diary_id: esc.id },
           };
           const { error: bevErr } = await supabase.from('claim_events').insert(breachEv);
@@ -461,7 +518,8 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
     try {
       const aid = require('./aiDecisionsService');
       await aid.linkHumanDecision(claimId, outcome.ai_link, {
-        human_decision: `${diary.diary_type}:${action}`,
+        // Decision AND its rationale ride into the audit trail together.
+        human_decision: `${diary.diary_type}:${action}${note ? ` — ${note}` : ''}`,
         human_decision_at: now,
         human_decision_by: actorEmail || null,
       });
@@ -482,6 +540,24 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
     escalations: escalations.map(e => ({ id: e.id, diary_type: e.diary_type, due_date: e.due_date, statutory_deadline: e.statutory_deadline })),
     status_transition: statusTransition,
   };
+}
+
+/**
+ * Derive a fixed statutory date from a due_basis spec. The
+ * claim_form_receipt anchor is claims.filed_at (when the claim form
+ * was received and the claim filed) — falling back to created_at for
+ * rows that predate filed_at. Immutable by construction.
+ */
+async function _deriveAnchorDate(claimId, dueBasis) {
+  if (dueBasis.anchor !== 'claim_form_receipt') return null;
+  const { data: claim, error } = await supabase
+    .from('claims').select('filed_at, created_at').eq('id', claimId).single();
+  if (error || !claim) return null;
+  const anchor = claim.filed_at || claim.created_at;
+  if (!anchor) return null;
+  const d = new Date(anchor);
+  d.setUTCDate(d.getUTCDate() + dueBasis.days);
+  return d.toISOString().split('T')[0];
 }
 
 /**

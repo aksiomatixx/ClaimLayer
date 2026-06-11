@@ -370,25 +370,29 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
       notes:       `DWC-7 notice of rights must be mailed within 1 business day of claim creation`,
     },
     {
-      diary_type:  'COMPENSABILITY_DECISION_DUE',
-      due_date:    new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
+      // Corrected compensability model (confirmed by the licensed
+      // adjuster): ACCEPT, DENY, or DELAY within 14 calendar days of
+      // claim form receipt. Only a delay creates the 90-day
+      // COMPENSABILITY_DECISION_DUE diary (anchored to claim form
+      // receipt — the LC §5402 presumption date); accept or deny inside
+      // the 14 days means that diary never exists.
+      // REGULATORY-PENDING: the controlling section for the 14-day
+      // requirement is not committed under docs/regulatory/ — the
+      // citation is intentionally omitted from adjuster-facing copy
+      // until a committed source verifies it. LC §5402 (90-day
+      // presumption) is carried from existing repo copy and likewise
+      // remains PENDING verification.
+      diary_type:  'COMPENSABILITY_NOTICE_DUE',
+      due_date:    new Date(new Date(filedAt).getTime() + 14 * 24 * 60 * 60 * 1000)
                      .toISOString().split('T')[0],
-      // The immutable statutory ceiling: delays may reschedule the
-      // review but never beyond this date (LC §5402 presumption).
-      statutory_deadline: new Date(new Date(doi).getTime() + 90 * 24 * 60 * 60 * 1000)
+      statutory_deadline: new Date(new Date(filedAt).getTime() + 14 * 24 * 60 * 60 * 1000)
                      .toISOString().split('T')[0],
       no_snooze:   true,
       assigned_to: config.adjuster.email,
       priority:    'CRITICAL',
-      notes:       `LC §5402 — claim presumed compensable by operation of law if not accepted or denied within 90 calendar days. DOI: ${doi}. Missing this deadline is a critical compliance failure.`,
-    },
-    {
-      diary_type:  'DELAY_NOTICE_DUE',
-      due_date:    new Date(new Date(filedAt).getTime() + 14 * 24 * 60 * 60 * 1000)
-                     .toISOString().split('T')[0],
-      assigned_to: config.adjuster.email,
-      priority:    'HIGH',
-      notes:       `LC §4650/§4652 — if compensability decision is not made within 14 days of FROI receipt (${filedAt.split('T')[0]}), a delay notice must be sent to the employee. Clock starts at FROI filing, not injury date.`,
+      notes:       `Accept, deny, or delay within 14 calendar days of claim form receipt (${filedAt.split('T')[0]}). ` +
+                   'A delay issues the delay notice and sets the final decision diary on the LC §5402 presumption date — ' +
+                   '90 calendar days from claim form receipt. The clock runs from receipt, not the injury date.',
     },
   ];
 

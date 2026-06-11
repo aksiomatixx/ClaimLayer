@@ -28,7 +28,9 @@ beforeEach(async () => {
 
 describe('registry completeness', () => {
   const WORKER_TYPES = [
-    'claim_accepted', 'claim_denied', 'td_commencement', 'td_rate_change',
+    // claim_delay added with the corrected 14-day compensability model
+    // (CL-DEC1): a delay inside the initial window issues this notice.
+    'claim_accepted', 'claim_delay', 'claim_denied', 'td_commencement', 'td_rate_change',
     'td_suspension', 'td_reinstatement', 'td_termination', 'pd_commencement',
     'pd_rate_change', 'pd_suspension', 'pd_resumption', 'ps_mmi_rating',
     'settlement_offer', 'ur_decision', 'qme_process', 'mpn_enrollment',
@@ -37,7 +39,7 @@ describe('registry completeness', () => {
     'ptp_authorization', 'ptp_change', 'specialist_authorization', 'ur_decision_provider',
   ];
 
-  it('contains exactly the 20 master-context templates', () => {
+  it('contains exactly the 21 master-context templates', () => {
     expect(Object.keys(svc.NOTICE_TEMPLATES).sort())
       .toEqual([...WORKER_TYPES, ...PROVIDER_TYPES].sort());
   });

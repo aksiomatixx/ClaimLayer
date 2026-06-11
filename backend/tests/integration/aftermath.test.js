@@ -103,11 +103,22 @@ describe('accept compensability — the full aftermath', () => {
     expect(queue.some(q => q.mtc_code === '04')).toBe(true);
   });
 
-  it('delay sets the next decision diary and leaves status unchanged', async () => {
-    const diaryId = await seedDiary('COMPENSABILITY_DECISION_DUE');
-    const result = await svc.completeAction(diaryId, { action: 'delay' }, 'adjuster@test');
+  it('delay (initial 14-day window) sets the 90-day decision diary on the presumption date', async () => {
+    // The corrected model: delay lives on the INITIAL diary
+    // (COMPENSABILITY_NOTICE_DUE); its successor lands exactly on
+    // filed_at + 90 (the LC §5402 presumption date).
+    const filedAt = new Date().toISOString();
+    await supabase.from('claims').update({ filed_at: filedAt }).eq('id', CLAIM);
+    const diaryId = await seedDiary('COMPENSABILITY_NOTICE_DUE');
+
+    const result = await svc.completeAction(diaryId, { action: 'delay', note: 'awaiting prior treatment records' }, 'adjuster@test');
     expect(result.status_transition).toBeNull();
     expect(result.successor_diaries[0].diary_type).toBe('COMPENSABILITY_DECISION_DUE');
+    const d = new Date(filedAt); d.setUTCDate(d.getUTCDate() + 90);
+    expect(result.successor_diaries[0].due_date).toBe(d.toISOString().split('T')[0]);
+    // The delay notice issued and queued.
+    const { data: notices } = await supabase.from('benefit_notices').select('*').eq('claim_id', CLAIM);
+    expect(notices.some(n => n.notice_type === 'claim_delay' && n.status === 'queued')).toBe(true);
   });
 });
 
@@ -132,9 +143,14 @@ describe('TD biweekly cycle', () => {
 
 describe('guard rails', () => {
   it('rejects unknown actions with the valid list', async () => {
-    const diaryId = await seedDiary('COMPENSABILITY_DECISION_DUE');
+    const diaryId = await seedDiary('COMPENSABILITY_NOTICE_DUE');
     await expect(svc.completeAction(diaryId, { action: 'nuke' }, 'a'))
       .rejects.toThrow(/Valid: accept, deny, delay/);
+    // After a delay, the final decision diary has NO delay option —
+    // the presumption date cannot be pushed.
+    const finalId = await seedDiary('COMPENSABILITY_DECISION_DUE');
+    await expect(svc.completeAction(finalId, { action: 'delay', note: 'x' }, 'a'))
+      .rejects.toThrow(/Valid: accept, deny$/);
   });
 
   it('rejects completing a non-open diary', async () => {
