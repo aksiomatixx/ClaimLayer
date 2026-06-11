@@ -260,11 +260,15 @@ describe('claimService.createClaim → Supabase', () => {
     const { data: diaries } = await supabase
       .from('diaries').select('*').eq('claim_id', res.body.id);
 
-    expect(diaries.length).toBeGreaterThanOrEqual(6); // 6 statutory diaries
+    // Corrected compensability model (CL-DEC1): one initial 14-day
+    // COMPENSABILITY_NOTICE_DUE diary — the 90-day diary only ever
+    // exists after an explicit delay decision.
+    expect(diaries.length).toBeGreaterThanOrEqual(5);
     const types = diaries.map(d => d.diary_type);
     expect(types).toContain('DWC1_ISSUE');
-    expect(types).toContain('COMPENSABILITY_DECISION_DUE');
-    expect(types).toContain('DELAY_NOTICE_DUE');
+    expect(types).toContain('COMPENSABILITY_NOTICE_DUE');
+    expect(types).not.toContain('COMPENSABILITY_DECISION_DUE');
+    expect(types).not.toContain('DELAY_NOTICE_DUE');
   });
 
   it('getClaim assembles full claim with events and diaries', async () => {

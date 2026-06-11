@@ -100,6 +100,7 @@ const LIFECYCLE_PLANS = [
     description: 'Right shoulder pain reported next morning; no witnesses; prior chiropractic care noted.',
     priority: 'High',
     aiCompensability: 'Questionable', aiConfidence: 62,
+    aiRationale: 'Synthetic demo rationale: the reported mechanism (overhead reach during a patient transfer) is consistent with a right shoulder strain, and the PR-1 attributes causation to the incident. Confidence is reduced because the injury was reported the next morning with no witnesses, and the file references prior shoulder treatment. Recommend completing the investigation before the initial 14-day decision: confirm the prior treatment records and the supervisor statement.',
     aiRedFlags: ['No witnesses to mechanism', 'Prior shoulder treatment in claim history'],
     aiDecisions: [
       { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 7, guardrails: [] },
@@ -511,6 +512,8 @@ async function _seedOneClaim(id, idx, plan, persona) {
     suggestedExpenseReserve:    4500,
     redFlags:                 plan.aiRedFlags || [],
     nextActions:              ['Confirm provider selection', 'Schedule MPN appointment'],
+    rationale:                plan.aiRationale ||
+      'Synthetic demo rationale: mechanism, treatment pattern, and reporting timeline are consistent with a work-related injury; no disqualifying findings in the seeded file.',
     analysisNotes:            'Demo-seeded analysis — values are illustrative; production AI run will overwrite.',
   } : null;
 
@@ -826,7 +829,17 @@ function _buildDiaries(claimId, plan) {
     case 'intake_complete':
       return [base('AI_ANALYSIS_PENDING', 0, 'MEDIUM', 'Run AI compensability analysis')];
     case 'under_investigation':
-      return [base('COMPENSABILITY_DECISION_DUE', 60, 'CRITICAL', 'LC §5402 — accept or deny within 90 cal days')];
+      // Corrected model: accept/deny/delay within 14 calendar days of
+      // claim form receipt. The seed's receipt day is daysAgo, so the
+      // diary lands at (14 - daysAgo) from today. The 90-day diary only
+      // exists after an explicit delay decision.
+      return [{
+        ...base('COMPENSABILITY_NOTICE_DUE', 14 - plan.daysAgo, 'CRITICAL',
+          'Accept, deny, or delay within 14 calendar days of claim form receipt. ' +
+          'A delay issues the delay notice and sets the final decision on the LC §5402 presumption date (90 calendar days from claim form receipt).'),
+        statutory_deadline: inDays(14 - plan.daysAgo),
+        no_snooze: true,
+      }];
     case 'active_medical':
       return [base('PR2_FOLLOW_UP', 14, 'MEDIUM', 'Follow up on next PR-2 from treating physician'),
               base('TD_PAYMENT_REVIEW', 14, 'HIGH', 'Confirm TD payment continuity')];
@@ -880,7 +893,7 @@ function _buildDocuments(claimId, idx, plan) {
     doc('froi', plan.daysAgo, {
       title: 'DWC-1 / First Report of Injury', category: 'state_form', source: 'employer', pages: 3,
       ai_summary: 'Employer first report. Injury reported same day; mechanism consistent with the worker statement. No witnesses listed; employer does not contest.',
-      relevant_to: ['DWC1_ISSUE', 'COMPENSABILITY_DECISION_DUE'],
+      relevant_to: ['DWC1_ISSUE', 'COMPENSABILITY_NOTICE_DUE'],
     }),
   ];
 
@@ -898,12 +911,12 @@ function _buildDocuments(claimId, idx, plan) {
         doc('med_initial', plan.daysAgo - 3, {
           title: 'Initial treating physician report (PR-1)', category: 'medical', source: 'provider', pages: 6,
           ai_summary: 'First visit report. Dx: lumbar strain; objective findings limited to reduced ROM. Work restrictions: no lifting >10 lbs for 2 weeks. Causation attributed to the reported incident.',
-          relevant_to: ['COMPENSABILITY_DECISION_DUE'],
+          relevant_to: ['COMPENSABILITY_NOTICE_DUE'],
         }),
         doc('wage_stmt', plan.daysAgo - 2, {
           title: 'Wage statement (12 months)', category: 'wage', source: 'employer',
           ai_summary: 'Payroll export covering 52 weeks. Supports the calculated AWW; two unpaid gaps consistent with scheduled leave, not disputed time.',
-          relevant_to: ['COMPENSABILITY_DECISION_DUE'],
+          relevant_to: ['COMPENSABILITY_NOTICE_DUE'],
         })];
     case 'active_medical':
       return [...common,

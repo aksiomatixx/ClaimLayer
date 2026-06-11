@@ -66,6 +66,19 @@ const NOTICE_TEMPLATES = {
       'A summary of the benefits that may apply to your claim is enclosed.',
     ],
   },
+  // REGULATORY-PENDING: delay-notice citation not committed under
+  // docs/regulatory/ — cite carried from the §9812 family used by the
+  // accept/deny notices; verify before production use.
+  claim_delay: {
+    audience: 'worker', cite: '8 CCR §9812', deadline: { basis: 'calendar_days_14', compute: _cal(14) },
+    title: 'Notice of Delay in Claim Decision',
+    body: (c, x) => [
+      `A decision on your workers' compensation claim ${c.claimNumber || ''} for the injury of ${c.dateOfInjury || ''} is DELAYED while the claim is investigated.`,
+      ...(x.decision_note ? [`Reason for the delay: ${x.decision_note}`] : []),
+      'Unless your claim is denied, it is presumed compensable if not rejected within 90 days of filing the claim form (Labor Code §5402).',
+      'You will be notified of the decision. Benefits may be owed for the period of delay if your claim is later accepted.',
+    ],
+  },
   claim_denied: {
     audience: 'worker', cite: '8 CCR §9812(g)(1)', deadline: { basis: 'calendar_days_14', compute: _cal(14) },
     bespoke: 'noticeService.generateDenialNotice',

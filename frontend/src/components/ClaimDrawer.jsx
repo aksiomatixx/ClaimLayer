@@ -42,18 +42,19 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
   const [confirming,setConfirming]=useState(null);   // {diaryId, preview}
   const [ingesting,setIngesting]=useState(false);
   const [declineReason,setDeclineReason]=useState('');
+  const [decisionNote,setDecisionNote]=useState('');
   const [editDue,setEditDue]=useState('');
   const [ingestText,setIngestText]=useState('');
   const refresh=()=>{['decision-brief','claim-diaries','claim','claim-documents'].forEach(k=>qc.invalidateQueries({queryKey:[k,claimId]}));qc.invalidateQueries({queryKey:['claims']});};
 
   const openConfirm=async(diaryId)=>{
-    try{const preview=await fetchAftermathPreview(diaryId);setConfirming({diaryId,preview});}
+    try{const preview=await fetchAftermathPreview(diaryId);setConfirming({diaryId,preview});setDecisionNote('');}
     catch(e){notify(`Preview failed: ${e.message}`,'error');}
   };
   const runComplete=async(diaryId,action)=>{
     try{
-      const result=await completeDiaryAction(diaryId,{action});
-      setConfirming(null);refresh();
+      const result=await completeDiaryAction(diaryId,{action,note:decisionNote.trim()||undefined});
+      setConfirming(null);setDecisionNote('');refresh();
       const bits=[];
       if(result.notices_generated?.length)bits.push(`${result.notices_generated.length} notice(s) queued`);
       if(result.successor_diaries?.length)bits.push(`next: ${result.successor_diaries.map(d=>d.diary_type).join(', ')}`);
@@ -130,10 +131,18 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
               ?<div style={{marginTop:10}}><Btn small onClick={()=>openConfirm(a.diary_id)}>Complete action…</Btn></div>
               :<div style={{marginTop:10,background:C.bg,border:`1px solid ${C.amber}44`,borderRadius:8,padding:"12px 14px"}}>
                 <div style={{fontSize:10,fontFamily:C.mono,fontWeight:700,color:C.amber,letterSpacing:".06em",marginBottom:8}}>WHAT COMPLETING WILL DO</div>
+                {(confirming.preview.actions||[]).some(o=>o.requires_note)&&(
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:10,fontFamily:C.mono,fontWeight:700,color:C.amber,letterSpacing:".06em",marginBottom:4}}>DECISION RATIONALE (REQUIRED — GOES TO THE AUDIT TRAIL)</div>
+                    <textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} rows={2}
+                      placeholder="Why — in plain language. Written to the claim file, the audit trail, and the AI decision link."
+                      style={{width:"100%",background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,fontSize:11.5,padding:"6px 9px",fontFamily:C.sans}}/>
+                  </div>
+                )}
                 {(confirming.preview.actions||[]).map(opt=>(
                   <div key={opt.action} style={{marginBottom:10}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                      <Btn small onClick={()=>runComplete(a.diary_id,opt.action)}>{opt.describe}</Btn>
+                      <Btn small disabled={opt.requires_note&&!decisionNote.trim()} onClick={()=>runComplete(a.diary_id,opt.action)}>{opt.describe}</Btn>
                     </div>
                     <ul style={{margin:"0 0 0 16px",padding:0}}>
                       {opt.will.map((w,i)=><li key={i} style={{fontSize:11,color:C.dim,lineHeight:1.55}}>{w}</li>)}
@@ -335,7 +344,11 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
   const emp=claim.employee||{};
   const empName=`${emp.firstName||''} ${emp.lastName||''}`.trim()||claim.claimant||claim.id;
   const totalRes=a?(a.suggestedMedicalReserve||0)+(a.suggestedIndemnityReserve||0)+(a.suggestedExpenseReserve||0):null;
-  const nextStatuses=VALID_NEXT[claim.status]||[];
+  // Accept/Deny never appear as status buttons: compensability decisions
+  // flow ONLY through the queued action (the queue contract), where the
+  // rationale is required and the aftermath executes. The API route
+  // remains for programmatic callers; the UI affordance is gone.
+  const nextStatuses=(VALID_NEXT[claim.status]||[]).filter(s=>s!=="accepted"&&s!=="denied");
 
   const startReserveApproval=()=>{
     setResForm({

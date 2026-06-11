@@ -34,9 +34,13 @@ const PLAYBOOK = {
     action: 'Run the AI compensability analysis',
     why: () => 'Intake is complete. The compensability agent will draft the analysis, suggested reserves, and red flags for your review.',
   },
+  COMPENSABILITY_NOTICE_DUE: {
+    action: 'Decide compensability — accept, deny, or delay',
+    why: c => `The claim form was received and the initial decision is due within 14 calendar days of receipt. Accept or deny resolves it now; a delay issues the delay notice and sets the final decision on the LC §5402 presumption date — 90 calendar days from claim form receipt${c.ai ? `. The AI assessment is "${c.ai.compensability}" at ${c.ai.compensabilityScore}% confidence — the call is yours` : ''}.`,
+  },
   COMPENSABILITY_DECISION_DUE: {
-    action: 'Decide compensability — accept, delay, or deny',
-    why: c => `The 90-day decision window under LC §5402 is running${c.ai ? `. The AI assessment is "${c.ai.compensability}" at ${c.ai.compensabilityScore}% confidence — the call is yours` : ''}.`,
+    action: 'Make the final compensability decision — accept or deny',
+    why: c => `The decision was delayed within the initial 14-day window. The LC §5402 presumption date — 90 calendar days from claim form receipt — is this diary's due date and cannot move: an undenied claim is presumed compensable after it${c.ai ? `. The AI assessment is "${c.ai.compensability}" at ${c.ai.compensabilityScore}% confidence — the call is yours` : ''}.`,
   },
   TD_PAYMENT_REVIEW: {
     action: 'Review the temporary disability payment',
@@ -95,7 +99,7 @@ function _humanize(type) {
 const STATUS_LANG = {
   new_claim:              'just reported and awaiting first contact',
   intake_complete:        'through intake and queued for analysis',
-  under_investigation:    'under investigation inside the 90-day decision window',
+  under_investigation:    'under investigation — the compensability decision (accept, deny, or delay) is due within 14 calendar days of claim form receipt',
   active_medical:         'accepted, with active medical treatment',
   p_and_s:                'permanent and stationary',
   pd_evaluation:          'in permanent disability evaluation',
