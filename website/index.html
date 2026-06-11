@@ -161,20 +161,20 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <h1>AI agents for workers' comp claims.<br/><em>A licensed human at every decision.</em></h1>
   <p>ClaimLayer is a regulatory-aware execution layer that runs Claude-powered agents on top of your existing claims system — drafting the analysis, applying the statutory math, generating the notices, and tracking the deadlines, inside guardrails enforced in code.</p>
   <div class="hero-cta">
-    <a class="btn" href="#video">▶ &nbsp;Watch the 4-minute tour</a>
+    <a class="btn" href="#video">▶ &nbsp;Watch the 5-minute tour</a>
     <a class="btn ghost" href="demo/" target="_blank" rel="noopener">🖱 &nbsp;Launch the interactive demo</a>
   </div>
   <div class="chips">
     <div class="chip"><b>6</b> specialized Claude agents</div>
     <div class="chip"><b>100%</b> of model calls audit-logged</div>
     <div class="chip"><b>0</b> auto-deny pathways — by construction</div>
-    <div class="chip"><b>1,138</b> automated tests · 75 suites</div>
+    <div class="chip"><b>1,242</b> automated tests · 83 suites</div>
   </div>
 </div></header>
 
 <section id="video"><div class="wrap reveal">
   <div class="kicker">Product tour</div>
-  <h2>See the whole claim lifecycle in four minutes</h2>
+  <h2>See the whole claim lifecycle, end to end</h2>
   <p class="sub" style="margin-bottom:38px">Narrated walkthrough captured live from the running application — intake to settlement, with the AI decision audit trail in between.</p>
   <div class="video-frame">
     <video controls preload="metadata" poster="assets/poster.jpg">
@@ -189,8 +189,8 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <h2>Execution, not prediction</h2>
   <p class="sub">Most AI in claims scores risk. ClaimLayer carries out the regulatory workflow itself — and is built around the assumption that a wrong automated decision has legal consequences.</p>
   <div class="grid3" style="margin-top:46px">
-    <div class="card"><div class="glyph">⚙️</div><h3>Agents that do the work</h3><p>Compensability analyses drafted, treatment requests evaluated against MTUS, settlements priced, Medicare interests screened, voice intake structured — before the adjuster opens the file.</p></div>
-    <div class="card"><div class="glyph">🛡️</div><h3>Guardrails in code, not prompts</h3><p>The model physically cannot deny treatment, exceed settlement bounds, or invent a statutory value. Hard limits live in the service layer, where no prompt injection can reach them.</p></div>
+    <div class="card"><div class="glyph">⚙️</div><h3>Agents that do the work</h3><p>Every incoming document ingested, summarized, and reviewed in the context of its claim; compensability analyses drafted; treatment requests evaluated against MTUS; Medicare interests screened; voice intake structured — before the adjuster opens the file.</p></div>
+    <div class="card"><div class="glyph">🛡️</div><h3>Guardrails in code, not prompts</h3><p>The model physically cannot deny treatment, move a statutory deadline, write a reserve, or invent a statutory value. Hard limits live in the service layer, where no prompt injection can reach them.</p></div>
     <div class="card"><div class="glyph">🔌</div><h3>A layer, not a replacement</h3><p>Pluggable adapters sit on top of your retained system of record — ingesting claims, pushing diaries, documents, and notices back. No migration project required.</p></div>
   </div>
 
@@ -201,11 +201,11 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     </div>
     <div class="card" style="border-color:rgba(232,163,61,.45)">
       <div class="kicker" style="color:var(--green)">After — decide, then it executes</div>
-      <p style="line-height:2;color:var(--text)">Every document ingested, labeled, and filed to the claim · the required action queued as a prepared decision · the adjuster reviews and decides · decision documented, notices mailed, diaries completed, the next diaries set — automatically.</p>
+      <p style="line-height:2;color:var(--text)">Every document ingested, summarized, and reviewed in the context of its claim · required actions surfaced to the adjuster — including reserve adjustments · the adjuster works the queue · the AI handles everything after: decision documented, letters and notices sent, diaries completed, the next ones set, FROI/SROI state reports filed — all auditable.</p>
     </div>
   </div>
   <div style="margin-top:22px;background:var(--amber-f);border:1px solid rgba(232,163,61,.4);border-radius:12px;padding:18px 24px;font-size:15.5px;color:var(--amber);font-weight:600">
-    The operating contract: as long as the adjuster works the generated action queue, statutory timelines are met and penalties are avoided.
+    The operating contract: as long as the adjuster works the generated action queue, statutory timelines are met, penalties are avoided, and the state reporting files itself. The adjuster's job becomes the two things that need a human: impactful decisions — with everything relevant presented, summarized, and organized — and taking care of people.
   </div>
 </div></section>
 
@@ -215,9 +215,9 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <div class="feat">
     <div class="card"><span class="tag amber">AI Agent</span><h3>Compensability analysis</h3><p>Score, priority, suggested reserves, red flags, and written rationale on every new claim — presented as a plain-language decision brief with the source documents and their AI summaries one click away. Accept or deny stays a licensed-human action.</p></div>
     <div class="card"><span class="tag amber">AI Agent</span><h3>MTUS treatment authorization</h3><p>Every RFA reviewed against California treatment guidelines. The agent can only return <span class="mono" style="font-size:12px">auto_approve</span> or <span class="mono" style="font-size:12px">physician_review</span> — denial doesn't exist in its vocabulary.</p></div>
-    <div class="card"><span class="tag amber">AI Agent</span><h3>Settlement pricing &amp; MSA screening</h3><p>C&amp;R offers priced inside a hard 1.15×–5.0× band of stipulated value, gated by a deterministic Medicare-interest screen that runs before the model ever sees the file.</p></div>
+    <div class="card"><span class="tag amber">AI Agent</span><h3>Settlement pricing &amp; MSA screening</h3><p>C&amp;R offers priced with written rationale, gated by a deterministic Medicare-interest screen that runs before the model ever sees the file — and a settlement package that refuses to generate until the MSA document is verified on the claim.</p></div>
     <div class="card"><span class="tag blue">Engine</span><h3>Statutory benefits engine</h3><p>TD at two-thirds AWW with the 104-week cap, PD rating and advances, waiting periods, and calendar- vs business-day deadlines per code section — version-pinned to DWC sources.</p></div>
-    <div class="card"><span class="tag blue">Engine</span><h3>Notices, diaries &amp; WCIS</h3><p>Server-side PDF generation for statutory notices, penalty diaries that cannot be snoozed, and EDI FROI/SROI transmission infrastructure for WCIS reporting.</p></div>
+    <div class="card"><span class="tag blue">Engine</span><h3>Notices, diaries &amp; automated FROI/SROI</h3><p>Server-side PDF generation for statutory notices, penalty diaries that cannot be snoozed, and automated WCIS state reporting: as the claim moves — created, benefits start, rates change, benefits suspend or resume — the matching FROI/SROI EDI transactions enqueue themselves, deadline-tracked and acknowledgment-reconciled.</p></div>
     <div class="card"><span class="tag">Trust</span><h3>AI decision audit trail</h3><p>Every model call logged with its input snapshot, raw output, tokens, latency, guardrails triggered, and human-override status — queryable in the in-app Agents console.</p></div>
   </div>
 </div></section>
@@ -227,9 +227,9 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <h2>From injury to resolution</h2>
   <div class="steps">
     <div class="step"><h3>Report</h3><p>The worker reports the injury by voice or guided form — bilingual, mobile-first, no login. The employer files the FROI from their own portal.</p></div>
-    <div class="step"><h3>Draft</h3><p>Agents draft the compensability analysis, reserves, and treatment evaluations the moment intake completes — with rationale attached.</p></div>
-    <div class="step"><h3>Decide</h3><p>A licensed adjuster reviews a ranked action queue and makes every consequential call. The AI recommends; the human decides.</p></div>
-    <div class="step"><h3>Prove</h3><p>Every model call, guardrail, and override lands in a queryable audit trail. Statutory deadlines and notices track themselves.</p></div>
+    <div class="step"><h3>Prepare</h3><p>Every incoming document — uploaded PDF, scanned fax, email attachment — is ingested, summarized, and reviewed in the context of the claim. The actions it requires, reserve adjustments included, surface on the adjuster's queue with rationale attached.</p></div>
+    <div class="step"><h3>Decide</h3><p>The adjuster works the queue: every consequential call, made with everything relevant presented, summarized, and organized. The AI recommends; the licensed human decides.</p></div>
+    <div class="step"><h3>Execute &amp; prove</h3><p>The AI handles everything after the decision: documents it, sends the letters and notices, completes the diaries, sets the next ones, and files the FROI/SROI state reports — every step audit-logged.</p></div>
   </div>
 </div></section>
 
@@ -238,7 +238,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <h2>Safe to point at a regulated workflow</h2>
   <div class="g-list">
     <div class="g-item"><span class="no">01</span><div><b>No auto-deny pathway exists anywhere in the system</b><span>Denials are a licensed-human-only action by construction — the output schema doesn't include one.</span></div></div>
-    <div class="g-item"><span class="no">02</span><div><b>Settlement offers hard-capped at 1.15×–5.0×</b><span>The pricing agent cannot return a number outside the band; the clamp runs after the model, in code.</span></div></div>
+    <div class="g-item"><span class="no">02</span><div><b>Reserve changes require a licensed adjuster's approval</b><span>The AI may suggest reserves; nothing is written to the financial system of record until an adjuster approves it.</span></div></div>
     <div class="g-item"><span class="no">03</span><div><b>Deterministic MSA screen gates every settlement</b><span>Medicare-interest screening is never left to the model's discretion.</span></div></div>
     <div class="g-item"><span class="no">04</span><div><b>Statutory values are never model-generated</b><span>Rating schedules, fee schedules, and caps come from version-controlled DWC publications.</span></div></div>
     <div class="g-item"><span class="no">05</span><div><b>Penalty diaries cannot be snoozed</b><span>Statutory deadlines use the correct calendar/business-day basis per the governing code section.</span></div></div>
@@ -264,14 +264,14 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     </div>
     <div class="story">
       <span class="role" style="color:var(--amber)">The adjuster</span>
-      <h3>Works a queue of prepared decisions, not an inbox</h3>
+      <h3>Works the queue — the AI handles everything after</h3>
       <ul>
-        <li>Incoming documents — uploaded PDFs, scanned faxes, email attachments — are classified, summarized, filed to the claim, and translated into the action they require before the adjuster ever sees them</li>
-        <li>Each queued action opens as a plain-language brief: what to decide, why, what in the claim led here — with the original documents one click away</li>
-        <li>A dry-run shows exactly what approving will do; then one decision fires the whole aftermath: claim note written back, statutory notices generated and queued, the next deadline diary set</li>
-        <li>Every model recommendation is logged with what the AI saw; statutory deadlines are deterministic code, and penalty diaries refuse to move</li>
+        <li>Incoming documents — uploaded PDFs, scanned faxes, email attachments — are ingested, summarized, and reviewed in the context of the claim; the actions they require, reserve adjustments included, surface on the queue</li>
+        <li>Each item opens as a plain-language brief: what to decide, why, what in the claim led here — everything relevant presented, summarized, and organized, with the originals one click away</li>
+        <li>After the decision, the AI does the follow-up: documents it, sends the letters and notices, completes the diary, sets the next ones, files the FROI/SROI state reports — all of it logged and auditable</li>
+        <li>What's left for the human is exactly what should be: the impactful decisions, and taking care of the people on the claim</li>
       </ul>
-      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, and calendars deadlines by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided.</span></div>
+      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, calendars deadlines, and keys state reports by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided, the reporting filed.</span></div>
     </div>
     <div class="story">
       <span class="role" style="color:var(--blue)">The employer</span>
