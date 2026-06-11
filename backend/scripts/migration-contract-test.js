@@ -209,6 +209,26 @@ async function main() {
     `INSERT INTO integration_outbox (id, target, operation, status)
      VALUES ('obx_ct_2', 'filehandler', 'add_note', 'maybe')`);
 
+  await check('reserve_line_items accepts all three line shapes', async () => {
+    await client.query(
+      `INSERT INTO reserve_line_items (id, claim_id, category, label, shape, quantity, unit_amount, total, basis_note, created_by)
+       VALUES ('rli_ct_1', 'claim_ct_1', 'medical', 'PTP visits', 'quantity', 5, 250, 1250, 'per PR-1 plan (synthetic)', 'ct@test')`);
+    await client.query(
+      `INSERT INTO reserve_line_items (id, claim_id, category, label, shape, quantity, unit_amount, total)
+       VALUES ('rli_ct_2', 'claim_ct_1', 'indemnity', 'TD', 'weeks_rate', 6, 414, 2484)`);
+    await client.query(
+      `INSERT INTO reserve_line_items (id, claim_id, category, label, shape, flat_amount, total)
+       VALUES ('rli_ct_3', 'claim_ct_1', 'indemnity', 'Est. PD', 'flat', 7500, 7500)`);
+  });
+  await expectViolation(client,
+    'reserve_line_items rejects categories outside the controlled trio',
+    `INSERT INTO reserve_line_items (id, claim_id, category, label, shape, flat_amount, total)
+     VALUES ('rli_ct_bad', 'claim_ct_1', 'legal_fees', 'x', 'flat', 1, 1)`);
+  await expectViolation(client,
+    'a quantity-shaped line without quantity/unit is rejected',
+    `INSERT INTO reserve_line_items (id, claim_id, category, label, shape, total)
+     VALUES ('rli_ct_bad2', 'claim_ct_1', 'medical', 'x', 'quantity', 0)`);
+
   await check('magic-link single use is atomic (conditional update wins exactly once)', async () => {
     await client.query(
       `INSERT INTO magic_link_tokens (jti, claim_id, adp_employee_id, expires_at)

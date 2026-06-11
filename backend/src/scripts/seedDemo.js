@@ -102,6 +102,22 @@ const LIFECYCLE_PLANS = [
     aiCompensability: 'Questionable', aiConfidence: 62,
     aiRationale: 'Synthetic demo rationale: the reported mechanism (overhead reach during a patient transfer) is consistent with a right shoulder strain, and the PR-1 attributes causation to the incident. Confidence is reduced because the injury was reported the next morning with no witnesses, and the file references prior shoulder treatment. Recommend completing the investigation before the initial 14-day decision: confirm the prior treatment records and the supervisor statement.',
     aiRedFlags: ['No witnesses to mechanism', 'Prior shoulder treatment in claim history'],
+    reserveWorksheet: [
+      { category: 'medical', label: 'PTP office visits', shape: 'quantity', quantity: 5, unit_amount: 250,
+        basis_note: 'PTP visits per PR-1 treatment plan (synthetic demo estimate)' },
+      { category: 'medical', label: 'MRI — right shoulder', shape: 'quantity', quantity: 1, unit_amount: 1400,
+        basis_note: 'Ordered if symptoms persist past 4 weeks (synthetic demo estimate, not a fee-schedule figure)' },
+      { category: 'medical', label: 'Physical therapy sessions', shape: 'quantity', quantity: 12, unit_amount: 125,
+        basis_note: '2x/week for 6 weeks per PR-1 plan (synthetic demo estimate)' },
+      { category: 'medical', label: 'Pharmacy allowance', shape: 'flat', flat_amount: 600,
+        basis_note: 'NSAIDs + muscle relaxant course (synthetic demo allowance)' },
+      { category: 'indemnity', label: 'Temporary disability', shape: 'weeks_rate', quantity: 6, unit_amount: 414,
+        basis_note: 'Estimated 6 weeks TD at the claim TD rate (synthetic demo estimate)' },
+      { category: 'indemnity', label: 'Estimated permanent disability', shape: 'flat', flat_amount: 7500,
+        basis_note: 'SYNTHETIC DEMO ESTIMATE — placeholder PD dollars pending rating; not a statutory or DEU figure' },
+      { category: 'expense', label: 'Copy service / record retrieval', shape: 'quantity', quantity: 2, unit_amount: 85,
+        basis_note: 'Prior treatment records retrieval (synthetic demo estimate)' },
+    ],
     aiDecisions: [
       { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 7, guardrails: [] },
     ],
@@ -211,7 +227,7 @@ async function wipeDemo() {
   const childTables = [
     'td_periods', 'pd_evaluations', 'settlement_offers',
     'rfas', 'rfa_evaluations', 'ai_decisions',
-    'diaries', 'claim_events', 'reserves', 'audit_log',
+    'diaries', 'claim_events', 'reserves', 'reserve_line_items', 'audit_log',
     'claim_documents',
   ];
   for (const tbl of childTables) {
@@ -648,6 +664,38 @@ async function _seedOneClaim(id, idx, plan, persona) {
 
   if (plan.aiDecisions && plan.aiDecisions.length > 0) {
     await _seedAiDecisions(id, idx, plan, persona);
+  }
+
+  if (plan.reserveWorksheet) {
+    await _seedReserveWorksheet(id, plan.reserveWorksheet);
+  }
+}
+
+// Itemized reserve worksheet (CL-RSV1). Direct insert with
+// deterministic ids so re-seed is idempotent. All amounts are
+// SYNTHETIC demo values — basis notes say so; nothing here is a
+// statutory or fee-schedule figure.
+async function _seedReserveWorksheet(claimId, items) {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const total = it.shape === 'flat'
+      ? it.flat_amount
+      : Math.round(it.quantity * it.unit_amount * 100) / 100;
+    await supabase.from('reserve_line_items').insert({
+      id:          `rli_demo_${claimId}_${i + 1}`,
+      claim_id:    claimId,
+      category:    it.category,
+      label:       it.label,
+      shape:       it.shape || 'quantity',
+      quantity:    it.quantity ?? null,
+      unit_amount: it.unit_amount ?? null,
+      flat_amount: it.flat_amount ?? null,
+      total,
+      basis_note:  it.basis_note,
+      created_by:  'seed@demo',
+      created_at:  new Date().toISOString(),
+      updated_at:  new Date().toISOString(),
+    });
   }
 }
 

@@ -108,6 +108,7 @@ app.use('/api/v1',               require('./routes/ai-decisions'));
 app.use('/api/v1',               require('./routes/integrations'));
 app.use('/api/v1',               require('./routes/policies'));
 app.use('/api/v1',               require('./routes/diaries'));
+app.use('/api/v1',               require('./routes/reserveWorksheet'));
 // (webhooks router is mounted above, before body parsing)
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────
