@@ -6,6 +6,7 @@ import { calculatePD, createStipulation, fetchPDData, initiatePDAdvances, record
 import { approveSupplemental, dismissSupplemental, fetchPanelsForClaim, fetchSupplementalRequests, issuePanel, markReportReceived, recordStrikes, requestPanel, scheduleQmeAppointment } from '../services/qme.js';
 import { fetchTdPeriods } from '../services/td.js';
 import BenefitsTab from './BenefitsTab.jsx';
+import ReservesTab from './ReservesTab.jsx';
 import { C, COMP_COLOR, PRI_COLOR, TD_TYPE_BG, TD_TYPE_COLOR } from '../theme.js';
 import { Btn, Field, InfoPair, Lbl, SectionHead, Spinner, SyncBadge, Tabs } from '../ui/primitives.jsx';
 import { fmt$ } from '../utils.js';
@@ -400,7 +401,7 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
             <DecisionSupport claimId={claimId} brief={brief} briefLoading={briefLoading} documents={documents} claim={claim} notify={notify}/>
           </div>
         <div style={{padding:"22px 26px",flex:1,overflowY:"auto",minWidth:0}}>
-          <Tabs tabs={[{key:"details",label:"Details"},{key:"benefits",label:`Benefits${tdActive?` · ${tdActive.benefit_type}`:''}`},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"},{key:"pd",label:"PD / Stip"}]} active={drawerTab} onChange={setDrawerTab}/>
+          <Tabs tabs={[{key:"details",label:"Details"},{key:"benefits",label:`Benefits${tdActive?` · ${tdActive.benefit_type}`:''}`},{key:"qme",label:`QME/AME (${qmePanels.length})`},{key:"mmi",label:"MMI / P&S"},{key:"pd",label:"PD / Stip"},{key:"reserves",label:"Reserves"}]} active={drawerTab} onChange={setDrawerTab}/>
 
           {drawerTab==="details"&&<>
           {/* Claim Facts */}
@@ -535,6 +536,7 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
 
           {/* ── Benefits Tab — TD period tracking ────────────────── */}
           {drawerTab==="benefits"&&<BenefitsTab claimId={claimId} claim={claim} notify={notify}/>}
+          {drawerTab==="reserves"&&<ReservesTab claimId={claimId} notify={notify}/>}
 
           {/* ── M11: QME/AME Tab ─────────────────────────────────── */}
           {drawerTab==="qme"&&<>

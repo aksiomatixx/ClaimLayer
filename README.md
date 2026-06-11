@@ -8,7 +8,9 @@
 
 A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.
 
-`1,138 tests · 75 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+**[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
+
+`1,242 tests · 83 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 

@@ -124,6 +124,20 @@ export async function fetchWcisQualityMetrics() {
   return _json(await fetch(`${BASE}/wcis/quality-metrics`, _opts()));
 }
 
+// ── Itemized reserve worksheets (CL-RSV1) ────────────────────────────────────
+
+export async function fetchReserveWorksheet(claimId) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/reserve-worksheet`, _opts()));
+}
+
+export async function addReserveLineItem(claimId, payload) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/reserve-worksheet/items`, _opts('POST', payload)));
+}
+
+export async function removeReserveLineItem(itemId) {
+  return _json(await fetch(`${BASE}/reserve-worksheet/items/${encodeURIComponent(itemId)}`, { method: 'DELETE', credentials: 'include' }));
+}
+
 export async function declineDiaryAction(diaryId, reason) {
   return _json(await fetch(`${BASE}/diaries/${encodeURIComponent(diaryId)}/decline`, _opts('POST', { reason })));
 }
