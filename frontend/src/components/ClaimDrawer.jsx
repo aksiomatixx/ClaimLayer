@@ -22,12 +22,14 @@ export const VALID_NEXT={
   pd_evaluation:["settlement_discussions","litigated"],
   settlement_discussions:["closed"],
   litigated:["settlement_discussions","closed"],
+  future_medical_only:["closed"],
   denied:[],closed:[],
 };
 export const STATUS_LABEL={
   new_claim:"New Claim",intake_complete:"Intake Done",under_investigation:"Investigation",
   accepted:"Accepted",active_medical:"Active Medical",p_and_s:"P&S",pd_evaluation:"PD Eval",
-  settlement_discussions:"Settlement",litigated:"Litigated",denied:"Denied",closed:"Closed",
+  settlement_discussions:"Settlement",litigated:"Litigated",future_medical_only:"Future Med",
+  denied:"Denied",closed:"Closed",
 };
 export const PRI_DIARY={CRITICAL:C.red,HIGH:C.amber,MEDIUM:C.blue,LOW:C.dim};
 

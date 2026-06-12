@@ -4,10 +4,11 @@
  * Integration tests — demo seed + reset.
  *
  * Verifies:
- *   - seedDemo creates exactly 8 claims
- *   - all 7 distinct lifecycle statuses are represented
+ *   - seedDemo creates exactly 12 claims (IDs skip 009 — reserved for
+ *     the linked 2024 prior claim)
+ *   - all distinct lifecycle statuses are represented
  *   - every seeded claim carries metadata.demo === true
- *   - re-running seedDemo is idempotent (still 8, same IDs)
+ *   - re-running seedDemo is idempotent (still 12, same IDs)
  *   - POST /api/v1/admin/demo-reset wipes + re-seeds
  *   - POST /api/v1/admin/demo-reset returns 403 in production
  *   - GET  /api/v1/admin/demo-status reflects the demo flag
@@ -43,17 +44,21 @@ beforeEach(() => {
 // seedDemo (direct service call)
 // ═════════════════════════════════════════════════════════════════════════════
 describe('seedDemo', () => {
-  it('creates exactly 8 claims with deterministic IDs', async () => {
+  it('creates exactly 12 claims with deterministic IDs (skipping the reserved 009)', async () => {
     const out = await seedDemo();
-    expect(out.count).toBe(8);
-    expect(out.ids).toHaveLength(8);
+    expect(out.count).toBe(12);
+    expect(out.ids).toHaveLength(12);
     expect(out.ids[0]).toBe('claim_demo_001');
     expect(out.ids[7]).toBe('claim_demo_008');
+    // 009 is reserved for the linked 2024 prior Rosa Mendez claim.
+    expect(out.ids[8]).toBe('claim_demo_010');
+    expect(out.ids[11]).toBe('claim_demo_013');
+    expect(out.ids).not.toContain('claim_demo_009');
 
-    // 8 from LIFECYCLE_PLANS + 1 pre-migrated legacy example (LEG-000)
+    // 12 from LIFECYCLE_PLANS + 1 pre-migrated legacy example (LEG-000)
     // + the linked 2024 prior Rosa Mendez claim (CL-DEMO2).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(14);
   });
 
   it('every seeded claim has metadata.demo === true', async () => {
@@ -75,15 +80,15 @@ describe('seedDemo', () => {
     }
   });
 
-  it('is idempotent — re-running yields the same 8 IDs', async () => {
+  it('is idempotent — re-running yields the same 12 IDs', async () => {
     const a = await seedDemo();
     const b = await seedDemo();
-    expect(b.count).toBe(8);
+    expect(b.count).toBe(12);
     expect(b.ids).toEqual(a.ids);
-    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
+    // 12 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
     // + the linked 2024 prior claim (CL-DEMO2).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(14);
   });
 
   it('writes claim_events and diaries per plan', async () => {
@@ -170,11 +175,40 @@ describe('td_periods seeding', () => {
     }
   });
 
-  it('total td_periods rows after seed = 7', async () => {
+  it('claim_demo_010 (accepted, on TD payments) has 1 active TTD period', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(8));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].benefit_type).toBe('TTD');
+    expect(periods[0].end_date).toBeNull();
+  });
+
+  it('claim_demo_011 (MMI solicitation) has 1 active TTD period — TD continues pending P&S', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(9));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].end_date).toBeNull();
+  });
+
+  it('claim_demo_012 (future_medical_only) has 1 closed period ended rtw_full', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(10));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].reason_ended).toBe('rtw_full');
+  });
+
+  it('claim_demo_013 (litigated) has 1 closed period ended rtw_modified', async () => {
+    await seedDemo();
+    const periods = await tdFor(makeClaimId(11));
+    expect(periods).toHaveLength(1);
+    expect(periods[0].reason_ended).toBe('rtw_modified');
+  });
+
+  it('total td_periods rows after seed = 11', async () => {
     await seedDemo();
     const { data } = await supabase.from('td_periods').select('*');
-    // 0+0+0+1+1+1+2+2 = 7
-    expect(data).toHaveLength(7);
+    // 0+0+0+1+1+1+2+2 (original eight) + 1+1+1+1 (claims 010-013) = 11
+    expect(data).toHaveLength(11);
   });
 
   it('claim_demo_006 summary math — Carlos Ruiz tdRate $497, P&S 4d ago, ~41-day span', async () => {
@@ -248,7 +282,7 @@ describe('ai_decisions seeding', () => {
     expect(triggered.action).toBe('flagged_above_premium_threshold');
   });
 
-  it('total ai_decisions rows after seed = 10', async () => {
+  it('total ai_decisions rows after seed = 14', async () => {
     await seedDemo();
     const { data } = await supabase.from('ai_decisions').select('*');
     // claims 1+2 (new_claim, intake_complete) → 0 each.
@@ -258,8 +292,9 @@ describe('ai_decisions seeding', () => {
     // claim_6 (p_and_s)           → 1 (compensability).
     // claim_7 (pd_evaluation)     → 1 (compensability).
     // claim_8 (settlement_discussions) → 3 (compensability + cnr_pricing + msa_screening).
-    // Total = 1+2+2+1+1+3 = 10.
-    expect(data).toHaveLength(10);
+    // claims 010-013 → 1 compensability each.
+    // Total = 1+2+2+1+1+3+4 = 14.
+    expect(data).toHaveLength(14);
   });
 });
 
@@ -287,19 +322,19 @@ describe('wipeDemo', () => {
 // POST /api/v1/admin/demo-reset
 // ═════════════════════════════════════════════════════════════════════════════
 describe('POST /api/v1/admin/demo-reset', () => {
-  it('happy path — wipes + re-seeds, returns count 8', async () => {
+  it('happy path — wipes + re-seeds, returns count 12', async () => {
     await seedDemo();
     const res = await request(app)
       .post('/api/v1/admin/demo-reset')
       .set('Cookie', `token=${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(res.body.count).toBe(8);
+    expect(res.body.count).toBe(12);
 
-    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
+    // 12 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
     // + the linked 2024 prior claim (CL-DEMO2).
     const { data: rows } = await supabase.from('claims').select('*');
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(14);
   });
 
   it('401 without admin token', async () => {
@@ -332,14 +367,75 @@ describe('GET /api/v1/admin/demo-status', () => {
     expect(res.body.count).toBe(0);
   });
 
-  it('reports demo=true and count=10 after seed', async () => {
-    // 8 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
+  it('reports demo=true and count=14 after seed', async () => {
+    // 12 lifecycle-plan claims + 1 pre-migrated legacy example (LEG-000)
     // + the linked 2024 prior claim (CL-DEMO2).
     await seedDemo();
     const res = await request(app).get('/api/v1/admin/demo-status').set('Cookie', `token=${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.demo).toBe(true);
-    expect(res.body.count).toBe(10);
+    expect(res.body.count).toBe(14);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// New lifecycle stages: accepted (on TD payments), MMI solicitation with
+// estimated PD, future_medical_only, litigated
+// ═════════════════════════════════════════════════════════════════════════════
+describe('extended lifecycle claims (010–013)', () => {
+  beforeEach(async () => { await seedDemo(); });
+
+  it('claim_demo_010 is accepted with an open TD payment review diary', async () => {
+    const { data: claim } = await supabase.from('claims').select('*').eq('id', makeClaimId(8)).single();
+    expect(claim.status).toBe('accepted');
+    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', makeClaimId(8));
+    const td = diaries.find(d => d.diary_type === 'TD_PAYMENT_REVIEW');
+    expect(td).toBeTruthy();
+    expect(td.status).toBe('open');
+  });
+
+  it('claim_demo_011 carries the full MMI-solicitation footprint', async () => {
+    const claimId = makeClaimId(9);
+
+    const { data: evals } = await supabase.from('mmi_evaluations').select('*').eq('claim_id', claimId);
+    expect(evals).toHaveLength(1);
+    expect(evals[0].recommendation).toBe('solicit_pr4');
+    expect(evals[0].adjuster_action).toBe('pr4_solicited');
+    expect(evals[0].signal_count).toBe(3);
+
+    const { data: pr4s } = await supabase.from('pr4_solicitations').select('*').eq('claim_id', claimId);
+    expect(pr4s).toHaveLength(1);
+    expect(pr4s[0].status).toBe('sent');
+    expect(pr4s[0].mmi_evaluation_id).toBe(evals[0].id);
+    // 30-day response clock from the solicitation date.
+    expect(pr4s[0].response_due_date > pr4s[0].solicitation_date).toBe(true);
+
+    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', claimId);
+    const due = diaries.find(d => d.diary_type === 'PR4_RESPONSE_DUE');
+    expect(due).toBeTruthy();
+    expect(due.status).toBe('open');
+  });
+
+  it('claim_demo_011 reserve worksheet includes an estimated PD line pending the rating', async () => {
+    const { data: items } = await supabase.from('reserve_line_items').select('*').eq('claim_id', makeClaimId(9));
+    const pd = items.find(i => i.label === 'Estimated permanent disability');
+    expect(pd).toBeTruthy();
+    expect(pd.category).toBe('indemnity');
+    expect(pd.total).toBeGreaterThan(0);
+    expect(pd.basis_note).toMatch(/SYNTHETIC DEMO ESTIMATE/);
+    // Estimated only — no pd_evaluations row until the PR-4 is rated.
+    const { data: pds } = await supabase.from('pd_evaluations').select('*').eq('claim_id', makeClaimId(9));
+    expect(pds).toHaveLength(0);
+  });
+
+  it('claim_demo_012 is future_medical_only and claim_demo_013 is litigated with a legal review diary', async () => {
+    const { data: fmo } = await supabase.from('claims').select('*').eq('id', makeClaimId(10)).single();
+    expect(fmo.status).toBe('future_medical_only');
+
+    const { data: lit } = await supabase.from('claims').select('*').eq('id', makeClaimId(11)).single();
+    expect(lit.status).toBe('litigated');
+    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', makeClaimId(11));
+    expect(diaries.some(d => d.diary_type === 'LEGAL_REVIEW' && d.status === 'open')).toBe(true);
   });
 });
 
