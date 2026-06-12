@@ -12,7 +12,12 @@ on:
   workflow_dispatch:
   push:
     branches: ["claude/**"]
-    paths: [".github/workflows/live-ingestion-test.yml"]
+    paths:
+      - ".github/workflows/live-ingestion-test.yml"
+      - "backend/src/scripts/liveIngestionTest.js"
+      - "backend/src/scripts/generateTestDocuments.js"
+      - "backend/src/services/documentIngestionService.js"
+      - "backend/prompts/document_classification.txt"
 
 permissions:
   contents: read

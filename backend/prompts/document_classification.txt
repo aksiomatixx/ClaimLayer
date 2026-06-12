@@ -21,6 +21,7 @@ Your job:
    - work_status: one of "off_work" | "modified_duty" | "full_duty" | null
    - restrictions: short text of work restrictions if stated
    - signals: array drawn ONLY from ["p_and_s", "representation_change", "new_body_part", "rtw_release", "treatment_request"] for contents that indicate those events
+     - "p_and_s" only when THIS document itself reports the examination finding the patient permanent and stationary / at MMI (e.g., a PR-4 or a med-legal report declaring P&S). Do NOT signal it for documents that merely reference an existing rating or a future evaluation (settlement letters citing a PD percentage, QME scheduling notices, etc.)
 4. Write a 2–3 sentence factual summary an adjuster can act on. State only what the document says — no recommendations, no speculation.
 5. Report your confidence in the classification as an integer 0–100. Be honest: if the text is ambiguous, fragmentary, or could belong to multiple categories, report low confidence. Low-confidence documents are routed to a human — that is the correct outcome, not a failure.
 
