@@ -257,6 +257,22 @@ router.get('/dev-employer-session', (req, res) => {
   res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare-001', employerName: 'BrightCare Home Health' });
 });
 
+// ── GET /api/v1/auth/dev-supervisor-session — dev-only supervisor login ──────
+// BLOCKED in production and when NODE_ENV is unset (CL-SUP1).
+router.get('/dev-supervisor-session', (req, res) => {
+  if (!['development', 'test'].includes(process.env.NODE_ENV)) {
+    return res.status(403).json({ error: 'Not available in production' });
+  }
+  const { generateSupervisorToken } = require('../middleware/auth');
+  const token = generateSupervisorToken({
+    sub:   'dev-supervisor',
+    email: 'supervisor@homecaretpa.com',
+    name:  'Dev Supervisor',
+  });
+  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+  res.json({ ok: true, role: 'supervisor', expiresIn: '8h' });
+});
+
 // ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M5) ─────────────
 router.post('/mfa/enroll', requireAuth, (req, res) => {
   // Placeholder — wire to Supabase Auth MFA API in M5

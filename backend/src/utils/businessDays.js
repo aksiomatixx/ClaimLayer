@@ -89,4 +89,15 @@ function addBusinessDays(startDate, days) {
   return current;
 }
 
-module.exports = { addBusinessDays, getCaliforniaHolidays };
+/**
+ * Is the given ISO date (YYYY-MM-DD) a business day — i.e. not a
+ * weekend and not a California state holiday?
+ */
+function isBusinessDay(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dow = d.getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  return !_getCachedHolidays(d.getUTCFullYear()).has(dateStr);
+}
+
+module.exports = { addBusinessDays, getCaliforniaHolidays, isBusinessDay };

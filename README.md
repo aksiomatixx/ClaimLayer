@@ -10,7 +10,7 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,295 tests · 89 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,312 tests · 91 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -58,10 +58,11 @@ These are the choices that make the system safe to point at a regulated workflow
 - **A deterministic MSA screen gates every settlement** — Medicare-interest screening is not left to the model's discretion.
 - **Statutory values are never model-generated.** Rating schedules, fee schedules, and caps are sourced from authoritative DWC publications and version-controlled; the model reasons over them but never invents them.
 - **Penalty and deadline diaries cannot be snoozed**, and statutory deadlines use the correct calendar/business-day basis per the governing code section.
+- **Supervisor oversight is deterministic.** A daily business-morning digest lists every CRITICAL/no-snooze diary due today and every overdue diary across the book, grouped by adjuster — plain queries, no model involvement, acknowledged with an audit trail.
 
 ## Testing
 
-1,295 automated tests across 89 suites: 1,219 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 76 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
+1,312 automated tests across 91 suites: 1,232 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 80 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 ## Tech stack
 

@@ -78,6 +78,24 @@ router.post(
   }
 );
 
+// ── POST /api/v1/admin/workers/supervisor-alerts/run ────────────────────────
+// Authenticated internal trigger for the daily supervisor digest.
+router.post(
+  '/workers/supervisor-alerts/run',
+  requireAuth,
+  requireRole(['admin']),
+  async (req, res) => {
+    try {
+      const worker = require('../cron/supervisorAlertWorker');
+      const result = await worker.run(req.body?.date);
+      res.json({ ok: true, ...result, alerts: (result.alerts || []).length });
+    } catch (err) {
+      logger.error({ msg: 'admin/workers/supervisor-alerts: run failed', err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 // ── GET /api/v1/admin/demo-status ────────────────────────────────────────────
 // Lightweight check used by the frontend banner. Returns the count of
 // demo-flagged claims; the banner shows when count > 0.

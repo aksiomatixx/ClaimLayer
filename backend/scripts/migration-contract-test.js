@@ -250,6 +250,20 @@ async function main() {
     `INSERT INTO claim_links (id, claim_id_a, claim_id_b, relation_type)
      VALUES ('clk_ct_4', 'claim_ct_2', 'claim_ct_1', 'duplicate_of')`);
 
+  await check('supervisor_alerts stores one digest per supervisor per day', async () => {
+    await client.query(
+      `INSERT INTO supervisor_alerts (id, alert_date, recipient_user_id, payload, due_today_count, overdue_count)
+       VALUES ('sva_ct_1', '2026-06-12', 'supervisor@ct.test', '{"due_today":[],"overdue":[]}', 1, 2)`);
+  });
+  await expectViolation(client,
+    'a second digest for the same supervisor/date is rejected (idempotent upsert target)',
+    `INSERT INTO supervisor_alerts (id, alert_date, recipient_user_id)
+     VALUES ('sva_ct_2', '2026-06-12', 'supervisor@ct.test')`);
+  await expectViolation(client,
+    'negative digest counts are rejected',
+    `INSERT INTO supervisor_alerts (id, alert_date, recipient_user_id, due_today_count)
+     VALUES ('sva_ct_3', '2026-06-13', 'supervisor@ct.test', -1)`);
+
   await check('magic-link single use is atomic (conditional update wins exactly once)', async () => {
     await client.query(
       `INSERT INTO magic_link_tokens (jti, claim_id, adp_employee_id, expires_at)
