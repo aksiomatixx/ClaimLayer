@@ -235,6 +235,7 @@ async function wipeDemo() {
     try { await supabase.from('claim_links').delete().eq('claim_id_a', id); } catch { /* ignore */ }
     try { await supabase.from('claim_links').delete().eq('claim_id_b', id); } catch { /* ignore */ }
   }
+  try { await supabase.from('supervisor_alerts').delete().eq('recipient_user_id', 'supervisor@homecaretpa.com'); } catch { /* ignore */ }
   for (const tbl of childTables) {
     for (const id of ids) {
       try { await supabase.from(tbl).delete().eq('claim_id', id); } catch { /* table may not exist */ }
@@ -342,11 +343,55 @@ async function seedDemo() {
   // plus one already-migrated example so the round trip is visible without
   // clicking anything.
   await _seedPriorRosaClaim();
+  await _seedSupervisorDemo();
   await _seedLegacyDemo();
 
   logger.info({ msg: 'seedDemo: complete', count: created.length });
   return { count: created.length, ids: created,
     employers: [EMPLOYER_BRIGHTCARE.id, EMPLOYER_WESTSIDE.id] };
+}
+
+
+// ── Supervisor daily-alert demo data (CL-SUP1) ───────────────────────────────
+// A supervisor user (role-model row) plus diaries that guarantee a
+// non-empty digest: one CRITICAL due TODAY and two OVERDUE diaries on
+// different adjusters, so the panel demos grouped-by-adjuster well.
+async function _seedSupervisorDemo() {
+  await supabase.from('users').upsert({
+    id:    'a0000000-0000-4000-8000-000000000001',
+    email: 'supervisor@homecaretpa.com',
+    role:  'supervisor',
+    created_at: new Date().toISOString(),
+  }, { onConflict: 'email' });
+
+  // Match the alert service's clock: the digest date is computed in
+  // America/Los_Angeles, so "due today" — and the overdue offsets —
+  // must be anchored to LA-today, not UTC-today.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const past = (n) => {
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().split('T')[0];
+  };
+  const extra = [
+    { id: 'diy_demo_sup_due_today', claim_id: makeClaimId(3),  // David Park, active_medical
+      diary_type: 'TD_PAYMENT_REVIEW', due_date: today, priority: 'CRITICAL', no_snooze: true,
+      assigned_to: config.adjuster.email,
+      notes: 'Biweekly TD payment review — due today (synthetic demo diary for the supervisor digest).' },
+    { id: 'diy_demo_sup_overdue_1', claim_id: makeClaimId(4),  // Linda Chen
+      diary_type: 'PR2_FOLLOW_UP', due_date: past(3), priority: 'MEDIUM',
+      assigned_to: 'j.lee@homecaretpa.com',
+      notes: 'PR-2 follow-up — 3 days overdue (synthetic demo diary for the supervisor digest).' },
+    { id: 'diy_demo_sup_overdue_2', claim_id: makeClaimId(5),  // Carlos Ruiz
+      diary_type: 'QME_REPORT_REVIEW', due_date: past(6), priority: 'HIGH',
+      assigned_to: 'd.park@homecaretpa.com',
+      notes: 'QME report review — 6 days overdue (synthetic demo diary for the supervisor digest).' },
+  ];
+  for (const d of extra) {
+    await supabase.from('diaries').insert({
+      ...d, status: 'open', created_at: new Date().toISOString(),
+    });
+  }
 }
 
 // ── Legacy integration seed (M_legacy_integration) ────────────────────────────

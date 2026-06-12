@@ -75,6 +75,16 @@ function generateEmployerToken(payload) {
   );
 }
 
+// ── generateSupervisorToken ───────────────────────────────────────────────────
+// Issues an 8-hour JWT for supervisor oversight sessions (CL-SUP1).
+function generateSupervisorToken(payload) {
+  return jwt.sign(
+    { ...payload, role: 'supervisor' },
+    config.jwtSecret,
+    { expiresIn: '8h' }
+  );
+}
+
 // ── requireMFA ────────────────────────────────────────────────────────────────
 // Checks that the authenticated user has verified TOTP MFA (amr includes 'totp').
 // When SUPABASE_URL is absent (dev/test), this is a no-op pass-through.
@@ -91,4 +101,4 @@ function requireMFA(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireRole, generateMagicToken, generateAdminToken, generateEmployerToken, requireMFA };
+module.exports = { requireAuth, requireRole, generateMagicToken, generateAdminToken, generateEmployerToken, generateSupervisorToken, requireMFA };
