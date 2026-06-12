@@ -56,6 +56,8 @@ nav{position:sticky;top:0;z-index:50;background:rgba(7,16,26,.86);backdrop-filte
 .hero::before{content:'';position:absolute;inset:-40% -20% auto;height:120%;background:radial-gradient(ellipse 55% 45% at 50% 0%,rgba(232,163,61,.12),transparent 70%);pointer-events:none}
 .hero h1{font-size:clamp(34px,5.4vw,62px);font-weight:800;letter-spacing:-1.5px;line-height:1.08;max-width:980px;margin:0 auto 22px}
 .hero h1 em{font-style:normal;color:var(--amber)}
+.hero .byline{color:var(--text);font-size:clamp(15px,1.7vw,17.5px);max-width:820px;margin:0 auto 18px}
+.hero .byline b{color:var(--amber)}
 .hero p{color:var(--dim);font-size:clamp(16px,1.8vw,19px);max-width:760px;margin:0 auto 36px}
 .hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
 .chips{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:44px}
@@ -165,16 +167,18 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 
 <header class="hero" id="top"><div class="wrap">
   <h1>AI agents for workers' comp claims.<br/><em>A licensed human at every decision.</em></h1>
-  <p>ClaimLayer is a regulatory-aware execution layer that runs Claude-powered agents on top of your existing claims system — drafting the analysis, applying the statutory math, generating the notices, and tracking the deadlines, inside guardrails enforced in code.</p>
+  <p class="byline">A full-stack reference implementation built around California workers' compensation domain expertise — designed to demonstrate safe deployment of AI agents in regulated, deadline-driven workflows. Built by <a href="#about"><b>Akash Dixit</b></a>, by directing Claude Code.</p>
+  <p>ClaimLayer is a regulatory-aware execution layer that runs Claude-powered agents on top of an existing claims system — drafting the analysis, applying the statutory math, generating the notices, and tracking the deadlines, inside guardrails enforced in code.</p>
   <div class="hero-cta">
+    <a class="btn" href="demo/" target="_blank" rel="noopener">🖱 &nbsp;Launch the interactive demo</a>
     <a class="btn" href="#video">▶ &nbsp;Watch the 5-minute tour</a>
-    <a class="btn ghost" href="demo/" target="_blank" rel="noopener">🖱 &nbsp;Launch the interactive demo</a>
+    <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">View source ↗</a>
   </div>
   <div class="chips">
     <div class="chip"><b>6</b> specialized Claude agents</div>
     <div class="chip"><b>100%</b> of model calls audit-logged</div>
     <div class="chip"><b>0</b> auto-deny pathways — by construction</div>
-    <div class="chip"><b>1,242</b> automated tests · 83 suites</div>
+    <div class="chip"><b>1,312</b> automated tests · 91 suites</div>
   </div>
 </div></header>
 
