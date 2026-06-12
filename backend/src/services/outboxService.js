@@ -77,11 +77,16 @@ async function _execute(row) {
   if (row.target === 'filehandler') {
     const filehandler = require('./filehandler');
     const p = row.payload || {};
+    // The outbox row id is the operation's stable idempotency key: a
+    // stale-lock replay (external call succeeded, local success-write
+    // lost) re-sends the SAME key, so the system of record can dedupe
+    // instead of double-writing a ledger note / diary completion.
+    const opts = { idempotencyKey: row.id };
     if (row.operation === 'add_note') {
-      return filehandler.addNote(p.fh_claim_id, p.note_text, p.added_by || 'ADJUSTER');
+      return filehandler.addNote(p.fh_claim_id, p.note_text, p.added_by || 'ADJUSTER', 'diary', opts);
     }
     if (row.operation === 'complete_diary') {
-      return filehandler.completeDiary(p.fh_claim_id, p.fh_diary_id, p.completion_note, p.completed_by || 'ADJUSTER');
+      return filehandler.completeDiary(p.fh_claim_id, p.fh_diary_id, p.completion_note, p.completed_by || 'ADJUSTER', opts);
     }
   }
   throw new Error(`outbox: unknown target/operation ${row.target}/${row.operation}`);

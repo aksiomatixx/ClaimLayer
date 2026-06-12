@@ -231,7 +231,7 @@ router.get(
 router.get(
   '/:id/diaries',
   requireAuth,
-  requireRole(['admin']),
+  requireRole(['admin', 'supervisor']), // supervisors: read-only oversight (daily alert drawer links)
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
@@ -322,7 +322,7 @@ router.post(
 router.get(
   '/:id/documents',
   requireAuth,
-  requireRole(['admin']),
+  requireRole(['admin', 'supervisor']), // supervisors: read-only oversight (daily alert drawer links)
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
@@ -330,8 +330,13 @@ router.get(
       const { data, error } = await supabase
         .from('claim_documents').select('*').eq('claim_id', req.params.id);
       if (error) throw new Error(error.message);
-      const documents = (data || []).sort((a, b) =>
-        String(b.received_at || '').localeCompare(String(a.received_at || '')));
+      // List responses carry metadata only — the raw PDF (base64, up to
+      // ~20 MB per document) is served exclusively by the explicit
+      // /documents/:docId/file download route.
+      const documents = (data || [])
+        .map(({ pdf_buffer_b64, ...doc }) => ({ ...doc, has_file: !!pdf_buffer_b64 }))
+        .sort((a, b) =>
+          String(b.received_at || '').localeCompare(String(a.received_at || '')));
       res.json({ documents });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -343,7 +348,7 @@ router.get(
 router.get(
   '/:id/documents/:docId/file',
   requireAuth,
-  requireRole(['admin']),
+  requireRole(['admin', 'supervisor']), // supervisors: read-only oversight (daily alert drawer links)
   [param('id').notEmpty(), param('docId').notEmpty()],
   validate,
   async (req, res) => {
@@ -376,7 +381,7 @@ router.get(
 router.get(
   '/:id/links',
   requireAuth,
-  requireRole(['admin']),
+  requireRole(['admin', 'supervisor']), // supervisors: read-only oversight (daily alert drawer links)
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
@@ -393,7 +398,7 @@ router.get(
 router.get(
   '/:id/decision-brief',
   requireAuth,
-  requireRole(['admin']),
+  requireRole(['admin', 'supervisor']), // supervisors: read-only oversight (daily alert drawer links)
   [param('id').notEmpty()],
   validate,
   async (req, res) => {

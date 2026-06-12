@@ -27,11 +27,12 @@ function validate(req, res, next) {
 
 const _status = (err) =>
   err.message.includes('not found') ? 404
-    : /must be|required|one of/.test(err.message) ? 400 : 500;
+    : /WORKSHEET_CHANGED/.test(err.message) ? 409
+    : /must be|required|one of|No worksheet/.test(err.message) ? 400 : 500;
 
 router.get(
   '/claims/:id/reserve-worksheet',
-  requireAuth, requireRole(['admin']),
+  requireAuth, requireRole(['admin', 'supervisor']), // read-only oversight
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
@@ -59,6 +60,25 @@ router.post(
     try {
       const item = await worksheet.addLineItem(req.params.id, req.body, req.user?.email);
       res.status(201).json({ item });
+    } catch (err) { res.status(_status(err)).json({ error: err.message }); }
+  }
+);
+
+// Approve the current rollup, bound to the reviewed subtotals: a
+// concurrent worksheet edit turns the approval into a 409 instead of
+// silently writing stale totals to reserves/FileHandler.
+router.post(
+  '/claims/:id/reserve-worksheet/approve',
+  requireAuth, requireRole(['admin']),
+  [
+    param('id').notEmpty(),
+    body('expected').isObject().withMessage('expected {medical, indemnity, expense} is required'),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const result = await worksheet.approveWorksheet(req.params.id, req.body.expected, req.user?.email);
+      res.json(result);
     } catch (err) { res.status(_status(err)).json({ error: err.message }); }
   }
 );

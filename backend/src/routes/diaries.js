@@ -22,7 +22,7 @@ function validate(req, res, next) {
 
 router.get(
   '/diaries/:id/aftermath-preview',
-  requireAuth, requireRole(['admin']),
+  requireAuth, requireRole(['admin', 'supervisor']), // read-only preview
   [param('id').notEmpty()],
   validate,
   async (req, res) => {
