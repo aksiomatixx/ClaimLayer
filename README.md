@@ -10,7 +10,7 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,312 tests · 91 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,340 tests · 92 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -62,7 +62,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-1,312 automated tests across 91 suites: 1,232 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 80 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
+1,340 automated tests across 92 suites: 1,256 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 ## Tech stack
 
@@ -86,17 +86,18 @@ The demo runs against a real PostgreSQL database via Supabase — there is no in
 2. **A Supabase project** — either of:
    - **Local (recommended):** install the [Supabase CLI](https://supabase.com/docs/guides/cli) and Docker, then run `supabase start` from the repo root. The repo ships a `supabase/config.toml`, so this spins up a full local stack and applies every migration in `supabase/migrations/` automatically. The command prints the `API URL`, `anon key`, and `service_role key` to put in `backend/.env`.
    - **Hosted:** a free-tier project at [supabase.com](https://supabase.com); apply the migrations in `supabase/migrations/` in filename order (SQL editor, `psql`, or `supabase db push`).
-3. **Environment** — copy `backend/.env.example` to `backend/.env` and fill in at minimum:
-   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
-   - `JWT_SECRET` (any random string for local use)
+3. **Environment** — copy `backend/.env.example` to `backend/.env`, then fill in:
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` (printed by `supabase start`)
+   - `JWT_SECRET` (any random string for local use — `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`)
    - `ANTHROPIC_API_KEY` — optional; without it the app runs but agent analyses are unavailable
-   - ADP / FileHandler / SendGrid / Twilio / Lob keys are **not** required for the demo
+   - `FILEHANDLER_API_KEY`, `ADP_CLIENT_ID`, `ADP_CLIENT_SECRET` — required to be *set* (the backend refuses to boot without them), but the demo-safe mock values already in `.env.example` (`mock-fh-key` / `mock` / `mock`) are all the demo needs; no real vendor accounts
+   - SendGrid / Twilio / Lob keys are **not** required for the demo
 
 ### Run it
 
 ```bash
-npm ci --prefix backend && npm ci --prefix frontend   # lockfile-exact installs
-npm run dev:demo      # wipes demo-flagged rows, seeds 8 synthetic claims, starts backend (:3001) + frontend (:5173)
+npm ci --prefix backend && npm ci --prefix frontend   # lockfile-exact installs (no root install needed)
+npm run dev:demo      # wipes demo-flagged rows, seeds 10 synthetic claims, starts backend (:3001) + frontend (:5173)
 ```
 
 ### Deploying
@@ -108,13 +109,14 @@ order to a clean PostgreSQL 16, the hardening migration re-applies
 idempotently, and schema-contract integration tests assert every write
 shape the code performs (`backend/scripts/migration-contract-test.js`).
 
-Two workers must run in production (cron or scheduler, both also
+Three workers must run in production (cron or scheduler, all also
 triggerable via authenticated admin endpoints):
 
 | Worker | Module | Endpoint | Schedule |
 |---|---|---|---|
 | Notice delivery | `backend/src/cron/noticeDeliveryWorker.js` | `POST /api/v1/admin/workers/notice-delivery/run` | every 15 min |
 | Integration outbox | `backend/src/cron/outboxWorker.js` | `POST /api/v1/admin/workers/outbox/run` | every 5 min |
+| Supervisor alerts | `backend/src/cron/supervisorAlertWorker.js` | `POST /api/v1/admin/workers/supervisor-alerts/run` | 06:30 America/Los_Angeles, Mon–Fri |
 
 Physical mail is only marked **delivered** by a signature-verified Lob
 webhook (`POST /webhooks/lob/delivery`); until then a submitted letter

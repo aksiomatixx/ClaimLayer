@@ -40,25 +40,43 @@ const _daysBetween = (from, to) =>
   Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 
 // ── The two scope queries (named, tested) ─────────────────────────────────────
+// Predicates are pushed server-side and results paginated: PostgREST caps
+// unpaginated responses (1,000 rows by default), and a digest that silently
+// drops overdue diaries past the first page is worse than no digest.
 
-async function _openDiaries() {
-  const { data, error } = await supabase.from('diaries').select('*').eq('status', 'open');
-  if (error) throw new Error(`supervisorAlert: diaries read failed — ${error.message}`);
-  return data || [];
+const PAGE_SIZE = 1000;
+
+async function _pageAll(buildQuery) {
+  const rows = [];
+  for (let from = 0; ; from += _pageSize()) {
+    const { data, error } = await buildQuery().range(from, from + _pageSize() - 1);
+    if (error) throw new Error(`supervisorAlert: diaries read failed — ${error.message}`);
+    rows.push(...(data || []));
+    if (!data || data.length < _pageSize()) return rows;
+  }
 }
+
+// Test seam: boundary tests exercise multi-page retrieval without
+// seeding a thousand rows.
+let _pageSizeOverride = null;
+const _pageSize = () => _pageSizeOverride || PAGE_SIZE;
 
 /**
  * DUE TODAY (important): open diaries with due_date = date AND
  * (priority CRITICAL OR no_snooze).
  */
 async function dueTodayImportant(date) {
-  return (await _openDiaries()).filter(d =>
-    d.due_date === date && (d.priority === 'CRITICAL' || d.no_snooze === true));
+  return _pageAll(() => supabase.from('diaries').select('*')
+    .eq('status', 'open').eq('due_date', date)
+    .or('priority.eq.CRITICAL,no_snooze.eq.true')
+    .order('id', { ascending: true })); // stable pagination order
 }
 
 /** OVERDUE: ALL open diaries with due_date < date, any priority. */
 async function overdue(date) {
-  return (await _openDiaries()).filter(d => d.due_date && d.due_date < date);
+  return _pageAll(() => supabase.from('diaries').select('*')
+    .eq('status', 'open').lt('due_date', date)
+    .order('id', { ascending: true })); // stable pagination order
 }
 
 // ── Digest assembly ───────────────────────────────────────────────────────────
@@ -178,7 +196,17 @@ async function generate(date = todayLA()) {
       };
       const { data: inserted, error: insErr } = await supabase
         .from('supervisor_alerts').insert(row).select().single();
-      if (insErr) throw new Error(`supervisorAlert: insert failed — ${insErr.message}`);
+      if (insErr) {
+        // Concurrent generation lost the race on the (date, recipient)
+        // UNIQUE — converge on the existing row instead of failing.
+        if (insErr.code === '23505' || /duplicate key/.test(insErr.message || '')) {
+          const { data: raced } = await supabase
+            .from('supervisor_alerts').select('*')
+            .eq('alert_date', date).eq('recipient_user_id', recipientId);
+          if (raced && raced.length > 0) { alerts.push(raced[0]); continue; }
+        }
+        throw new Error(`supervisorAlert: insert failed — ${insErr.message}`);
+      }
       alerts.push(inserted);
       await _notify(recipientId, digest);
     }
@@ -196,25 +224,45 @@ async function currentFor(recipientId) {
     String(b.alert_date).localeCompare(String(a.alert_date)))[0] || null;
 }
 
-/** Acknowledge — recorded with the acting user in the audit trail. */
+/**
+ * Acknowledge — recipient-bound and audited.
+ *
+ * Only the alert's recipient may acknowledge it: the requester identity
+ * is part of both the lookup and the update predicate, so another
+ * supervisor holding the alert id gets the same "not found" a wrong id
+ * would (no existence leak). The acknowledgement is only kept if the
+ * audit row records — an audit-insert failure compensates by reverting
+ * the ack, so "acknowledged" is never true without its trail.
+ */
 async function acknowledge(alertId, actorEmail) {
-  const { data: alert, error } = await supabase
-    .from('supervisor_alerts').select('*').eq('id', alertId).single();
-  if (error || !alert) throw new Error(`Alert not found: ${alertId}`);
+  if (!actorEmail) throw new Error('Alert not found: acknowledge requires the requesting supervisor identity');
+
+  const { data: rows, error } = await supabase
+    .from('supervisor_alerts').select('*')
+    .eq('id', alertId).eq('recipient_user_id', actorEmail);
+  if (error) throw new Error(`supervisorAlert: acknowledge lookup failed — ${error.message}`);
+  const alert = (rows || [])[0];
+  if (!alert) throw new Error(`Alert not found: ${alertId}`);
   if (alert.acknowledged_at) return alert; // idempotent
 
   const now = new Date().toISOString();
   const { data: updated, error: upErr } = await supabase.from('supervisor_alerts')
-    .update({ acknowledged_at: now, acknowledged_by: actorEmail || null, updated_at: now })
-    .eq('id', alertId).select().single();
+    .update({ acknowledged_at: now, acknowledged_by: actorEmail, updated_at: now })
+    .eq('id', alertId).eq('recipient_user_id', actorEmail).select().single();
   if (upErr) throw new Error(`supervisorAlert: acknowledge failed — ${upErr.message}`);
 
   const { error: auErr } = await supabase.from('audit_log').insert({
     action: 'supervisor_alert_acknowledged', resource_type: 'supervisor_alert', resource_id: alertId,
     description: `Daily alert ${alert.alert_date} acknowledged (${alert.due_today_count} due today, ${alert.overdue_count} overdue)`,
-    actor: actorEmail || null, created_at: now,
+    actor: actorEmail, created_at: now,
   });
-  if (auErr) throw new Error(`supervisorAlert: acknowledge audit failed — ${auErr.message}`);
+  if (auErr) {
+    // Compensate: an unaudited acknowledgement must not stand.
+    await supabase.from('supervisor_alerts')
+      .update({ acknowledged_at: null, acknowledged_by: null, updated_at: new Date().toISOString() })
+      .eq('id', alertId).eq('acknowledged_at', now);
+    throw new Error(`supervisorAlert: acknowledge audit failed — ${auErr.message}`);
+  }
   return updated;
 }
 
@@ -284,4 +332,6 @@ module.exports = {
   todayLA,
   _renderDigestText,
   NOTIFY_ADAPTERS,
+  /** Test seam: shrink the PostgREST page size to exercise pagination. */
+  _setPageSizeForTests(n) { _pageSizeOverride = n || null; },
 };

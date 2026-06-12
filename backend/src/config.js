@@ -6,6 +6,15 @@ const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
 
+  // Express `trust proxy` — REQUIRED behind a reverse proxy, otherwise
+  // every client shares the proxy's IP and the rate limiter throttles
+  // the whole user base together. Unset (the safe local/dev/test
+  // default) means "no proxy: use the socket address". Accepts a hop
+  // count ("1"), a named preset ("loopback"), or a CIDR list.
+  // 'true' is intentionally mapped to 1 hop — blind trust of the whole
+  // X-Forwarded-For chain would let clients spoof their rate-limit key.
+  trustProxy: process.env.TRUST_PROXY || null,
+
   jwtSecret: process.env.JWT_SECRET,
 
   filehandler: {

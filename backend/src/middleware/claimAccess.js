@@ -38,6 +38,10 @@ async function _claimEmployerId(claimId) {
 async function userMayAccessClaim(user, claimId) {
   if (!user || !claimId) return false;
   if (user.role === 'admin') return true;
+  // Supervisors oversee the whole book — but read-only. Write routes
+  // carry their own requireRole(['admin']) gates; the GET-only pass in
+  // requireClaimScope below is what lets the daily-alert drawer links
+  // open a claim under a supervisor session.
   if (user.role === 'employee') return user.claimId === claimId;
   if (user.role === 'employer') {
     const employerId = user.employerId || user.sub;
@@ -66,6 +70,10 @@ function requireClaimScope(resolve) {
 
   return async (req, res, next) => {
     if (req.user?.role === 'admin') return next();
+    // Read-only oversight: supervisors may READ any claim-scoped
+    // resource (their daily alert spans every adjuster's book), never
+    // write through this gate.
+    if (req.user?.role === 'supervisor' && req.method === 'GET') return next();
     let claimId;
     try {
       claimId = await resolver(req);

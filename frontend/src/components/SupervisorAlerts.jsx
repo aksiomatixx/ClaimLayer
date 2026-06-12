@@ -41,7 +41,7 @@ function Section({ title, color, groups, onSelect }) {
   );
 }
 
-export default function SupervisorAlerts({ onSelect, notify = () => {} }) {
+export default function SupervisorAlerts({ onSelect, notify = () => {}, placeholder = false }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: alert } = useQuery({
@@ -50,7 +50,13 @@ export default function SupervisorAlerts({ onSelect, notify = () => {} }) {
     refetchInterval: 60_000,
   });
 
-  if (!alert) return null;
+  if (!alert) {
+    // Dedicated supervisor view: explain the empty state instead of
+    // rendering nothing (embedded usages keep the silent null).
+    return placeholder
+      ? <div style={{ fontSize: 12.5, color: C.muted }}>No daily alert yet — the digest generates each business morning (06:30 Pacific), or an admin can trigger it from the ops endpoints.</div>
+      : null;
+  }
   const p = alert.payload || {};
 
   const ack = async () => {

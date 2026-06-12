@@ -81,15 +81,22 @@ const portalAdapter = {
 
 const mailAdapter = {
   name: 'mail',
-  async deliver(notice) {
+  async deliver(notice, channel) {
     const lobService = require('./lobService');
     // Submission to the print/mail provider — whether the live API or
     // the LOB_LIVE=false stub — is SUBMITTED, never delivered. Only a
     // verified Lob delivery webhook (recordLobEvent) flips this channel
     // to delivered.
+    //
+    // The channel row id is the DURABLE idempotency key: if the
+    // provider accepts the letter but the process dies before
+    // provider_ref is saved locally, the stale-lock retry re-submits
+    // with the same key and gets the ORIGINAL letter back — a statutory
+    // notice is never physically mailed twice.
     const result = await lobService.sendLetter(
       'benefit_notice', notice.claim_id, notice.audience,
       { recipientName: notice.recipient?.name, noticeType: notice.notice_type, documentId: notice.document_id },
+      { idempotencyKey: channel?.id },
     );
     if (!result?.letterId) throw new Error('MAIL_SUBMISSION_FAILED — no letter id returned');
     return { state: 'submitted', ref: result.letterId, detail: `lob:${result.letterId} (${result.status})` };
@@ -324,7 +331,7 @@ async function deliverNotice(noticeId, { method, workerId } = {}) {
     }
     attempted = true;
     try {
-      const r = await adapter.deliver(notice);
+      const r = await adapter.deliver(notice, ch);
       const now = new Date().toISOString();
       const patch = {
         status: r.state,
@@ -411,9 +418,14 @@ const LOB_DELIVERED_EVENTS = ['letter.delivered'];
 const LOB_FAILED_EVENTS    = ['letter.returned_to_sender', 'letter.failed', 'letter.deleted'];
 
 /**
- * Process a signature-verified Lob webhook event. Idempotent on the
- * Lob event id: duplicate deliveries of the same event are acknowledged
- * without reprocessing.
+ * Process a signature-verified Lob webhook event.
+ *
+ * Idempotent on the Lob event id, with a PROCESSING STATE: the event
+ * row is recorded on first sight, but only marked processed
+ * (processed_at) after the channel/notice updates succeed. A Lob retry
+ * of an event whose application failed — or that arrived before the
+ * letter's provider_ref was saved — is therefore reprocessed instead of
+ * being skipped by the dedupe row.
  */
 async function recordLobEvent(event) {
   const eventId  = event?.id;
@@ -422,31 +434,50 @@ async function recordLobEvent(event) {
 
   if (!eventId || !type) return { ignored: true, reason: 'malformed_event' };
 
-  // Idempotency: one row per provider event id.
+  // Idempotency: one row per provider event id; only a PROCESSED row
+  // short-circuits a retry.
   const { data: seen, error: seenErr } = await supabase
-    .from('webhook_events').select('id').eq('provider_event_id', eventId);
+    .from('webhook_events').select('*').eq('provider_event_id', eventId);
   if (seenErr) throw new Error(`noticeDelivery: webhook dedupe lookup failed — ${seenErr.message}`);
-  if (seen && seen.length > 0) return { duplicate: true };
+  const existing = (seen || [])[0];
+  if (existing && existing.processed_at) return { duplicate: true };
 
-  const { error: insErr } = await supabase.from('webhook_events').insert({
-    id: _id('whk'),
-    provider: 'lob',
-    provider_event_id: eventId,
-    event_type: type,
-    payload: event,
-    received_at: new Date().toISOString(),
-  });
-  if (insErr) throw new Error(`noticeDelivery: webhook event insert failed — ${insErr.message}`);
+  let eventRowId = existing?.id || null;
+  if (!eventRowId) {
+    eventRowId = _id('whk');
+    const { error: insErr } = await supabase.from('webhook_events').insert({
+      id: eventRowId,
+      provider: 'lob',
+      provider_event_id: eventId,
+      event_type: type,
+      payload: event,
+      received_at: new Date().toISOString(),
+      processed_at: null,
+    });
+    if (insErr) throw new Error(`noticeDelivery: webhook event insert failed — ${insErr.message}`);
+  }
 
-  if (!letterId) return { ignored: true, reason: 'no_letter_reference' };
+  const _markProcessed = async () => {
+    const { error } = await supabase.from('webhook_events')
+      .update({ processed_at: new Date().toISOString() }).eq('id', eventRowId);
+    if (error) throw new Error(`noticeDelivery: webhook processed-mark failed — ${error.message}`);
+  };
+
+  if (!letterId) {
+    await _markProcessed(); // nothing will ever apply — terminal
+    return { ignored: true, reason: 'no_letter_reference' };
+  }
 
   const { data: chRows, error: chErr } = await supabase
     .from('benefit_notice_channels').select('*').eq('provider_ref', letterId);
   if (chErr) throw new Error(`noticeDelivery: channel lookup failed — ${chErr.message}`);
   const channel = (chRows || [])[0];
   if (!channel) {
-    logger.warn({ msg: 'noticeDelivery: Lob event for unknown letter', letterId, type });
-    return { ignored: true, reason: 'unknown_letter' };
+    // Early webhook: the event can beat the local provider_ref save.
+    // Leave the row UNPROCESSED and signal retry so the provider
+    // redelivers once the submission record has landed.
+    logger.warn({ msg: 'noticeDelivery: Lob event for unknown letter — left retryable', letterId, type });
+    throw new Error(`noticeDelivery: no channel found for letter ${letterId} (event left retryable)`);
   }
 
   const now = new Date().toISOString();
@@ -458,6 +489,7 @@ async function recordLobEvent(event) {
     // Progress events (letter.processed, letter.in_transit, …) are
     // recorded but change no delivery truth.
     await _updateChannel(channel.id, { last_error: null, last_event: type });
+    await _markProcessed();
     return { recorded: true, progress: type };
   }
 
@@ -472,6 +504,9 @@ async function recordLobEvent(event) {
   if (LOB_FAILED_EVENTS.includes(type)) {
     await _surfaceTerminalFailure(updated, `physical mail ${type} (letter ${letterId})`);
   }
+
+  // Everything applied — only now does the dedupe row become terminal.
+  await _markProcessed();
 
   return { recorded: true, notice_id: notice.id, notice_status: updated.status };
 }

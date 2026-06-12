@@ -55,7 +55,17 @@ async function createLink(claimIdA, claimIdB, { relation_type = 'prior_claim_sam
   };
   const { data, error } = await supabase
     .from('claim_links').insert(row).select().single();
-  if (error) throw new Error(`claimLink: insert failed — ${error.message}`);
+  if (error) {
+    // Concurrency: two requests can both observe "no row" above; the
+    // loser's insert hits the pair UNIQUE constraint. Idempotent
+    // contract: re-fetch and return the winner's row.
+    if (error.code === '23505' || /duplicate key/.test(error.message || '')) {
+      const { data: raced, error: rcErr } = await supabase
+        .from('claim_links').select('*').eq('claim_id_a', a).eq('claim_id_b', b);
+      if (!rcErr && raced && raced.length > 0) return raced[0];
+    }
+    throw new Error(`claimLink: insert failed — ${error.message}`);
+  }
 
   for (const cid of [a, b]) {
     const { error: evErr } = await supabase.from('claim_events').insert({

@@ -64,6 +64,61 @@ describe('App smoke (post-modularization wiring)', () => {
       await screen.findByText('No claims require immediate action')
     ).toBeInTheDocument();
   });
+
+  // Codex sweep A2: the supervisor panel lives in a SUPERVISOR-
+  // authenticated flow — entering the role establishes the supervisor
+  // session (the endpoints 403 admin cookies) and the digest renders.
+  it('the supervisor role establishes its own session and renders the digest panel', async () => {
+    fetchMock.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes('/supervisor/alerts/current')) {
+        return jsonRes({ alert: {
+          id: 'sva_app_1', alert_date: '2026-06-12',
+          due_today_count: 1, overdue_count: 2,
+          acknowledged_at: null, acknowledged_by: null,
+          payload: { due_today: [], overdue: [] },
+        } });
+      }
+      if (u.includes('/claims')) return jsonRes({ claims: [] });
+      if (u.includes('/auth/')) return jsonRes({ ok: true, role: 'supervisor' });
+      return jsonRes({});
+    });
+    renderApp();
+    fireEvent.click(screen.getByRole('button', { name: /Supervisor/ }));
+
+    expect(await screen.findByText('Supervisor Oversight')).toBeInTheDocument();
+    expect(await screen.findByTestId('sup-counts')).toHaveTextContent('1 important due today · 2 overdue');
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/auth/dev-supervisor-session'))).toBe(true);
+  });
+
+  // Codex sweep G17: every ENTRY into the employer role re-establishes
+  // the employer cookie — a cached employerUser from a previous visit
+  // must not leave the interim admin cookie active.
+  it('re-entering the employer role refreshes the employer session', async () => {
+    fetchMock.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes('/auth/dev-employer-session')) {
+        return jsonRes({ ok: true, employerId: 'employer-brightcare-001', employerName: 'BrightCare Home Health' });
+      }
+      if (u.includes('/claims')) return jsonRes({ claims: [] });
+      if (u.includes('/auth/')) return jsonRes({ ok: true });
+      return jsonRes({});
+    });
+    renderApp();
+    const employerCalls = () =>
+      fetchMock.mock.calls.filter(([u]) => String(u).includes('/auth/dev-employer-session')).length;
+
+    fireEvent.click(screen.getByRole('button', { name: /Employer/ }));
+    await screen.findByText('Employer Portal');
+    const afterFirst = employerCalls();
+    expect(afterFirst).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /Admin/ }));
+    await screen.findByText('Claims Console');
+
+    fireEvent.click(screen.getByRole('button', { name: /Employer/ }));
+    await vi.waitFor(() => expect(employerCalls()).toBeGreaterThan(afterFirst));
+  });
 });
 
 describe('ErrorBoundary', () => {

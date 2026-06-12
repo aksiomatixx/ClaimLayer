@@ -10,6 +10,16 @@ async function _json(res) {
   return res.json();
 }
 
+/** Dev-only supervisor auto-login (mirrors ensureDevSession for admin).
+ *  The supervisor endpoints 403 admin cookies, so entering the
+ *  supervisor surface must establish a supervisor session first. */
+export async function ensureDevSupervisorSession() {
+  try {
+    const res = await fetch(`${BASE}/auth/dev-supervisor-session`, { credentials: 'include' });
+    return res.ok ? res.json() : null;
+  } catch { return null; }
+}
+
 /** Latest daily digest for the logged-in supervisor; null when none
  *  (or when the caller is not a supervisor — the panel renders nothing). */
 export async function fetchSupervisorAlert() {

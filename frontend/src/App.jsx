@@ -16,8 +16,10 @@ import { NoticeCenter } from './components/NoticeCenter.jsx';
 import { RFACenter } from './components/RFACenter.jsx';
 import { TopNav } from './components/TopNav.jsx';
 import { generateNoticePDF } from './noticePdf.js';
+import SupervisorAlerts from './components/SupervisorAlerts.jsx';
 import { ensureDevSession, fetchClaims } from './services/claims.js';
 import { ensureDevEmployerSession } from './services/employer.js';
+import { ensureDevSupervisorSession } from './services/supervisor.js';
 import { C, CSS, FONTS } from './theme.js';
 import { Spinner, Toast } from './ui/primitives.jsx';
 
@@ -33,16 +35,19 @@ export default function App(){
   const [employerUser,setEmployerUser]=useState(null);
 
   // ── Dev-only auto-login (replaced by Supabase Auth in M5).
-  // Refresh the cookie on every role change so the demo never carries a
-  // stale cookie from a prior role: switching admin → employer → admin
-  // must restore the admin cookie, not leave the employer one in place.
+  // Refresh the cookie on EVERY role change so the demo never carries a
+  // stale cookie from a prior role: employer → admin → employer must
+  // re-establish the employer cookie each time (the cached employerUser
+  // display state is not session state), supervisor gets its own
+  // session (the supervisor endpoints 403 admin cookies), and admin +
+  // employee restore the admin dev cookie.
   useEffect(()=>{
     if(role==='employer'){
-      if(!employerUser){
-        ensureDevEmployerSession().then(data=>{
-          if(data?.ok) setEmployerUser({employerId:data.employerId,employerName:data.employerName,email:data.email||'hr@brightcarehh.com'});
-        });
-      }
+      ensureDevEmployerSession().then(data=>{
+        if(data?.ok) setEmployerUser({employerId:data.employerId,employerName:data.employerName,email:data.email||'hr@brightcarehh.com'});
+      });
+    } else if(role==='supervisor'){
+      ensureDevSupervisorSession();
     } else {
       // admin + employee portals both use the admin dev cookie today
       ensureDevSession();
@@ -108,6 +113,15 @@ export default function App(){
         {role==="admin"&&adminView==="integrations"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><IntegrationsConsole notify={notify}/></Suspense>}
         {role==="admin"&&adminView==="reports"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><AdminReports onSelect={setSelectedId}/></Suspense>}
         {role==="admin"&&adminView==="architecture"&&<Suspense fallback={<div style={{paddingTop:64,textAlign:"center"}}><Spinner/></div>}><Architecture/></Suspense>}
+        {role==="supervisor"&&(
+          <div style={{paddingTop:32,animation:"fadeUp .3s ease"}}>
+            <div style={{marginBottom:24}}>
+              <h1 style={{fontSize:22,fontWeight:700,marginBottom:4}}>Supervisor Oversight</h1>
+              <p style={{color:C.muted,fontSize:13}}>The business-morning digest — important diaries due today and every overdue diary across the book, grouped by adjuster. Read-only: decisions stay with the assigned adjuster.</p>
+            </div>
+            <SupervisorAlerts onSelect={setSelectedId} notify={notify} placeholder/>
+          </div>
+        )}
         {role==="employer"&&<EmployerPortal employerUser={employerUser} setEmployerUser={setEmployerUser} onSelect={setSelectedId}/>}
         {role==="employee"&&(
           <div style={{paddingTop:32,maxWidth:660,animation:"fadeUp .3s ease"}}>

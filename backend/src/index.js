@@ -36,6 +36,17 @@ const {
 
 const app = express();
 
+// ── Proxy-aware client IPs (must precede the rate limiters) ─────────────────
+// Without this, every request behind a reverse proxy carries the proxy's
+// IP and the per-IP rate limits throttle all users as one client.
+if (config.trustProxy != null) {
+  const v = String(config.trustProxy);
+  app.set('trust proxy',
+    /^\d+$/.test(v) ? Number(v)   // hop count
+      : v === 'true' ? 1          // never blanket-trust the whole XFF chain
+      : v);                       // named preset or CIDR list
+}
+
 // ── Global middleware ────────────────────────────────────────────────────────
 
 // Request ID — honored from a trusted proxy header if present, otherwise

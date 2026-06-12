@@ -204,65 +204,122 @@ function _parseMessageId(headersBlob) {
   return m ? m[1].trim() : null;
 }
 
-router.post('/email/inbound', emailUpload.any(), async (req, res) => {
+// Token gate runs BEFORE Multer: an unauthenticated request must be
+// rejected before any multipart file is buffered into memory (up to
+// 10 × 15 MB otherwise). The token travels in the query string or a
+// header, so no body parsing is needed to validate it.
+function _emailTokenGate(req, res, next) {
   if (!_validateInboundToken(req)) {
     logger.warn({ msg: 'email/inbound: token validation failed', ip: req.ip });
     return res.status(401).json({ error: 'Invalid inbound token' });
   }
+  next();
+}
 
+// Permanent attachment problems (malformed/over-limit/not-a-claim-doc):
+// recorded and skipped — a vendor retry can never fix these. Anything
+// else is transient and must stay retryable.
+const PERMANENT_ATTACHMENT_ERROR = /required|must be|cannot be|does not match|exceeds|%PDF/;
+
+router.post('/email/inbound', _emailTokenGate, emailUpload.any(), async (req, res) => {
   const from    = req.body?.from || null;
   const subject = req.body?.subject || null;
   const messageId = _parseMessageId(req.body?.headers) || req.body?.['message-id'] || null;
 
+  // Per-message processing state: the dedupe row is created up front but
+  // only marked processed (processed_at) once every attachment either
+  // ingested or failed permanently. A vendor retry of a message whose
+  // attachments failed transiently is REPROCESSED, skipping only the
+  // attachments that already succeeded.
   const { supabase } = require('../services/supabase');
+  let eventRowId = null;
+  let priorOutcomes = {};
   if (messageId) {
     const { data: seen, error: seenErr } = await supabase
-      .from('webhook_events').select('id')
+      .from('webhook_events').select('*')
       .eq('provider', 'email_inbound').eq('provider_event_id', messageId);
     if (seenErr) {
       logger.error({ msg: 'email/inbound: dedupe lookup failed', err: seenErr.message });
       return res.status(500).json({ error: 'Dedupe lookup failed' });
     }
-    if (seen && seen.length > 0) {
+    const existing = (seen || [])[0];
+    if (existing && existing.processed_at) {
       return res.status(200).json({ received: true, duplicate: true });
     }
-    const { error: insErr } = await supabase.from('webhook_events').insert({
-      id: `whk_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
-      provider: 'email_inbound',
-      provider_event_id: messageId,
-      event_type: 'inbound_email',
-      payload: { from, subject, attachments: (req.files || []).map(f => f.originalname) },
-      received_at: new Date().toISOString(),
-    });
-    if (insErr) {
-      logger.error({ msg: 'email/inbound: dedupe insert failed', err: insErr.message });
-      return res.status(500).json({ error: 'Dedupe record failed' });
+    if (existing) {
+      eventRowId = existing.id;
+      priorOutcomes = existing.payload?.outcomes_by_file || {};
+    } else {
+      eventRowId = `whk_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const { error: insErr } = await supabase.from('webhook_events').insert({
+        id: eventRowId,
+        provider: 'email_inbound',
+        provider_event_id: messageId,
+        event_type: 'inbound_email',
+        payload: { from, subject, attachments: (req.files || []).map(f => f.originalname), outcomes_by_file: {} },
+        received_at: new Date().toISOString(),
+        processed_at: null,
+      });
+      if (insErr) {
+        logger.error({ msg: 'email/inbound: dedupe insert failed', err: insErr.message });
+        return res.status(500).json({ error: 'Dedupe record failed' });
+      }
     }
   }
 
   const ingestion = require('../services/documentIngestionService');
+  const outcomesByFile = { ...priorOutcomes };
   const outcomes = [];
+  let transientFailure = false;
+
   for (const f of req.files || []) {
+    const name = f.originalname || 'attachment';
+    const prior = outcomesByFile[name];
+    if (prior && prior.done) {
+      outcomes.push({ filename: name, ...prior, retried: false });
+      continue; // already ingested (or permanently skipped) on a prior attempt
+    }
+
     const isPdf = f.buffer && f.buffer.slice(0, 5).toString('latin1').startsWith('%PDF-');
     if (!isPdf) {
-      outcomes.push({ filename: f.originalname, skipped: 'not_a_pdf' });
+      outcomesByFile[name] = { done: true, skipped: 'not_a_pdf' };
+      outcomes.push({ filename: name, skipped: 'not_a_pdf' });
       continue;
     }
     try {
       const r = await ingestion.ingestPdf({
         buffer: f.buffer,
-        filename: f.originalname,
+        filename: name,
         source: 'email',
         channel_metadata: { from, subject, message_id: messageId },
       }, from ? `email:${from}` : 'email-inbound');
-      outcomes.push({ filename: f.originalname, routed: r.routed, document_id: r.document.id });
+      outcomesByFile[name] = { done: true, routed: r.routed, document_id: r.document.id };
+      outcomes.push({ filename: name, routed: r.routed, document_id: r.document.id });
     } catch (e) {
-      // One bad attachment must not fail the message; a 5xx would make
-      // the vendor redeliver everything (and the dedupe row would then
-      // skip the good attachments too).
-      logger.error({ msg: 'email/inbound: attachment ingest failed', filename: f.originalname, err: e.message });
-      outcomes.push({ filename: f.originalname, error: e.message });
+      const permanent = PERMANENT_ATTACHMENT_ERROR.test(e.message);
+      logger.error({ msg: 'email/inbound: attachment ingest failed', filename: name, permanent, err: e.message });
+      outcomesByFile[name] = { done: permanent, error: e.message };
+      outcomes.push({ filename: name, error: e.message, permanent });
+      if (!permanent) transientFailure = true;
     }
+  }
+
+  if (eventRowId) {
+    const { error: upErr } = await supabase.from('webhook_events').update({
+      payload: { from, subject, attachments: (req.files || []).map(f => f.originalname), outcomes_by_file: outcomesByFile },
+      ...(transientFailure ? {} : { processed_at: new Date().toISOString() }),
+    }).eq('id', eventRowId);
+    if (upErr) {
+      logger.error({ msg: 'email/inbound: state update failed — message stays retryable', err: upErr.message });
+      transientFailure = true;
+    }
+  }
+
+  if (transientFailure) {
+    // 5xx → the vendor redelivers; succeeded attachments are recorded
+    // above and will be skipped on the retry.
+    logger.warn({ msg: 'email/inbound: transient attachment failure — requesting vendor retry', from, subject });
+    return res.status(500).json({ received: false, retryable: true, from, subject, outcomes });
   }
 
   logger.info({ msg: 'email/inbound: processed', from, subject, attachments: outcomes.length });

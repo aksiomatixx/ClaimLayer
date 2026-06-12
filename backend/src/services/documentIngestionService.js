@@ -472,7 +472,16 @@ async function resolveTriage(docId, { action, claim_id, category, reason }, acto
         .update({ triage_status: 'resolved', updated_at: new Date().toISOString() })
         .eq('id', docId).eq('triage_status', 'resolving')
         .select().single();
-      if (finErr || !updated) throw new Error(`finalize failed: ${finErr ? finErr.message : 'claim was lost'}`);
+      if (finErr || !updated) {
+        // audit_log is append-only — reverse the rejection entry with a
+        // compensating one so the trail matches the reverted document.
+        await supabase.from('audit_log').insert({
+          action: 'document_rejected_reverted', resource_type: 'claim_document', resource_id: docId,
+          description: `Triage rejection of "${doc.title}" reverted — finalization failed; document returned to pending`,
+          actor: actorEmail || null, created_at: new Date().toISOString(),
+        });
+        throw new Error(`finalize failed: ${finErr ? finErr.message : 'claim was lost'}`);
+      }
       return { document: updated, diary: null };
     }
 
@@ -489,19 +498,40 @@ async function resolveTriage(docId, { action, claim_id, category, reason }, acto
     if (upErr) throw new Error(`file update failed: ${upErr.message}`);
 
     let diary;
+    let filedEvent;
+    let filedAudited = false;
+
+    // Compensation for the filed-record trio (diary, claim event, audit
+    // row): a failed finalize must not leave records asserting the
+    // document was filed while it reverts to pending.
+    const _compensateFiled = async () => {
+      if (diary) await supabase.from('diaries').delete().eq('id', diary.id);
+      if (filedEvent) await supabase.from('claim_events').delete().eq('id', filedEvent.id);
+      if (filedAudited) {
+        // audit_log is append-only (7-year retention) — reverse with a
+        // compensating entry rather than deleting.
+        await supabase.from('audit_log').insert({
+          action: 'document_triage_filed_reverted', resource_type: 'claim_document', resource_id: docId,
+          description: `Triage filing of "${doc.title}" reverted — finalization failed; document returned to pending`,
+          actor: actorEmail || null, created_at: new Date().toISOString(),
+        });
+      }
+    };
+
     try {
       // Deadlines still anchor to the original channel receipt — triage
       // latency never extends a statutory clock.
       diary = await _createDiary(claim_id, rule, docId, doc.received_at);
-      await _writeEvent(claim_id, 'document_ingested', {
+      filedEvent = await _writeEvent(claim_id, 'document_ingested', {
         document_id: docId, category: finalCategory, via: 'human_triage',
         received_at: doc.received_at, actor: actorEmail || null,
       });
       await _audit('document_triage_filed',
         `Triage filed: "${doc.title}" → ${claim_id} (${finalCategory})`,
         { claim_id, category: finalCategory, diary_type: rule.diary_type });
+      filedAudited = true;
     } catch (e) {
-      if (diary) await supabase.from('diaries').delete().eq('id', diary.id);
+      await _compensateFiled();
       throw e;
     }
 
@@ -510,7 +540,7 @@ async function resolveTriage(docId, { action, claim_id, category, reason }, acto
       .eq('id', docId).eq('triage_status', 'resolving')
       .select().single();
     if (finErr || !updated) {
-      if (diary) await supabase.from('diaries').delete().eq('id', diary.id);
+      await _compensateFiled();
       throw new Error(`finalize failed: ${finErr ? finErr.message : 'claim was lost'}`);
     }
 

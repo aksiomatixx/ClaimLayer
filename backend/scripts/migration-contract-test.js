@@ -264,6 +264,29 @@ async function main() {
     `INSERT INTO supervisor_alerts (id, alert_date, recipient_user_id, due_today_count)
      VALUES ('sva_ct_3', '2026-06-13', 'supervisor@ct.test', -1)`);
 
+  await check('audit_log accepts the actor identity the services write', async () => {
+    // Regression (Codex sweep A1): diary actions, document ingestion, and
+    // supervisor-alert acknowledgement all insert `actor` — the column
+    // must exist or every one of those writes fails on real PostgreSQL.
+    await client.query(
+      `INSERT INTO audit_log (action, resource_type, resource_id, description, actor)
+       VALUES ('supervisor_alert_acknowledged', 'supervisor_alert', 'sva_ct_1', 'contract test', 'supervisor@ct.test')`);
+    const { rows } = await client.query(
+      `SELECT actor FROM audit_log WHERE resource_id = 'sva_ct_1'`);
+    if (rows[0]?.actor !== 'supervisor@ct.test') throw new Error('actor column did not round-trip');
+  });
+
+  await check('webhook_events carries processed_at (processing-state idempotency)', async () => {
+    await client.query(
+      `INSERT INTO webhook_events (id, provider, provider_event_id, event_type)
+       VALUES ('whk_ct_3', 'lob', 'evt_ct_1', 'letter.delivered')`);
+    await client.query(
+      `UPDATE webhook_events SET processed_at = now() WHERE id = 'whk_ct_3'`);
+    const { rows } = await client.query(
+      `SELECT processed_at FROM webhook_events WHERE id = 'whk_ct_3'`);
+    if (!rows[0]?.processed_at) throw new Error('processed_at did not persist');
+  });
+
   await check('magic-link single use is atomic (conditional update wins exactly once)', async () => {
     await client.query(
       `INSERT INTO magic_link_tokens (jti, claim_id, adp_employee_id, expires_at)

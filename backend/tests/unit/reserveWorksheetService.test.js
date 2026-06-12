@@ -83,12 +83,17 @@ describe('line-item math', () => {
     expect(item.total).toBe(1400);
   });
 
-  it('fractional math rounds to cents', async () => {
+  it('operands quantize to cents BEFORE multiplying — formula and total always agree', async () => {
+    // Codex sweep B6: Postgres stores NUMERIC(…,2) operands, so the
+    // arithmetic must run on the quantized values. 33.335 → 33.34, and
+    // the stored total is exactly what the stored formula computes.
     const item = await svc.addLineItem(CLAIM, {
       category: 'medical', label: 'PT', shape: 'quantity',
       quantity: 3, unit_amount: 33.335,
     }, 'a');
-    expect(item.total).toBe(100.01);
+    expect(item.unit_amount).toBe(33.34);
+    expect(item.total).toBe(100.02);
+    expect(item.total).toBe(Math.round(item.quantity * item.unit_amount * 100) / 100);
   });
 });
 

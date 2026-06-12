@@ -154,12 +154,16 @@ async function createDiary(fhClaimId, diary) {
 /**
  * Mark a diary entry as completed.
  */
-async function completeDiary(fhClaimId, diaryId, resolutionNotes, completedBy = 'SYSTEM') {
+async function completeDiary(fhClaimId, diaryId, resolutionNotes, completedBy = 'SYSTEM', { idempotencyKey } = {}) {
   return request('patch', `/claims/${fhClaimId}/diaries/${diaryId}`, {
     status:          'completed',
     completedDate:   new Date().toISOString().split('T')[0],
     completedBy,
     resolutionNotes,
+    // Stable replay key (the outbox row id): the system of record must
+    // treat a repeated key as the same operation, so a stale-lock retry
+    // after a lost local write cannot double-apply.
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   }, fhClaimId);
 }
 
@@ -187,9 +191,13 @@ async function recordPayment(fhClaimId, payment) {
  * Write a claim note to the system of record (the auditable ledger).
  * POST /claims/:id/notes — noteType 'diary' for decision notes.
  */
-async function addNote(fhClaimId, noteText, addedBy, noteType = 'diary') {
+async function addNote(fhClaimId, noteText, addedBy, noteType = 'diary', { idempotencyKey } = {}) {
   return request('POST', `/claims/${fhClaimId}/notes`, {
     noteText, noteType, addedBy, isPrivate: false,
+    // Stable replay key (the outbox row id): the ledger must treat a
+    // repeated key as the same note, so a stale-lock retry after a lost
+    // local write cannot duplicate a system-of-record entry.
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   }, fhClaimId);
 }
 

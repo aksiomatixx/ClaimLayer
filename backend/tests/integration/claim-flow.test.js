@@ -194,6 +194,36 @@ describe('Full FROI → claim creation flow', () => {
     console.log(`  ✓ AWW: $${createdClaim.aww} / TD: $${createdClaim.tdRate}/wk`);
   }, 20_000);
 
+  // Codex sweep C8: a FileHandler outage must never leave a claim with
+  // no decision path — the statutory diaries (incl. the 14-day
+  // compensability decision) seed regardless of the sync outcome.
+  it('seeds the compensability decision diary even when FileHandler creation fails', async () => {
+    const filehandler = require('../../src/services/filehandler');
+    filehandler.createClaim.mockRejectedValueOnce(new Error('FileHandler unreachable'));
+
+    const res = await request(app)
+      .post('/api/v1/claims')
+      .set('Authorization', authHeader)
+      .send({
+        adpEmployeeId:    'CW-007',
+        employerName:     'CareWell Senior Services',
+        dateOfInjury:     '2026-06-01',
+        bodyPart:         'Wrist',
+        injuryType:       'Slip and Fall',
+        injuryDescription: 'Slipped on wet kitchen floor during patient meal preparation',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.filehandlerId).toBeFalsy();
+    expect(res.body.events.some(e => e.type === 'filehandler_sync_failed')).toBe(true);
+
+    const { supabase } = require('../../src/services/supabase');
+    const { data: diaries } = await supabase
+      .from('diaries').select('*').eq('claim_id', res.body.id);
+    const types = (diaries || []).map(d => d.diary_type);
+    expect(types).toContain('COMPENSABILITY_NOTICE_DUE'); // the decision path survives the outage
+    expect(types).toContain('DWC1_ISSUE');
+  }, 20_000);
+
   it('GET /api/v1/claims/:id retrieves the created claim', async () => {
     if (!createdClaim) return;
 

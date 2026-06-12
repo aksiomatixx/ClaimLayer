@@ -61,16 +61,26 @@ async function _normalize(claimId, input) {
 
   let quantity = null, unit_amount = null, flat_amount = null, total;
 
+  // Operands are quantized to the database precision (NUMERIC(…,2))
+  // BEFORE any arithmetic: the stored operands, the displayed formula,
+  // and the stored total must all agree. Computing from full-precision
+  // inputs (e.g. quantity 1.004 × $100 = $100.40) while Postgres rounds
+  // the operand to 1.00 would store a total its own formula contradicts.
   if (shape === 'flat') {
     flat_amount = Number(input.flat_amount);
     if (!Number.isFinite(flat_amount) || flat_amount < 0) {
       throw new Error('flat_amount must be a non-negative number for a flat line');
     }
-    total = _round2(flat_amount);
+    flat_amount = _round2(flat_amount);
+    total = flat_amount;
   } else {
     quantity = Number(input.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new Error(`quantity must be a positive number for a ${shape} line`);
+    }
+    quantity = _round2(quantity);
+    if (quantity <= 0) {
+      throw new Error(`quantity must be a positive number for a ${shape} line (rounds to 0 at the stored 2-decimal precision)`);
     }
     if (input.unit_amount == null && shape === 'weeks_rate' && category === 'indemnity') {
       // TD lines default to the claim's existing weekly rate — the one
@@ -86,6 +96,7 @@ async function _normalize(claimId, input) {
     if (!Number.isFinite(unit_amount) || unit_amount < 0) {
       throw new Error(`unit_amount must be a non-negative number for a ${shape} line`);
     }
+    unit_amount = _round2(unit_amount);
     total = _round2(quantity * unit_amount);
   }
 
@@ -224,11 +235,56 @@ async function getWorksheet(claimId) {
   };
 }
 
+// ── Worksheet-bound approval (the only worksheet → reserves path) ────────────
+
+/**
+ * Approve the CURRENT worksheet rollup as reserves, bound to the version
+ * the approver was looking at.
+ *
+ * The client sends `expected` — the {medical, indemnity, expense}
+ * subtotals it displayed. The rollup is recomputed server-side at
+ * approval time; if any subtotal moved (another admin edited the
+ * worksheet after the approver loaded it), the approval is rejected
+ * with WORKSHEET_CHANGED and nothing is written. On a match the
+ * SERVER-COMPUTED totals — never the client's numbers — flow into the
+ * same claimService.approveReserves gate (reserves row + FileHandler),
+ * so a stale cache can never become the approved reserve position.
+ */
+async function approveWorksheet(claimId, expected, adjusterEmail) {
+  if (!expected || ['medical', 'indemnity', 'expense'].some(k => !Number.isFinite(Number(expected[k])))) {
+    throw new Error('expected must carry the medical/indemnity/expense subtotals the approver reviewed');
+  }
+
+  const ws = await getWorksheet(claimId);
+  if (ws.proposal.status === 'no_worksheet') {
+    throw new Error('No worksheet to approve — the claim has no reserve line items');
+  }
+
+  const drift = CATEGORIES.filter(c => _round2(Number(expected[c])) !== ws.subtotals[c]);
+  if (drift.length > 0) {
+    throw new Error(
+      `WORKSHEET_CHANGED — the worksheet was modified after it was reviewed (` +
+      drift.map(c => `${c}: reviewed ${_round2(Number(expected[c]))}, now ${ws.subtotals[c]}`).join('; ') +
+      '). Reload the worksheet and approve the current totals.');
+  }
+
+  const claimService = require('./claimService');
+  const updated = await claimService.approveReserves(claimId, {
+    medical: ws.subtotals.medical,
+    indemnity: ws.subtotals.indemnity,
+    expense: ws.subtotals.expense,
+    reason: 'Itemized reserve worksheet rollup',
+  }, adjusterEmail);
+
+  return { approved: ws.subtotals, claim: updated };
+}
+
 module.exports = {
   addLineItem,
   updateLineItem,
   removeLineItem,
   getWorksheet,
+  approveWorksheet,
   CATEGORIES,
   SHAPES,
 };

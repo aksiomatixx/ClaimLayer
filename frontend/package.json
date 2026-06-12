@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:demo": "vite build --config vite.demo.config.js",
+    "build:demo": "vite build --config vite.demo.config.js && node scripts/finalize-demo.js",
     "test": "vitest run"
   },
   "keywords": [],
