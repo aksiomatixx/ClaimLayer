@@ -7,6 +7,7 @@
     "dev:demo": "NODE_ENV=development node scripts/dev-demo.js",
     "db:reset": "NODE_ENV=development node scripts/db-reset.js",
     "seed:demo": "NODE_ENV=development node backend/src/scripts/seedDemo.js",
+    "gen:test-docs": "NODE_ENV=development node backend/src/scripts/generateTestDocuments.js",
     "dev": "node scripts/dev.js",
     "test": "cd backend && npm test"
   }

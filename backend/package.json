@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "gen:test-docs": "node src/scripts/generateTestDocuments.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.0",

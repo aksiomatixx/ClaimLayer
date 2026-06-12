@@ -10,7 +10,7 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,340 tests · 92 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,348 tests · 92 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -62,7 +62,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-1,340 automated tests across 92 suites: 1,256 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
+1,348 automated tests across 92 suites: 1,264 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 ## Tech stack
 
@@ -97,8 +97,16 @@ The demo runs against a real PostgreSQL database via Supabase — there is no in
 
 ```bash
 npm ci --prefix backend && npm ci --prefix frontend   # lockfile-exact installs (no root install needed)
-npm run dev:demo      # wipes demo-flagged rows, seeds 10 synthetic claims, starts backend (:3001) + frontend (:5173)
+npm run dev:demo      # wipes demo-flagged rows, seeds 14 synthetic claims, starts backend (:3001) + frontend (:5173)
 ```
+
+### Test the document pipeline with real PDFs
+
+```bash
+npm run gen:test-docs   # writes test-documents/*.pdf + manifest.json
+```
+
+Generates 13 realistic inbound claim documents (PR-2s, a DWC Form RFA, a PR-4, a QME notice, bills, a wage statement, attorney filings…) as actual PDFs whose claim numbers, claimants, DOIs, and employers match the seeded demo book — each one is the natural next inbound document for its claim's lifecycle stage. Upload one through the claim drawer (or `POST /api/v1/documents/ingest-file`) and watch it classify, match by extracted claim number, file to the claim, and queue its action diary. One file deliberately carries no claim number so it lands in the human triage queue. Claim numbers embed the current year and dates are relative to the generation date, so regenerate after each re-seed. `manifest.json` lists the expected category and routing for every file.
 
 ### Deploying
 

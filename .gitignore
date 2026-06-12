@@ -23,6 +23,10 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Generated test PDFs (npm run gen:test-docs) — claim numbers embed the
+# current year and dates are relative to generation, so rebuild, don't commit
+test-documents/
+
 # Python
 __pycache__/
 *.pyc
