@@ -10,7 +10,7 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,242 tests · 83 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,295 tests · 89 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -54,14 +54,14 @@ The system is a layer, not a replacement: it runs agentic workflows on top of a 
 These are the choices that make the system safe to point at a regulated workflow:
 
 - **No auto-deny pathway exists anywhere in the system.** On treatment authorizations, an agent may only return `auto_approve` or `physician_review` — never a denial. Denials are a licensed-human-only action by construction.
-- **Settlement offers are hard-capped at 1.15× and 5.0×** of stipulated value; the pricing agent physically cannot return a number outside that band.
+- **Reserve changes require a licensed adjuster's approval.** The AI may suggest reserves; nothing is written to the financial system of record until an adjuster approves it.
 - **A deterministic MSA screen gates every settlement** — Medicare-interest screening is not left to the model's discretion.
 - **Statutory values are never model-generated.** Rating schedules, fee schedules, and caps are sourced from authoritative DWC publications and version-controlled; the model reasons over them but never invents them.
 - **Penalty and deadline diaries cannot be snoozed**, and statutory deadlines use the correct calendar/business-day basis per the governing code section.
 
 ## Testing
 
-1,138 automated tests across 75 suites: 1,072 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 66 frontend tests (Vitest + Testing Library) covering the architecture view, TD-period data layer, API service contracts, and a full-app smoke render.
+1,295 automated tests across 89 suites: 1,219 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 76 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 ## Tech stack
 

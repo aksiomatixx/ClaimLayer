@@ -175,7 +175,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 <section id="video"><div class="wrap reveal">
   <div class="kicker">Product tour</div>
   <h2>See the whole claim lifecycle, end to end</h2>
-  <p class="sub" style="margin-bottom:38px">Narrated walkthrough captured live from the running application — intake to settlement, with the AI decision audit trail in between.</p>
+  <p class="sub" style="margin-bottom:38px">Narrated walkthrough captured live from the running application — from the first document to settlement, with the AI decision audit trail in between.</p>
   <div class="video-frame">
     <video controls preload="metadata" poster="assets/poster.jpg">
       <source src="assets/tour.mp4" type="video/mp4"/>
@@ -189,7 +189,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <h2>Execution, not prediction</h2>
   <p class="sub">Most AI in claims scores risk. ClaimLayer carries out the regulatory workflow itself — and is built around the assumption that a wrong automated decision has legal consequences.</p>
   <div class="grid3" style="margin-top:46px">
-    <div class="card"><div class="glyph">⚙️</div><h3>Agents that do the work</h3><p>Every incoming document ingested, summarized, and reviewed in the context of its claim; compensability analyses drafted; treatment requests evaluated against MTUS; Medicare interests screened; voice intake structured — before the adjuster opens the file.</p></div>
+    <div class="card"><div class="glyph">⚙️</div><h3>Agents that do the work</h3><p>Every incoming document ingested, summarized, and reviewed in the context of its claim; compensability analyses drafted; treatment requests evaluated against MTUS; Medicare interests screened — before the adjuster opens the file.</p></div>
     <div class="card"><div class="glyph">🛡️</div><h3>Guardrails in code, not prompts</h3><p>The model physically cannot deny treatment, move a statutory deadline, write a reserve, or invent a statutory value. Hard limits live in the service layer, where no prompt injection can reach them.</p></div>
     <div class="card"><div class="glyph">🔌</div><h3>A layer, not a replacement</h3><p>Pluggable adapters sit on top of your retained system of record — ingesting claims, pushing diaries, documents, and notices back. No migration project required.</p></div>
   </div>
@@ -226,7 +226,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <div class="kicker">How it works</div>
   <h2>From injury to resolution</h2>
   <div class="steps">
-    <div class="step"><h3>Report</h3><p>The worker reports the injury by voice or guided form — bilingual, mobile-first, no login. The employer files the FROI from their own portal.</p></div>
+    <div class="step"><h3>Claim arrives</h3><p>A first report of injury lands and the documents start coming — mail, fax scans, email attachments, uploads. ClaimLayer starts every statutory clock from receipt.</p></div>
     <div class="step"><h3>Prepare</h3><p>Every incoming document — uploaded PDF, scanned fax, email attachment — is ingested, summarized, and reviewed in the context of the claim. The actions it requires, reserve adjustments included, surface on the adjuster's queue with rationale attached.</p></div>
     <div class="step"><h3>Decide</h3><p>The adjuster works the queue: every consequential call, made with everything relevant presented, summarized, and organized. The AI recommends; the licensed human decides.</p></div>
     <div class="step"><h3>Execute &amp; prove</h3><p>The AI handles everything after the decision: documents it, sends the letters and notices, completes the diaries, sets the next ones, and files the FROI/SROI state reports — every step audit-logged.</p></div>
@@ -248,20 +248,9 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 
 <section id="stories" class="band"><div class="wrap reveal">
   <div class="kicker">Working with ClaimLayer</div>
-  <h2>Three sides of the same claim</h2>
-  <p class="sub">How each person actually uses the platform — and what changes against the claims software they're used to.</p>
-  <div class="stories">
-    <div class="story">
-      <span class="role" style="color:var(--green)">The injured worker</span>
-      <h3>Reports once, in their own words</h3>
-      <ul>
-        <li>Opens a secure single-use link on their phone — no account, no password, no app to install</li>
-        <li>Describes the injury by voice or typing, in English or Spanish; the agent extracts the facts — no forms</li>
-        <li>Picks a network doctor ranked by distance and tier, books the appointment, confirms it in the same session</li>
-        <li>The DWC-1 claim form is prepared from what they said and tracked to signature</li>
-      </ul>
-      <div class="delta"><b>vs. the usual claims system</b><span>Workers are usually a data subject: a paper FROI, a phone tree, then silence. Here the worker drives their own intake in one sitting — and every step they complete is one the adjuster never has to chase.</span></div>
-    </div>
+  <h2>Built around the adjuster's decision surface</h2>
+  <p class="sub">One queue, one drawer, one contract — everything else in the product exists to feed it.</p>
+  <div class="stories" style="grid-template-columns:1.4fr 1fr">
     <div class="story">
       <span class="role" style="color:var(--amber)">The adjuster</span>
       <h3>Works the queue — the AI handles everything after</h3>
@@ -274,15 +263,15 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
       <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, calendars deadlines, and keys state reports by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided, the reporting filed.</span></div>
     </div>
     <div class="story">
-      <span class="role" style="color:var(--blue)">The employer</span>
-      <h3>Files in minutes, sees everything</h3>
+      <span class="role" style="color:var(--blue)">The decision surface</span>
+      <h3>What the adjuster actually touches</h3>
       <ul>
-        <li>HR files the first report of injury in the portal; payroll wage data pulls automatically and the benefit rates compute themselves</li>
-        <li>The worker's intake link goes out immediately — the claim is moving the same day</li>
-        <li>Watches claim status, deadlines, and decisions in real time instead of calling for updates</li>
-        <li>Pulls loss runs and OSHA-ready reporting self-serve at renewal — with reserves honestly labeled as adjuster-approved or pending</li>
+        <li><b style="color:var(--text)">The queue</b> — ranked prepared actions with statutory deadlines computed</li>
+        <li><b style="color:var(--text)">The drawer</b> — decision brief, source documents with AI summaries, benefits, reserves worksheet, related claims, diaries</li>
+        <li><b style="color:var(--text)">The audit trail</b> — every model call, guardrail, and human override, queryable</li>
+        <li><b style="color:var(--text)">Integrations</b> — adapters over the retained system of record; nothing migrates</li>
       </ul>
-      <div class="delta"><b>vs. the usual claims system</b><span>The usual experience is a fax, a week of silence, and a quarterly report. Here the employer sees the same live claim the adjuster does — scoped to their own data and nothing else.</span></div>
+      <div class="delta"><b>scope note</b><span>Worker and employer self-service surfaces exist in the application; the product wedge — and this site — is the adjuster decision surface.</span></div>
     </div>
   </div>
   <p class="foot-note">Every behavior described above is implemented and demonstrated in the <a href="demo/" style="color:var(--amber)">interactive demo</a>, on synthetic data.</p>
@@ -298,7 +287,6 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <figure class="shot" data-full="assets/benefits.jpg"><img src="assets/benefits.jpg" loading="lazy" alt="TD benefit periods timeline"/><figcaption><b>Benefits tracking</b>TD periods against the 104-week statutory cap</figcaption></figure>
     <figure class="shot" data-full="assets/agents.jpg"><img src="assets/agents.jpg" loading="lazy" alt="AI decision audit trail"/><figcaption><b>Agents console</b>Every model call logged — overrides, guardrails, latency</figcaption></figure>
     <figure class="shot" data-full="assets/rfas.jpg"><img src="assets/rfas.jpg" loading="lazy" alt="RFA treatment authorization center"/><figcaption><b>RFA center</b>MTUS evaluation — auto-approve or physician review only</figcaption></figure>
-    <figure class="shot" data-full="assets/intake.jpg"><img src="assets/intake.jpg" loading="lazy" alt="Employee intake wizard"/><figcaption><b>Employee portal</b>Bilingual voice-enabled injury intake</figcaption></figure>
     <figure class="shot" data-full="assets/integrations.jpg"><img src="assets/integrations.jpg" loading="lazy" alt="Legacy integrations console"/><figcaption><b>Integrations</b>Adapters over your retained system of record</figcaption></figure>
     <figure class="shot" data-full="assets/architecture.jpg"><img src="assets/architecture.jpg" loading="lazy" alt="In-app architecture playbook"/><figcaption><b>Architecture view</b>The system documents itself — agents, guardrails, lifecycle</figcaption></figure>
   </div>
@@ -350,7 +338,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 <footer><div class="wrap f-i">
   <div>
     <div class="brand" style="margin-bottom:14px"><img src="assets/mark.png" alt="" style="width:26px;height:26px;border-radius:6px"/>ClaimLayer</div>
-    <p class="disclaimer">ClaimLayer is a reference implementation and active project — not a live system processing real claims. It runs on synthetic demo data, is not affiliated with any employer, and demonstrates deployment patterns rather than providing legal or claims-handling advice. All testimonials are illustrative scenarios from the demo dataset.</p>
+    <p class="disclaimer">ClaimLayer is a reference implementation and active project — not a live system processing real claims. It runs on synthetic demo data, is not affiliated with any employer, and demonstrates deployment patterns rather than providing legal or claims-handling advice. All scenarios shown are synthetic demo data.</p>
   </div>
   <div style="text-align:right">
     <div class="mono" style="font-size:11px;letter-spacing:.1em">BOUNDED · AUDITABLE · REVERSIBLE</div>

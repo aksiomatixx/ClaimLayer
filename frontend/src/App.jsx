@@ -22,7 +22,10 @@ import { C, CSS, FONTS } from './theme.js';
 import { Spinner, Toast } from './ui/primitives.jsx';
 
 export default function App(){
-  const [role,setRole]=useState("employee");
+  // CL-MKT1: when the portal nav is hidden (demo/marketing builds) the
+  // app must open on the adjuster surface — there is no switcher to
+  // leave the employee view. Views stay functional either way.
+  const [role,setRole]=useState(import.meta.env.VITE_SHOW_PORTAL_NAV!=='false'?"employee":"admin");
   const [adminView,setAdminView]=useState("claims");
   const [selectedId,setSelectedId]=useState(null);
   const [toast,setToast]=useState(null);
