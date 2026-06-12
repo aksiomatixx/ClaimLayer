@@ -1,0 +1,50 @@
+name: Live ingestion test
+
+# Runs the generated test PDFs through the real ingestion pipeline with
+# the REAL Claude classifier (secrets.ANTHROPIC_API_KEY). Database is
+# the in-memory test mock seeded with the demo book, so the run is
+# hermetic apart from the Anthropic API calls (one per PDF, ~13 total).
+#
+# Manual trigger from the Actions tab, plus a one-shot run when this
+# workflow file itself lands on a claude/** branch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/live-ingestion-test.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  live-ingestion:
+    name: Generated PDFs → real classifier → demo book
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Generate test PDFs from the demo book
+        run: node backend/src/scripts/generateTestDocuments.js
+
+      - name: Ingest every PDF through the live pipeline
+        run: node backend/src/scripts/liveIngestionTest.js
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Upload the PDFs as a run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-documents
+          path: test-documents/
