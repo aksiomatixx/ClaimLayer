@@ -262,8 +262,9 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 </div></section>
 
 <section><div class="wrap reveal">
-  <div class="kicker">Engineering decisions</div>
-  <h2>Safe to point at a regulated workflow</h2>
+  <div class="kicker">Safety architecture</div>
+  <h2>Regulated AI design — safe to point at a real workflow</h2>
+  <p class="sub">Human approval for every consequential decision, guardrails encoded in code rather than policy copy, and deterministic statutory math the model can read but never write.</p>
   <div class="g-list">
     <div class="g-item"><span class="no">01</span><div><b>No auto-deny pathway exists anywhere in the system</b><span>Denials are a licensed-human-only action by construction — the output schema doesn't include one.</span></div></div>
     <div class="g-item"><span class="no">02</span><div><b>Reserve changes require a licensed adjuster's approval</b><span>The AI may suggest reserves; nothing is written to the financial system of record until an adjuster approves it.</span></div></div>
@@ -272,6 +273,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="g-item"><span class="no">05</span><div><b>Penalty diaries cannot be snoozed</b><span>Statutory deadlines use the correct calendar/business-day basis per the governing code section.</span></div></div>
     <div class="g-item"><span class="no">06</span><div><b>Adversarially tested guardrails</b><span>The test suite actively tries to push agents past their bounds — and asserts the guardrails hold.</span></div></div>
   </div>
+  <p class="foot-note">Every model call is audit-logged — input snapshot, output, guardrails triggered, human-override status — queryable in the in-app Agents console. And everything here runs on synthetic demo data: ClaimLayer is a reference implementation with integration scaffolding, not a production system filing real notices.</p>
 </div></section>
 
 <section id="stories" class="band"><div class="wrap reveal">
