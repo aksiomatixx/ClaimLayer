@@ -168,7 +168,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="chip"><b>6</b> specialized Claude agents</div>
     <div class="chip"><b>100%</b> of model calls audit-logged</div>
     <div class="chip"><b>0</b> auto-deny pathways — by construction</div>
-    <div class="chip"><b>1,242</b> automated tests · 83 suites</div>
+    <div class="chip"><b>1,300+</b> automated tests, backend · frontend · schema contract</div>
   </div>
 </div></header>
 
@@ -182,6 +182,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
       Your browser does not support embedded video. <a href="assets/tour.mp4">Download the tour</a>.
     </video>
   </div>
+  <p style="margin-top:14px;font-size:.85rem;color:var(--muted);text-align:center">Demo environment: synthetic claims only. WCIS submissions and acknowledgments shown are simulated end to end — production transmission runs through the customer's DWC trading-partner credentials.</p>
 </div></section>
 
 <section class="band"><div class="wrap reveal">
@@ -201,7 +202,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     </div>
     <div class="card" style="border-color:rgba(232,163,61,.45)">
       <div class="kicker" style="color:var(--green)">After — decide, then it executes</div>
-      <p style="line-height:2;color:var(--text)">Every document ingested, summarized, and reviewed in the context of its claim · required actions surfaced to the adjuster — including reserve adjustments · the adjuster works the queue · the AI handles everything after: decision documented, letters and notices sent, diaries completed, the next ones set, FROI/SROI state reports filed — all auditable.</p>
+      <p style="line-height:2;color:var(--text)">Every document ingested, summarized, and reviewed in the context of its claim · required actions surfaced to the adjuster — including reserve adjustments · the adjuster works the queue · the AI handles everything after: decision documented, letters and notices sent, diaries completed, the next ones set, FROI/SROI state-report transactions built and queued for EDI submission — all auditable.</p>
     </div>
   </div>
   <div style="margin-top:22px;background:var(--amber-f);border:1px solid rgba(232,163,61,.4);border-radius:12px;padding:18px 24px;font-size:15.5px;color:var(--amber);font-weight:600">
@@ -217,7 +218,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="card"><span class="tag amber">AI Agent</span><h3>MTUS treatment authorization</h3><p>Every RFA reviewed against California treatment guidelines. The agent can only return <span class="mono" style="font-size:12px">auto_approve</span> or <span class="mono" style="font-size:12px">physician_review</span> — denial doesn't exist in its vocabulary.</p></div>
     <div class="card"><span class="tag amber">AI Agent</span><h3>Settlement pricing &amp; MSA screening</h3><p>C&amp;R offers priced with written rationale, gated by a deterministic Medicare-interest screen that runs before the model ever sees the file — and a settlement package that refuses to generate until the MSA document is verified on the claim.</p></div>
     <div class="card"><span class="tag blue">Engine</span><h3>Statutory benefits engine</h3><p>TD at two-thirds AWW with the 104-week cap, PD rating and advances, waiting periods, and calendar- vs business-day deadlines per code section — version-pinned to DWC sources.</p></div>
-    <div class="card"><span class="tag blue">Engine</span><h3>Notices, diaries &amp; automated FROI/SROI</h3><p>Server-side PDF generation for statutory notices, penalty diaries that cannot be snoozed, and automated WCIS state reporting: as the claim moves — created, benefits start, rates change, benefits suspend or resume — the matching FROI/SROI EDI transactions enqueue themselves, deadline-tracked and acknowledgment-reconciled.</p></div>
+    <div class="card"><span class="tag blue">Engine</span><h3>Notices, diaries &amp; WCIS-ready FROI/SROI</h3><p>Server-side PDF generation for statutory notices, penalty diaries that cannot be snoozed, and a WCIS-ready state-reporting pipeline: as the claim moves — created, benefits start, rates change, benefits suspend or resume — the matching FROI/SROI EDI transactions build and enqueue themselves, deadline-tracked and acknowledgment-reconciled. Transmission runs through the customer’s DWC trading-partner credentials; the demo simulates the submission and acknowledgment loop end to end.</p></div>
     <div class="card"><span class="tag">Trust</span><h3>AI decision audit trail</h3><p>Every model call logged with its input snapshot, raw output, tokens, latency, guardrails triggered, and human-override status — queryable in the in-app Agents console.</p></div>
   </div>
 </div></section>
@@ -229,7 +230,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="step"><h3>Claim arrives</h3><p>A first report of injury lands and the documents start coming — mail, fax scans, email attachments, uploads. ClaimLayer starts every statutory clock from receipt.</p></div>
     <div class="step"><h3>Prepare</h3><p>Every incoming document — uploaded PDF, scanned fax, email attachment — is ingested, summarized, and reviewed in the context of the claim. The actions it requires, reserve adjustments included, surface on the adjuster's queue with rationale attached.</p></div>
     <div class="step"><h3>Decide</h3><p>The adjuster works the queue: every consequential call, made with everything relevant presented, summarized, and organized. The AI recommends; the licensed human decides.</p></div>
-    <div class="step"><h3>Execute &amp; prove</h3><p>The AI handles everything after the decision: documents it, sends the letters and notices, completes the diaries, sets the next ones, and files the FROI/SROI state reports — every step audit-logged.</p></div>
+    <div class="step"><h3>Execute &amp; prove</h3><p>The AI handles everything after the decision: documents it, sends the letters and notices, completes the diaries, sets the next ones, and builds and queues the FROI/SROI state-report transactions — every step audit-logged.</p></div>
   </div>
 </div></section>
 
@@ -257,10 +258,10 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
       <ul>
         <li>Incoming documents — uploaded PDFs, scanned faxes, email attachments — are ingested, summarized, and reviewed in the context of the claim; the actions they require, reserve adjustments included, surface on the queue</li>
         <li>Each item opens as a plain-language brief: what to decide, why, what in the claim led here — everything relevant presented, summarized, and organized, with the originals one click away</li>
-        <li>After the decision, the AI does the follow-up: documents it, sends the letters and notices, completes the diary, sets the next ones, files the FROI/SROI state reports — all of it logged and auditable</li>
+        <li>After the decision, the AI does the follow-up: documents it, sends the letters and notices, completes the diary, sets the next ones, builds and queues the FROI/SROI state-report transactions — all of it logged and auditable</li>
         <li>What's left for the human is exactly what should be: the impactful decisions, and taking care of the people on the claim</li>
       </ul>
-      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, calendars deadlines, and keys state reports by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided, the reporting filed.</span></div>
+      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, calendars deadlines, and keys state reports by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided, the state reporting built, queued, and reconciled.</span></div>
     </div>
     <div class="story">
       <span class="role" style="color:var(--blue)">The decision surface</span>
@@ -299,13 +300,13 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div>
       <p>ClaimLayer was designed, architected, and built by a California workers' compensation claims professional with a decade in the field — by directing Claude Code, Anthropic's AI coding agent. The hard part was never the keystrokes; it was knowing what to build, where the model must not be trusted, and how to make a regulated workflow safe.</p>
       <p>The result is both an active project and a public worked example of a question we think matters: <b style="color:var(--text)">how do you get real leverage from AI agents in an environment where a wrong automated decision has legal consequences?</b></p>
-      <p>The answer ClaimLayer takes: agents execute, humans decide, code enforces the boundary, and everything is logged. The entire implementation — prompts, guardrails, statutory math, and 969 automated tests — is open for inspection on GitHub.</p>
+      <p>The answer ClaimLayer takes: agents execute, humans decide, code enforces the boundary, and everything is logged. The entire implementation — prompts, guardrails, statutory math, and the full automated test suite (1,300+ tests) — is open for inspection on GitHub.</p>
     </div>
     <div>
       <div class="fact"><span>Domain</span><b>California workers' compensation</b></div>
       <div class="fact"><span>AI</span><b>Anthropic Claude (6 agents)</b></div>
       <div class="fact"><span>Stack</span><b>Node / Express · React · PostgreSQL</b></div>
-      <div class="fact"><span>Tests</span><b>1,138 across 75 suites</b></div>
+      <div class="fact"><span>Tests</span><b>1,300+ · backend, frontend, schema contract</b></div>
       <div class="fact"><span>Audit trail</span><b>Every model call, queryable</b></div>
       <div class="fact"><span>Status</span><b>Reference implementation · demo data</b></div>
       <div class="fact"><span>Source</span><b><a href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">github.com/aksiomatixx/ClaimLayer</a></b></div>
