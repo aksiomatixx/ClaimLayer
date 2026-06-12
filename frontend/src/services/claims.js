@@ -137,6 +137,13 @@ export async function fetchReserveWorksheet(claimId) {
   return _json(await fetch(`${BASE}/claims/${claimId}/reserve-worksheet`, _opts()));
 }
 
+// Approve the rollup BOUND to the reviewed subtotals — the server
+// recomputes at approval time and 409s if the worksheet changed since
+// it was loaded, so stale totals never reach reserves/FileHandler.
+export async function approveReserveWorksheet(claimId, expected) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/reserve-worksheet/approve`, _opts('POST', { expected })));
+}
+
 export async function addReserveLineItem(claimId, payload) {
   return _json(await fetch(`${BASE}/claims/${claimId}/reserve-worksheet/items`, _opts('POST', payload)));
 }

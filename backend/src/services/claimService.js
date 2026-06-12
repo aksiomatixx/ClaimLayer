@@ -286,9 +286,11 @@ async function createClaim(froiData, employerId) {
   }
 
   // ── Step 6: Seed initial statutory diaries ─────────────────────────────────
-  if (filehandlerId) {
-    await _seedInitialDiaries(claimId, froiData.dateOfInjury, now, employee.aww, employee.tdRate);
-  }
+  // UNCONDITIONALLY: the statutory clocks (14-day compensability
+  // decision, DWC-1, TD setup) run from claim-form receipt whether or
+  // not the system-of-record sync succeeded. A FileHandler outage must
+  // never leave a claim with no decision path on the queue.
+  await _seedInitialDiaries(claimId, froiData.dateOfInjury, now, employee.aww, employee.tdRate);
 
   // ── Step 6.5: Motor vehicle subrogation flag ─────────────────────────────────
   if (froiData.injuryType === 'Motor Vehicle') {

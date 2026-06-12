@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { approveReserves, fetchReserveWorksheet } from '../services/claims.js';
+import { approveReserveWorksheet, fetchReserveWorksheet } from '../services/claims.js';
 import { C } from '../theme.js';
 import { fmt$ } from '../utils.js';
 import { Btn, Lbl, SectionHead, Spinner } from '../ui/primitives.jsx';
@@ -40,14 +40,20 @@ export default function ReservesTab({ claimId, notify }) {
 
   const applyRollup = async () => {
     try {
-      await approveReserves(claimId, {
-        medical: proposal.medical, indemnity: proposal.indemnity,
-        expense: proposal.expense, reason: proposal.reason,
+      // Version-bound: the server recomputes the rollup and rejects with
+      // a conflict if the worksheet changed since these totals rendered.
+      await approveReserveWorksheet(claimId, {
+        medical: proposal.medical, indemnity: proposal.indemnity, expense: proposal.expense,
       });
       qc.invalidateQueries({ queryKey: ['reserve-worksheet', claimId] });
       qc.invalidateQueries({ queryKey: ['claim', claimId] });
       notify('Worksheet rollup approved — reserves updated through the approval workflow');
-    } catch (e) { notify(`Approval failed: ${e.message}`, 'error'); }
+    } catch (e) {
+      qc.invalidateQueries({ queryKey: ['reserve-worksheet', claimId] });
+      notify(/WORKSHEET_CHANGED/.test(e.message)
+        ? 'The worksheet changed since you loaded it — totals refreshed, review and approve again'
+        : `Approval failed: ${e.message}`, 'error');
+    }
   };
 
   return (

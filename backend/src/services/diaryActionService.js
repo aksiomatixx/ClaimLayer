@@ -94,6 +94,10 @@ const AFTERMATH_RULES = {
       delay: {
         describe: 'Delay the decision — the delay notice issues and the LC §5402 90-day clock sets the final decision diary',
         requires_note: true,
+        // Delay is only lawful INSIDE the initial 14-day window: past
+        // the parent diary's statutory deadline the delay-notice path is
+        // gone and only accept/deny remain.
+        window: 'statutory_deadline',
         notices: [{ type: 'claim_delay' }],
         // The successor lands ON the presumption date: 90 calendar days
         // from claim form receipt (claims.filed_at), immutable.
@@ -204,13 +208,36 @@ function _validActions(diaryType) {
   return rule ? Object.keys(rule.decisions) : ['complete'];
 }
 
+/**
+ * Window gating: a decision marked `window: 'statutory_deadline'` is
+ * only available through the parent diary's statutory deadline (the day
+ * itself included). Past it the action is invalid — e.g. a
+ * compensability DELAY after day 14 cannot retroactively start the
+ * delay-notice path; only accept/deny remain.
+ */
+function _windowClosed(diary, outcome) {
+  if (outcome?.window !== 'statutory_deadline' || !diary.statutory_deadline) return false;
+  const today = new Date().toISOString().split('T')[0];
+  return today > diary.statutory_deadline;
+}
+
+function _openActions(diary) {
+  return _validActions(diary.diary_type).filter(action =>
+    !_windowClosed(diary, _resolveOutcome(diary.diary_type, action)));
+}
+
 // ── Preview (dry run for the drawer) ─────────────────────────────────────────
 
 async function previewAftermath(diaryId) {
   const { data: diary, error } = await supabase.from('diaries').select('*').eq('id', diaryId).single();
   if (error || !diary) throw new Error(`Diary not found: ${diaryId}`);
 
-  const actions = _validActions(diary.diary_type).map(action => {
+  // Actions whose statutory window has closed are not previewed — the
+  // drawer must only offer what the server will accept.
+  const closed = _validActions(diary.diary_type)
+    .filter(a => _windowClosed(diary, _resolveOutcome(diary.diary_type, a)));
+
+  const actions = _openActions(diary).map(action => {
     const o = _resolveOutcome(diary.diary_type, action);
     return {
       action,
@@ -228,7 +255,15 @@ async function previewAftermath(diaryId) {
       ],
     };
   });
-  return { diary_id: diaryId, diary_type: diary.diary_type, actions };
+  return {
+    diary_id: diaryId, diary_type: diary.diary_type, actions,
+    ...(closed.length ? {
+      window_closed: closed.map(a => ({
+        action: a,
+        reason: `the ${diary.statutory_deadline} statutory deadline has passed`,
+      })),
+    } : {}),
+  };
 }
 
 // ── Claiming (the concurrency gate) ──────────────────────────────────────────
@@ -323,6 +358,17 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
   if (!outcome) {
     throw new Error(
       `Unknown action "${action}" for ${diary.diary_type}. Valid: ${_validActions(diary.diary_type).join(', ')}`);
+  }
+
+  // Statutory-window gate: an action whose window closed with the
+  // diary's statutory deadline is rejected outright — e.g. delay after
+  // the 14-day compensability deadline. Only the still-lawful paths
+  // remain valid.
+  if (_windowClosed(diary, outcome)) {
+    throw new Error(
+      `Action "${action}" is no longer available for ${diary.diary_type} — ` +
+      `the ${diary.statutory_deadline} statutory deadline has passed. ` +
+      `Valid: ${_openActions(diary).join(', ')}`);
   }
 
   // Consequential decisions (compensability accept/deny/delay) require
