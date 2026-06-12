@@ -10,7 +10,7 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,348 tests · 92 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,352 tests · 92 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -62,7 +62,7 @@ These are the choices that make the system safe to point at a regulated workflow
 
 ## Testing
 
-1,348 automated tests across 92 suites: 1,264 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
+1,352 automated tests across 92 suites: 1,268 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 ## Tech stack
 

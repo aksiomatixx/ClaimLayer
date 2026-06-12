@@ -59,6 +59,50 @@ describe('POST /claims/:id/documents/ingest', () => {
   });
 });
 
+describe('signal overrides are scoped to their categories', () => {
+  const ingest = (title) =>
+    auth(request(app).post(`/api/v1/claims/${CLAIM}/documents/ingest`))
+      .send({ title, content_text: `${title} text` });
+
+  it('p_and_s on a medical report routes to PR4_RECEIVED_REVIEW', async () => {
+    mockClassification({
+      category: 'medical', confidence: 95, claim_number: null,
+      summary: 'PR-4 declaring P&S.', key_fields: { signals: ['p_and_s'] },
+    });
+    const res = await ingest('PR-4');
+    expect(res.body.diary.diary_type).toBe('PR4_RECEIVED_REVIEW');
+  });
+
+  it('p_and_s on a settlement document does NOT override — stays SETTLEMENT_DOC_REVIEW', async () => {
+    // Live-classifier finding: a C&R counter that cites the PR-4 rating
+    // gets the p_and_s signal; the override must not hijack its routing.
+    mockClassification({
+      category: 'settlement', confidence: 95, claim_number: null,
+      summary: 'C&R counter citing the PR-4 rating.', key_fields: { signals: ['p_and_s'] },
+    });
+    const res = await ingest('C&R counter');
+    expect(res.body.diary.diary_type).toBe('SETTLEMENT_DOC_REVIEW');
+  });
+
+  it('p_and_s on a QME scheduling notice does NOT override — stays QME_REPORT_REVIEW', async () => {
+    mockClassification({
+      category: 'qme', confidence: 95, claim_number: null,
+      summary: 'QME appointment notice mentioning impairment.', key_fields: { signals: ['p_and_s'] },
+    });
+    const res = await ingest('QME notice');
+    expect(res.body.diary.diary_type).toBe('QME_REPORT_REVIEW');
+  });
+
+  it('representation_change on a legal document still overrides to REPRESENTATION_REVIEW', async () => {
+    mockClassification({
+      category: 'legal', confidence: 95, claim_number: null,
+      summary: 'Notice of representation.', key_fields: { signals: ['representation_change'] },
+    });
+    const res = await ingest('Rep letter');
+    expect(res.body.diary.diary_type).toBe('REPRESENTATION_REVIEW');
+  });
+});
+
 describe('triage queue routes', () => {
   it('GET /documents/triage is not swallowed by the documents/:id route', async () => {
     mockClassification({

@@ -63,11 +63,19 @@ const DOC_ACTION_RULES = {
                     notes: 'Unrecognized document filed — verify categorization.' },
 };
 
-// Signals refine the queued action beyond the base category rule.
+// Signals refine the queued action beyond the base category rule —
+// but only within the categories where the signal is meaningful.
+// applies_to is the guardrail: the live classifier will sometimes flag
+// p_and_s on a document that merely REFERENCES an existing rating (a
+// QME scheduling letter, a C&R counter citing the PR-4) — the P&S
+// override is only correct when the document IS the medical report
+// declaring it. Deterministic in code, whatever the model returns.
 const SIGNAL_OVERRIDES = {
   p_and_s:               { diary_type: 'PR4_RECEIVED_REVIEW', due_days: 3, priority: 'HIGH',
+                           applies_to: ['medical'],
                            notes: 'P&S/MMI report received — review rating pathway (PR-4).' },
   representation_change: { diary_type: 'REPRESENTATION_REVIEW', due_days: 2, priority: 'HIGH',
+                           applies_to: ['legal', 'correspondence'],
                            notes: 'Representation change indicated — verify and update via the representation workflow (SROI 02 fires on change).' },
 };
 
@@ -135,7 +143,8 @@ async function _writeEvent(claimId, type, data) {
 
 function _resolveRule(category, signals) {
   for (const sig of signals || []) {
-    if (SIGNAL_OVERRIDES[sig]) return SIGNAL_OVERRIDES[sig];
+    const override = SIGNAL_OVERRIDES[sig];
+    if (override && override.applies_to.includes(category)) return override;
   }
   return DOC_ACTION_RULES[category] || DOC_ACTION_RULES.other;
 }
