@@ -97,11 +97,11 @@ const LIFECYCLE_PLANS = [
   {
     persona: 2, status: 'under_investigation', daysAgo: 8,
     bodyPart: 'Shoulder',                      injuryType: 'Strain / Sprain',
-    description: 'Right shoulder pain reported next morning; no witnesses; prior chiropractic care noted.',
+    description: 'Right shoulder pain reported next morning; no witnesses. Worker had a prior right shoulder injury resolved by stipulated award under linked claim HHW-2024-D09 (DOI 2024).',
     priority: 'High',
     aiCompensability: 'Questionable', aiConfidence: 62,
-    aiRationale: 'Synthetic demo rationale: the reported mechanism (overhead reach during a patient transfer) is consistent with a right shoulder strain, and the PR-1 attributes causation to the incident. Confidence is reduced because the injury was reported the next morning with no witnesses, and the file references prior shoulder treatment. Recommend completing the investigation before the initial 14-day decision: confirm the prior treatment records and the supervisor statement.',
-    aiRedFlags: ['No witnesses to mechanism', 'Prior shoulder treatment in claim history'],
+    aiRationale: 'Synthetic demo rationale: the reported mechanism (overhead reach during a patient transfer) is consistent with a right shoulder strain, and the PR-1 attributes causation to the incident. Confidence is reduced because the injury was reported the next morning with no witnesses, and the file shows a prior right shoulder claim for the same worker (HHW-2024-D09, resolved by stipulated award). Recommend completing the investigation before the initial 14-day decision: pull the linked 2024 file, compare the PR-1 findings, and obtain the supervisor statement.',
+    aiRedFlags: ['No witnesses to mechanism', 'Prior right shoulder treatment under linked claim HHW-2024-D09'],
     reserveWorksheet: [
       { category: 'medical', label: 'PTP office visits', shape: 'quantity', quantity: 5, unit_amount: 250,
         basis_note: 'PTP visits per PR-1 treatment plan (synthetic demo estimate)' },
@@ -221,6 +221,7 @@ const LIFECYCLE_PLANS = [
 async function wipeDemo() {
   const ids = [];
   for (let i = 0; i < LIFECYCLE_PLANS.length; i++) ids.push(makeClaimId(i));
+  ids.push('claim_demo_009'); // the linked 2024 prior claim (CL-DEMO2)
 
   // Child tables first to avoid FK violations on real Postgres. The
   // in-memory mock ignores FKs but the order is still correct.
@@ -230,6 +231,10 @@ async function wipeDemo() {
     'diaries', 'claim_events', 'reserves', 'reserve_line_items', 'audit_log',
     'claim_documents',
   ];
+  for (const id of ids) {
+    try { await supabase.from('claim_links').delete().eq('claim_id_a', id); } catch { /* ignore */ }
+    try { await supabase.from('claim_links').delete().eq('claim_id_b', id); } catch { /* ignore */ }
+  }
   for (const tbl of childTables) {
     for (const id of ids) {
       try { await supabase.from(tbl).delete().eq('claim_id', id); } catch { /* table may not exist */ }
@@ -336,6 +341,7 @@ async function seedDemo() {
   // Three un-migrated legacy claims (the "Migrate" button pulls them in)
   // plus one already-migrated example so the round trip is visible without
   // clicking anything.
+  await _seedPriorRosaClaim();
   await _seedLegacyDemo();
 
   logger.info({ msg: 'seedDemo: complete', count: created.length });
@@ -699,6 +705,157 @@ async function _seedReserveWorksheet(claimId, items) {
   }
 }
 
+
+// ── Prior Rosa Mendez claim (CL-DEMO2) ───────────────────────────────────────
+// A 2024 right-shoulder claim for the SAME worker (DEMO-3), closed by
+// stipulated award, linked to the 2026 claim so the red flag on the
+// open file is traceable to a real claim in the demo. Minimal document
+// set, completed diaries, a closed-claim reserve worksheet, and the
+// matching approved reserves row. All values synthetic.
+async function _seedPriorRosaClaim() {
+  const id = 'claim_demo_009';
+  const claimNumber = 'HHW-2024-D09';
+  const currentClaimId = makeClaimId(2);            // Rosa's 2026 claim
+  const currentClaimNumber = makeClaimNumber(2);
+  const persona = PERSONAS[2];
+  const doi = '2024-03-12';
+  const filed = '2024-03-13T16:00:00.000Z';
+  const closedAt = '2024-09-20T18:00:00.000Z';
+
+  await supabase.from('claims').insert({
+    id,
+    claim_number:       claimNumber,
+    employer_id:        persona.employer.id,
+    employer_name:      persona.employer.name,
+    employee: {
+      adpEmployeeId: 'DEMO-3',
+      firstName:     persona.first,
+      lastName:      persona.last,
+      dob:           persona.dob,
+      phone:         persona.phone,
+      jobTitle:      persona.title,
+      address:       { line1: '1234 Demo St', state: 'CA', zip: '90001' },
+    },
+    status:             'closed',
+    date_of_injury:     doi,
+    body_part:          'Shoulder',
+    injury_type:        'Strain / Sprain',
+    injury_description:
+      'Right shoulder strain lifting a patient during a bed-to-chair transfer. ' +
+      'Resolved by stipulated award (8% PD, future medical open). ' +
+      `Worker subsequently reported a new right shoulder injury in 2026 under linked claim ${currentClaimNumber}.`,
+    aww:                590.00,
+    td_rate:            393.33,
+    weeks_calculated:   52,
+    ai_analysis:        null,
+    priority:           null,
+    filed_at:           filed,
+    source_system:      'native',
+    sync_status:        'native',
+    metadata:           { demo: true, persona: `${persona.first} ${persona.last}`, resolution: 'stipulated_award' },
+    created_at:         filed,
+    updated_at:         closedAt,
+  });
+
+  await supabase.from('claim_events').insert([
+    { claim_id: id, type: 'claim_created',  timestamp: filed,    data: { source: 'froi', demo: true } },
+    { claim_id: id, type: 'status_changed', timestamp: closedAt, data: { from: 'settlement_discussions', to: 'closed', changedBy: 'adjuster@homecaretpa.com' } },
+  ]);
+
+  // Minimal document set — all summaries consistent with the right shoulder.
+  const docs = [
+    { slug: 'froi', received: '2024-03-13T16:00:00.000Z',
+      title: 'DWC-1 / First Report of Injury', category: 'state_form', pages: 3,
+      ai_summary: 'Employer first report (2024). Right shoulder strain during patient transfer; reported same day; employer does not contest.' },
+    { slug: 'pr1', received: '2024-03-18T16:00:00.000Z',
+      title: 'Initial treating physician report (PR-1)', category: 'medical', pages: 5,
+      ai_summary: 'First visit report (2024). Dx: right shoulder strain. Reduced abduction ROM, positive impingement signs. Restrictions: limited overhead reach, no lifting >10 lbs. Resolved with conservative care.' },
+    { slug: 'stip_award', received: '2024-09-15T16:00:00.000Z',
+      title: 'Stipulations with Request for Award — approved', category: 'settlement', pages: 9,
+      ai_summary: 'WCAB-approved stipulated award: 8% PD to the right shoulder, future medical open for the shoulder. Claim administratively closed after award payment.' },
+  ];
+  for (const d of docs) {
+    await supabase.from('claim_documents').insert({
+      id: `doc_demo_${id}_${d.slug}`,
+      claim_id: id,
+      title: d.title,
+      category: d.category,
+      source: 'inbound_mail',
+      received_at: d.received,
+      pages: d.pages,
+      status: 'filed',
+      ai_summary: d.ai_summary,
+      relevant_to: [],
+      classification_confidence: 90,
+      classification_model: SEED_MODEL,
+      triage_status: 'none',
+      version: 1,
+      created_at: d.received,
+      updated_at: d.received,
+    });
+  }
+
+  // Completed diaries — a closed file has no open work.
+  const closedDiaries = [
+    { type: 'COMPENSABILITY_NOTICE_DUE', due: '2024-03-27', completedAt: '2024-03-20T17:00:00.000Z',
+      action: 'accept', note: 'Witnessed mechanism, immediate report, PR-1 causation clear (synthetic demo decision).' },
+    { type: 'TD_PAYMENT_REVIEW', due: '2024-05-01', completedAt: '2024-05-01T17:00:00.000Z',
+      action: 'suspend', note: 'Released to full duty after 5 weeks TD (synthetic demo decision).' },
+    { type: 'CNR_ADJUSTER_SIGN', due: '2024-09-12', completedAt: '2024-09-12T17:00:00.000Z',
+      action: 'complete', note: 'Stipulated award signed and filed (synthetic demo decision).' },
+  ];
+  for (const d of closedDiaries) {
+    await supabase.from('diaries').insert({
+      id: `diy_demo_${id}_${d.type}`,
+      claim_id: id,
+      diary_type: d.type,
+      due_date: d.due,
+      assigned_to: config.adjuster.email,
+      priority: 'HIGH',
+      status: 'completed',
+      completed_at: d.completedAt,
+      completed_by: 'adjuster@homecaretpa.com',
+      decision_action: d.action,
+      decision_note: d.note,
+      created_at: '2024-03-13T16:00:00.000Z',
+    });
+  }
+
+  // Closed-claim worksheet: final actuals, not projections.
+  await _seedReserveWorksheet(id, [
+    { category: 'medical', label: 'PTP visits (final)', shape: 'quantity', quantity: 6, unit_amount: 240,
+      basis_note: 'Actual visits billed through claim closure (synthetic demo figure)' },
+    { category: 'medical', label: 'Physical therapy (final)', shape: 'quantity', quantity: 10, unit_amount: 120,
+      basis_note: 'Completed PT course (synthetic demo figure)' },
+    { category: 'indemnity', label: 'Temporary disability (paid)', shape: 'weeks_rate', quantity: 5, unit_amount: 393.33,
+      basis_note: '5 weeks TD actually paid at the 2024 claim rate (synthetic demo figure)' },
+    { category: 'indemnity', label: 'PD per stipulated award', shape: 'flat', flat_amount: 6960,
+      basis_note: 'SYNTHETIC DEMO FIGURE — 8% PD per the approved stipulation; not a DEU calculation' },
+    { category: 'expense', label: 'Copy service / filing', shape: 'quantity', quantity: 1, unit_amount: 140,
+      basis_note: 'EAMS filing + records (synthetic demo figure)' },
+  ]);
+
+  // The matching approved reserves row so the closed worksheet reads
+  // 'approved' — the M3 control point, exercised at seed time.
+  await supabase.from('reserves').insert({
+    claim_id: id,
+    medical: 2640, indemnity: 8926.65, expense: 140,
+    reason: 'Final reserves at closure (stipulated award paid)',
+    source: 'ADJUSTER',
+    approved_by: 'adjuster@homecaretpa.com',
+    created_at: closedAt,
+  });
+
+  // The symmetric link, through the real service.
+  const claimLinks = require('../services/claimLinkService');
+  await claimLinks.createLink(currentClaimId, id, {
+    relation_type: 'prior_claim_same_worker',
+    note: `Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the ${currentClaimNumber} investigation.`,
+  }, 'seed@demo');
+
+  logger.info({ msg: 'seedDemo: prior claim linked', prior: claimNumber, current: currentClaimNumber });
+}
+
 // Seed ai_decisions rows so the admin Agents view has data on first
 // load. Same rule as td_periods: direct insert, deterministic UUIDs.
 async function _seedAiDecisions(claimId, idx, plan, persona) {
@@ -958,7 +1115,7 @@ function _buildDocuments(claimId, idx, plan) {
       return [...common,
         doc('med_initial', plan.daysAgo - 3, {
           title: 'Initial treating physician report (PR-1)', category: 'medical', source: 'provider', pages: 6,
-          ai_summary: 'First visit report. Dx: lumbar strain; objective findings limited to reduced ROM. Work restrictions: no lifting >10 lbs for 2 weeks. Causation attributed to the reported incident.',
+          ai_summary: 'First visit report. Dx: right shoulder strain/sprain. Objective findings: reduced active ROM in abduction and forward flexion, positive impingement signs, tenderness over the supraspinatus. Work restrictions: limited overhead reach, no lifting >10 lbs for 2 weeks. Causation attributed to the reported incident.',
           relevant_to: ['COMPENSABILITY_NOTICE_DUE'],
         }),
         doc('wage_stmt', plan.daysAgo - 2, {

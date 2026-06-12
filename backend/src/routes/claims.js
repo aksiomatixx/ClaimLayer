@@ -372,6 +372,23 @@ router.get(
   }
 );
 
+// ── GET /api/v1/claims/:id/links — related claims (CL-DEMO2) ─────────────────
+router.get(
+  '/:id/links',
+  requireAuth,
+  requireRole(['admin']),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const claimLinks = require('../services/claimLinkService');
+      res.json({ links: await claimLinks.listLinks(req.params.id) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 // ── GET /api/v1/claims/:id/decision-brief — plain-language what/why ──────────
 router.get(
   '/:id/decision-brief',

@@ -6,6 +6,7 @@ import { calculatePD, createStipulation, fetchPDData, initiatePDAdvances, record
 import { approveSupplemental, dismissSupplemental, fetchPanelsForClaim, fetchSupplementalRequests, issuePanel, markReportReceived, recordStrikes, requestPanel, scheduleQmeAppointment } from '../services/qme.js';
 import { fetchTdPeriods } from '../services/td.js';
 import BenefitsTab from './BenefitsTab.jsx';
+import RelatedClaims from './RelatedClaims.jsx';
 import ReservesTab from './ReservesTab.jsx';
 import { C, COMP_COLOR, PRI_COLOR, TD_TYPE_BG, TD_TYPE_COLOR } from '../theme.js';
 import { Btn, Field, InfoPair, Lbl, SectionHead, Spinner, SyncBadge, Tabs } from '../ui/primitives.jsx';
@@ -220,7 +221,7 @@ function DecisionSupport({claimId,brief,briefLoading,documents,claim,notify}){
   );
 }
 
-export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
+export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1,onOpenClaim}){
   const qc=useQueryClient();
   const {data:claim,isLoading:claimLoading}=useQuery({
     queryKey:['claim',claimId],
@@ -415,6 +416,8 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1}){
             {claim.tdRate&&<InfoPair label="TD Rate/wk" value={fmt$(claim.tdRate)} mono accent={C.cyan}/>}
           </div>
           {claim.injuryDescription&&<InfoPair label="Description" value={claim.injuryDescription}/>}
+
+          <RelatedClaims claimId={claimId} onOpenClaim={onOpenClaim}/>
 
           {/* Status Transitions */}
           {nextStatuses.length>0&&(

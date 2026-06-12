@@ -115,7 +115,7 @@ export default function App(){
           </div>
         )}
       </div>
-      {selectedId&&<ClaimDrawer claimId={selectedId} onClose={()=>setSelectedId(null)} notify={notify} jsPdfReady={jsPdfReady} onGenDWC1={genDWC1}/>}
+      {selectedId&&<ClaimDrawer claimId={selectedId} onClose={()=>setSelectedId(null)} notify={notify} jsPdfReady={jsPdfReady} onGenDWC1={genDWC1} onOpenClaim={setSelectedId}/>}
     </div>
   );
 }
