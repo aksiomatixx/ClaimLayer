@@ -14,15 +14,19 @@ export function TopNav({role,setRole,claims,adminView,setAdminView}){
         <div style={{width:32,height:32,background:`linear-gradient(135deg,${C.amber},${C.amberD})`,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 2px 10px ${C.amber}44`}}><span style={{fontFamily:C.mono,fontWeight:700,fontSize:11,color:"#000"}}>CL</span></div>
         <div><div style={{fontFamily:C.mono,fontWeight:600,fontSize:13,color:C.text}}>ClaimLayer</div><div style={{fontSize:9,color:C.muted}}>Workers' Compensation · v3</div></div>
       </div>
-      {showPortalNav?(
-        <div style={{display:"flex",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:3,gap:2,margin:"0 auto"}}>
-          {[{key:"admin",label:"⚡ Admin"},{key:"employer",label:"🏢 Employer"},{key:"employee",label:"👤 Employee"}].map(({key,label})=>(
-            <button key={key} onClick={()=>setRole(key)} style={{background:role===key?C.amber:"transparent",color:role===key?"#000":C.dim,border:"none",padding:"6px 16px",borderRadius:6,fontSize:12,fontWeight:700,fontFamily:C.sans,cursor:"pointer",transition:"all .18s"}}>{label}</button>
-          ))}
-        </div>
-      ):(
-        <div style={{margin:"0 auto"}}/>
-      )}
+      {/* Internal roles (adjuster console + supervisor oversight) are
+          always switchable; the worker/employer portal pills stay gated
+          behind the CL-MKT1 flag. The supervisor surface is its own
+          authenticated session — its endpoints 403 admin cookies. */}
+      <div style={{display:"flex",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:3,gap:2,margin:"0 auto"}}>
+        {[
+          {key:"admin",label:"⚡ Admin"},
+          {key:"supervisor",label:"👁 Supervisor"},
+          ...(showPortalNav?[{key:"employer",label:"🏢 Employer"},{key:"employee",label:"👤 Employee"}]:[]),
+        ].map(({key,label})=>(
+          <button key={key} onClick={()=>setRole(key)} style={{background:role===key?C.amber:"transparent",color:role===key?"#000":C.dim,border:"none",padding:"6px 16px",borderRadius:6,fontSize:12,fontWeight:700,fontFamily:C.sans,cursor:"pointer",transition:"all .18s"}}>{label}</button>
+        ))}
+      </div>
       <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         {role==="admin"&&(
           <div style={{display:"flex",background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:2,gap:2}}>

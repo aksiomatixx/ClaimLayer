@@ -8,7 +8,6 @@ import { C, PRI_COLOR, TD_TYPE_COLOR } from '../theme.js';
 import { fmt$ } from '../utils.js';
 import { Badge, Btn, StatCard, Tabs, SyncBadge } from '../ui/primitives.jsx';
 import { TriageQueue, WcisQualityStrip } from './TriageQueue.jsx';
-import SupervisorAlerts from './SupervisorAlerts.jsx';
 
 const ACTION_STATUSES=new Set(["new_claim","intake_complete","under_investigation"]);
 const AGE_MS=d=>Date.now()-new Date(d).getTime();
@@ -111,7 +110,6 @@ export default function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGe
   return(
     <div style={{paddingTop:32,animation:"fadeUp .3s ease"}}>
       <div style={{marginBottom:26}}><h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>Claims Console</h1><p style={{color:C.muted,fontSize:13}}>Action Queue · AI Analysis · Reserve Approval · CMS Sync</p></div>
-      <SupervisorAlerts onSelect={onSelect} notify={notify}/>
       <TriageQueue claims={claims} notify={notify}/>
       <WcisQualityStrip/>
       <div style={{display:"flex",gap:14,marginBottom:24}}>
