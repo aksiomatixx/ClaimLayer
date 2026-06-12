@@ -211,7 +211,11 @@ describe('step 9 — system-of-record write-back on approval', () => {
     expect(noteText).toContain('worker still TTD');
     expect(author).toBe('adjuster@test');
 
-    expect(mockFhCompleteDiary).toHaveBeenCalledWith('FH-100', 'fhd-9', 'worker still TTD', 'adjuster@test');
+    // The outbox row id rides along as the stable idempotency key
+    // (Codex sweep E14) so stale replays cannot double-complete.
+    expect(mockFhCompleteDiary).toHaveBeenCalledWith(
+      'FH-100', 'fhd-9', 'worker still TTD', 'adjuster@test',
+      { idempotencyKey: expect.stringMatching(/^obx_/) });
   });
 
   it('write-back failure never blocks the decision', async () => {

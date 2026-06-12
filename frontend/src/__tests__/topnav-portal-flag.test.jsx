@@ -26,15 +26,24 @@ describe('TopNav portal navigation flag', () => {
     expect(screen.getByText('👤 Employee')).toBeInTheDocument();
   });
 
-  it('hides the worker/employer switcher when the flag is off (demo build)', () => {
+  it('hides the worker/employer pills when the flag is off (demo build)', () => {
     vi.stubEnv('VITE_SHOW_PORTAL_NAV', 'false');
     render(<TopNav {...PROPS} />);
     expect(screen.queryByText('🏢 Employer')).toBeNull();
     expect(screen.queryByText('👤 Employee')).toBeNull();
-    expect(screen.queryByText('⚡ Admin')).toBeNull(); // the whole switcher, not a partial
+    // The INTERNAL switcher stays: the supervisor surface is a separate
+    // authenticated session (its endpoints 403 admin cookies), so the
+    // adjuster-side roles must remain reachable even in the demo build.
+    expect(screen.getByText('⚡ Admin')).toBeInTheDocument();
+    expect(screen.getByText('👁 Supervisor')).toBeInTheDocument();
     // The admin surface itself still renders (view tabs intact).
     expect(screen.getByText('Claims')).toBeInTheDocument();
     expect(screen.getByText('Agents')).toBeInTheDocument();
+  });
+
+  it('shows the supervisor pill alongside the portal pills when the flag is on', () => {
+    render(<TopNav {...PROPS} />);
+    expect(screen.getByText('👁 Supervisor')).toBeInTheDocument();
   });
 
   it('an explicit true keeps the switcher (normal app unchanged)', () => {

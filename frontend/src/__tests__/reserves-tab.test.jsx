@@ -8,10 +8,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const fetchReserveWorksheet = vi.fn();
-const approveReserves = vi.fn();
+const approveReserveWorksheet = vi.fn();
 vi.mock('../services/claims.js', () => ({
   fetchReserveWorksheet: (...a) => fetchReserveWorksheet(...a),
-  approveReserves: (...a) => approveReserves(...a),
+  approveReserveWorksheet: (...a) => approveReserveWorksheet(...a),
 }));
 
 import ReservesTab from '../components/ReservesTab.jsx';
@@ -48,7 +48,7 @@ function renderTab() {
 
 beforeEach(() => {
   fetchReserveWorksheet.mockReset().mockResolvedValue(WORKSHEET);
-  approveReserves.mockReset().mockResolvedValue({});
+  approveReserveWorksheet.mockReset().mockResolvedValue({});
 });
 
 describe('ReservesTab', () => {
@@ -75,15 +75,29 @@ describe('ReservesTab', () => {
     expect(screen.getByTestId('subtotal-expense')).toHaveTextContent('$170');
   });
 
-  it('a pending proposal routes through the M3 approval (approveReserves) — never a direct write', async () => {
+  it('a pending proposal routes through the version-bound approval — never a direct write', async () => {
     renderTab();
     await waitFor(() => expect(screen.getByText(/pending adjuster approval/i)).toBeInTheDocument());
 
     screen.getByText('Approve worksheet totals as reserves').click();
-    await waitFor(() => expect(approveReserves).toHaveBeenCalledTimes(1));
-    const [claimId, payload] = approveReserves.mock.calls[0];
+    await waitFor(() => expect(approveReserveWorksheet).toHaveBeenCalledTimes(1));
+    const [claimId, expected] = approveReserveWorksheet.mock.calls[0];
     expect(claimId).toBe('claim_demo_003');
-    expect(payload).toEqual({ medical: 2650, indemnity: 9984, expense: 170, reason: 'Itemized reserve worksheet rollup' });
+    // The REVIEWED subtotals travel as the version binding; the server
+    // recomputes and writes its own totals (Codex sweep B5).
+    expect(expected).toEqual({ medical: 2650, indemnity: 9984, expense: 170 });
+  });
+
+  it('a 409 conflict (worksheet changed under the approver) refetches instead of writing', async () => {
+    approveReserveWorksheet.mockRejectedValue(new Error('WORKSHEET_CHANGED — totals moved'));
+    renderTab();
+    await waitFor(() => expect(screen.getByText(/pending adjuster approval/i)).toBeInTheDocument());
+
+    fetchReserveWorksheet.mockClear();
+    screen.getByText('Approve worksheet totals as reserves').click();
+    await waitFor(() => expect(approveReserveWorksheet).toHaveBeenCalledTimes(1));
+    // invalidateQueries → the worksheet refetches so the approver sees the new totals
+    await waitFor(() => expect(fetchReserveWorksheet).toHaveBeenCalled());
   });
 
   it('an approved worksheet shows the matched state with no approve button', async () => {
