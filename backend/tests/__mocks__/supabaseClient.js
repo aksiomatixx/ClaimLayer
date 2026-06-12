@@ -113,6 +113,13 @@ class QueryBuilder {
   eq(col, val) { this._filters.push({ col, val, op: 'eq' }); return this; }
   neq(col, val) { this._filters.push({ col, val, op: 'neq' }); return this; }
   is(col, val) { this._filters.push({ col, val, op: 'is' }); return this; }
+  lt(col, val) { this._filters.push({ col, val, op: 'lt' }); return this; }
+
+  // PostgREST .or('a.eq.x,b.is.true') — disjunction of simple predicates.
+  or(expr) { this._filters.push({ op: 'or', expr: String(expr) }); return this; }
+
+  // PostgREST range — INCLUSIVE [from, to] window over the result set.
+  range(from, to) { this._range = { from, to }; return this; }
 
   order(col, opts = {}) {
     this._orderBy = { col, desc: opts.ascending === false };
@@ -146,6 +153,18 @@ class QueryBuilder {
       if (f.op === 'neq') return row[f.col] !== f.val;
       // PostgREST semantics: NULL comparisons require .is()
       if (f.op === 'is')  return f.val === null ? row[f.col] == null : row[f.col] === f.val;
+      if (f.op === 'lt')  return row[f.col] != null && row[f.col] < f.val;
+      if (f.op === 'or') {
+        return f.expr.split(',').some(term => {
+          const [col, op, ...rest] = term.split('.');
+          const raw = rest.join('.');
+          const val = raw === 'true' ? true : raw === 'false' ? false : raw === 'null' ? null : raw;
+          if (op === 'eq') return row[col] === val;
+          if (op === 'is') return val === null ? row[col] == null : row[col] === val;
+          if (op === 'lt') return row[col] != null && row[col] < val;
+          return false;
+        });
+      }
       return true;
     });
   }
@@ -181,6 +200,7 @@ class QueryBuilder {
           });
         }
 
+        if (this._range) rows = rows.slice(this._range.from, this._range.to + 1);
         if (this._limitN !== null) rows = rows.slice(0, this._limitN);
 
         if (this._single) {
@@ -193,6 +213,25 @@ class QueryBuilder {
 
       case 'insert': {
         const items = Array.isArray(this._data) ? this._data : [this._data];
+
+        // Composite UNIQUE constraints the real schema enforces — the
+        // race-recovery code paths (claim links, supervisor alerts) need
+        // the mock to raise the same duplicate-key violation Postgres does.
+        const UNIQUES = {
+          claim_links:       ['claim_id_a', 'claim_id_b'],
+          supervisor_alerts: ['alert_date', 'recipient_user_id'],
+        };
+        const uq = UNIQUES[this._table];
+        if (uq) {
+          for (const item of items) {
+            for (const r of tbl.values()) {
+              if (uq.every(col => r[col] === item[col])) {
+                return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint "${this._table}_uq"` } };
+              }
+            }
+          }
+        }
+
         const created = items.map(item => {
           const row = { id: item.id || uid(), created_at: new Date().toISOString(), ...item };
           tbl.set(row.id, row);
