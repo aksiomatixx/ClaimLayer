@@ -153,6 +153,77 @@ async function captureStills() {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── Narration ────────────────────────────────────────────────────────────────
+// Offline neural TTS: sherpa-onnx-node (npm) + a Piper voice pulled
+// from the sherpa-onnx GitHub releases on first use (~64 MB, cached in
+// frontend/.cache). If the voice can't be set up, the tour records
+// silent-with-captions and says so.
+
+// Override with TTS_VOICE (any vits-piper voice from the sherpa-onnx
+// "tts-models" release, e.g. en_US-lessac-medium, en_US-amy-medium).
+const VOICE     = process.env.TTS_VOICE || 'en_US-hfc_female-medium';
+const VOICE_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-${VOICE}.tar.bz2`;
+const VOICE_DIR = path.resolve(__dirname, `../.cache/vits-piper-${VOICE}`);
+
+const NARRATION = {
+  intro:     "ClaimLayer runs AI agents on top of a workers' compensation claims system — with a licensed human at every consequential decision. Here's a quick tour of the live demo.",
+  console:   'Every claim is triaged by AI into a ranked action queue — statutory deadlines computed, reserves suggested, priorities explained.',
+  triage:    'Inbound documents classify themselves. A fax with no claim number is never silently filed — it waits for a human.',
+  book:      'The demo book spans the whole lifecycle — intake, disability payments, MMI, litigation, and settlement.',
+  drawer:    'A claim opens as a decision brief — what to decide, why, and the source documents, already summarized by the agent.',
+  mmi:       'This claim is mid MMI. Treatment has plateaued, the PR-4 request is out, and permanent disability is estimated on the worksheet, pending the rating.',
+  dryrun:    'Nothing commits blind. The adjuster sees exactly what completing will do — and the written rationale goes to the audit trail.',
+  rfa:       "Treatment requests are checked against the state's treatment schedule. The agent can only approve, or route to physician review. Denial isn't in its vocabulary.",
+  agents:    'Every model call is on the record — inputs, outputs, latency, confidence, and the guardrails it tripped.',
+  guardrail: 'This settlement price came in thirty percent above the stipulated value. The premium cap flagged it for a human, instead of letting it through.',
+  arch:      'The system documents itself. And the full source — tests, prompts, and the eval gate — is on GitHub.',
+  outro:     'Bounded. Auditable. Reversible. Run it yourself at claimlayer dot org.',
+};
+
+function ensureVoice() {
+  if (fs.existsSync(path.join(VOICE_DIR, 'tokens.txt'))) return true;
+  try {
+    console.log('  downloading narrator voice (one-time, ~64 MB)…');
+    fs.mkdirSync(path.dirname(VOICE_DIR), { recursive: true });
+    const tarball = `${VOICE_DIR}.tar.bz2`;
+    execFileSync('curl', ['-sfL', '-o', tarball, VOICE_URL], { stdio: 'ignore' });
+    execFileSync('tar', ['xjf', tarball, '-C', path.dirname(VOICE_DIR)], { stdio: 'ignore' });
+    fs.rmSync(tarball, { force: true });
+    return fs.existsSync(path.join(VOICE_DIR, 'tokens.txt'));
+  } catch (e) {
+    console.warn(`  ⚠ voice setup failed (${e.message}) — recording without narration`);
+    return false;
+  }
+}
+
+// Synthesize every line up front; returns { id: { wav, dur } } or null.
+function synthesizeNarration(outDir) {
+  if (!ensureVoice()) return null;
+  let sherpa;
+  try { sherpa = require('sherpa-onnx-node'); }
+  catch { console.warn('  ⚠ sherpa-onnx-node not installed — recording without narration'); return null; }
+  const tts = new sherpa.OfflineTts({
+    model: {
+      vits: {
+        model:   path.join(VOICE_DIR, `${VOICE}.onnx`),
+        tokens:  path.join(VOICE_DIR, 'tokens.txt'),
+        dataDir: path.join(VOICE_DIR, 'espeak-ng-data'),
+      },
+      numThreads: 2,
+    },
+    maxNumSentences: 3,
+  });
+  const lines = {};
+  for (const [id, text] of Object.entries(NARRATION)) {
+    const audio = tts.generate({ text, sid: 0, speed: 0.95 });
+    const wav = path.join(outDir, `${id}.wav`);
+    sherpa.writeWave(wav, { samples: audio.samples, sampleRate: audio.sampleRate });
+    lines[id] = { wav, dur: audio.samples.length / audio.sampleRate };
+  }
+  console.log(`  ✓ ${Object.keys(lines).length} narration lines synthesized`);
+  return lines;
+}
+
 // ── Tour ─────────────────────────────────────────────────────────────────────
 
 // Caption + cursor chrome, styled to the site (dark card, amber kicker).
@@ -207,10 +278,22 @@ const TOUR_CHROME = `
 async function recordTour() {
   console.log('recording tour…');
   const dir = fs.mkdtempSync('/tmp/cl-tour-');
+  // Synthesis happens BEFORE the browser launches — it is CPU-heavy and
+  // must not steal cycles from the recording.
+  const narration = synthesizeNarration(dir);
   const { browser, ctx, page } = await launch({
     recordVideo: { dir, size: { width: VW, height: VH } },
   });
   await ctx.addInitScript(TOUR_CHROME);
+
+  // The recorder's clock starts with the page; narration offsets are
+  // measured against it so each line can be placed on the timeline.
+  const t0 = Date.now();
+  const marks = [];
+  const say = (id) => { if (narration && narration[id]) marks.push({ id, atMs: Date.now() - t0 }); };
+  // Hold a beat at least minMs, and always long enough for its line.
+  const hold = (id, minMs) =>
+    settle(page, Math.max(minMs, narration && narration[id] ? narration[id].dur * 1000 + 700 : 0));
 
   const cap = (k, t) => page.evaluate(([k2, t2]) => window.__cap(k2, t2), [k, t]).catch(() => {});
   const capHide = () => page.evaluate(() => window.__capHide()).catch(() => {});
@@ -225,40 +308,47 @@ async function recordTour() {
   await page.evaluate(() => window.__card(`
     <div class="logo">CL</div>
     <h1>AI agents for workers&#39; comp claims.<br/><em>A licensed human at every decision.</em></h1>
-    <p>A 90-second tour of the live demo — synthetic data, real application.</p>
+    <p>A quick tour of the live demo — synthetic data, real application.</p>
     <p class="m">claimlayer.org</p>`)).catch(() => {});
-  await settle(page, 5200);
+  say('intro');
+  await hold('intro', 5200);
   await page.evaluate(() => window.__cardHide());
   await settle(page, 800);
 
   // Beat 1 — console + triage guardrail
   await cap('The adjuster console', 'Every claim AI-triaged into a ranked action queue — statutory deadlines computed, reserves suggested, priorities explained.');
-  await glide(800, 430); await settle(page, 3800);
+  say('console');
+  await glide(800, 430); await hold('console', 3800);
   await wheel(500); await settle(page, 1800); await wheel(-500);
   await cap('Inbound guardrail', 'A fax with no claim number is never silently filed — it waits in the human triage queue.');
-  await glide(700, 240); await settle(page, 4600);
+  say('triage');
+  await glide(700, 240); await hold('triage', 4600);
   await capHide(); await settle(page, 500);
 
   // Beat 2 — the book
   await act('all claims', () => page.getByText('All Claims (14)').first().click(T));
   await cap('The demo book', '14 synthetic claims spanning the whole lifecycle — intake, TD payments, MMI solicitation, PD rating, litigation, settlement, future medical.');
-  await settle(page, 2200); await wheel(700); await settle(page, 2200); await wheel(-700);
+  say('book');
+  await settle(page, 2200); await wheel(700); await hold('book', 2200); await wheel(-700);
   await capHide(); await settle(page, 500);
 
   // Beat 3 — drawer: decision brief + prepared actions
   await act('open D11', () => page.getByText('HHW-2026-D11', { exact: true }).first().click(T));
   await settle(page, 2200);
   await cap('The decision surface', 'The claim file opens as a decision brief: what to decide, why, and the source documents — already classified and summarized by the agent — one click away.');
-  await glide(1050, 420); await settle(page, 6200);
+  say('drawer');
+  await glide(1050, 420); await hold('drawer', 6200);
   await cap('MMI in flight', 'This claim is mid-MMI: treatment plateaued, the PR-4 solicitation is out, the 30-day response clock is a diary — and PD is estimated on the worksheet pending the rating.');
-  await settle(page, 6600);
+  say('mmi');
+  await hold('mmi', 6600);
 
   // Beat 4 — dry-run
   const opened = await act('dry-run', () => page.locator('button:has-text("Complete action")').first().click(T));
   if (opened) {
     await settle(page, 1600);
     await cap('Nothing commits blind', 'Before approving, the adjuster sees exactly what completing will do — and the decision rationale is required: it goes to the audit trail.');
-    await settle(page, 6600);
+    say('dryrun');
+    await hold('dryrun', 6600);
     await act('cancel dry-run', () => page.locator('button:has-text("Cancel")').first().click(T));
   }
   await capHide();
@@ -269,24 +359,28 @@ async function recordTour() {
   await act('rfas', () => page.locator('button:text-is("RFAs")').first().click(T));
   await settle(page, 2200);
   await cap('No auto-deny, by construction', 'Treatment requests are evaluated against MTUS. The agent can only auto-approve or route to physician review — denial does not exist in its output schema.');
-  await settle(page, 6600);
+  say('rfa');
+  await hold('rfa', 6600);
   await capHide();
 
   // Beat 6 — audit trail
   await act('agents', () => page.locator('button:text-is("Agents")').first().click(T));
   await settle(page, 2400);
   await cap('Every model call on the record', 'The agents console: every Claude call with its inputs, outputs, tokens, latency, confidence — and the guardrails it tripped.');
-  await settle(page, 5600);
+  say('agents');
+  await hold('agents', 5600);
   await cap('Guardrails that held', 'This settlement pricing ran 30% above the stipulated value — the premium cap flagged it for the human instead of letting it through.');
+  say('guardrail');
   await act('open cnr detail', () => page.getByText('cnr_pricing', { exact: true }).first().click(T));
-  await settle(page, 6200);
+  await hold('guardrail', 6200);
   await capHide();
 
   // Beat 7 — self-documenting
   await act('architecture', () => page.locator('button:text-is("Architecture")').first().click(T));
   await settle(page, 2600);
   await cap('The system documents itself', 'Agents, guardrails, and lifecycle — the architecture is a page in the product, and the full source is on GitHub.');
-  await wheel(700); await settle(page, 3600);
+  say('arch');
+  await wheel(700); await hold('arch', 3600);
   await capHide(); await settle(page, 400);
 
   // End card
@@ -295,7 +389,8 @@ async function recordTour() {
     <h1>Bounded. Auditable. <em>Reversible.</em></h1>
     <p>Run it yourself — no install, no keys.</p>
     <p class="m">claimlayer.org/demo &nbsp;·&nbsp; github.com/aksiomatixx/ClaimLayer</p>`));
-  await settle(page, 4600);
+  say('outro');
+  await hold('outro', 4600);
 
   await ctx.close();
   await browser.close();
@@ -305,14 +400,37 @@ async function recordTour() {
   const src = path.join(dir, webm);
   const mp4 = path.join(ASSETS, 'tour.mp4');
   console.log('  encoding mp4…');
+  const silent = path.join(dir, 'silent.mp4');
   execFileSync(FFMPEG, ['-y', '-i', src,
     '-c:v', 'libx264', '-crf', '23', '-preset', 'medium', '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart', '-an', mp4], { stdio: 'ignore' });
+    '-movflags', '+faststart', '-an', silent], { stdio: 'ignore' });
+
+  if (narration && marks.length) {
+    // Place each narration line on the timeline at the moment its beat
+    // started, then mix them into one AAC track over the video.
+    console.log(`  mixing ${marks.length} narration lines…`);
+    const inputs = [];
+    const delayed = [];
+    marks.forEach((m, i) => {
+      inputs.push('-i', narration[m.id].wav);
+      const ms = Math.max(0, Math.round(m.atMs));
+      delayed.push(`[${i + 1}:a]adelay=${ms}|${ms}[a${i}]`);
+    });
+    const filter = `${delayed.join(';')};${marks.map((_, i) => `[a${i}]`).join('')}` +
+      `amix=inputs=${marks.length}:normalize=0:dropout_transition=0,aresample=44100[mix]`;
+    execFileSync(FFMPEG, ['-y', '-i', silent, ...inputs,
+      '-filter_complex', filter, '-map', '0:v', '-map', '[mix]',
+      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k',
+      '-movflags', '+faststart', mp4], { stdio: 'ignore' });
+  } else {
+    fs.copyFileSync(silent, mp4);
+  }
+
   // Poster: the title card, fully faded in.
   execFileSync(FFMPEG, ['-y', '-ss', '3', '-i', mp4, '-frames:v', '1', '-q:v', '4',
     path.join(ASSETS, 'poster.jpg')], { stdio: 'ignore' });
   const mb = (fs.statSync(mp4).size / 1024 / 1024).toFixed(1);
-  console.log(`  ✓ tour.mp4 (${mb} MB) + poster.jpg`);
+  console.log(`  ✓ tour.mp4 (${mb} MB, ${narration && marks.length ? 'narrated' : 'silent'}) + poster.jpg`);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
