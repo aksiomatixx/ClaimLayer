@@ -53,3 +53,4 @@ coverage/
 supabase/.branches/
 supabase/.temp/
 supabase/.env
+frontend/.cache/

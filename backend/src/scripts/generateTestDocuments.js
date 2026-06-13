@@ -365,7 +365,13 @@ function declarationOfReadiness() {
   const today = dateDaysAgo(0);
   return {
     filename: `DOR-WCAB_${c.persona.last}_${c.claimNumber}.pdf`,
-    expected: { claim_number: c.claimNumber, claim_id: c.claimId, category: 'legal', routing: 'LEGAL_REVIEW' },
+    // routing accepts a set: counsel of record filing a DOR sometimes
+    // draws a representation_change signal from the model, and a 2-day
+    // HIGH representation review is a defensible disposition for it —
+    // both land the document in front of the right human on the same
+    // clock. Everything else stays a single-point assertion.
+    expected: { claim_number: c.claimNumber, claim_id: c.claimId, category: 'legal',
+                routing: ['LEGAL_REVIEW', 'REPRESENTATION_REVIEW'] },
     bytesPromise: buildPdf((w) => {
       w.letterhead('Workers\' Compensation Appeals Board — State of California',
         'Declaration of Readiness to Proceed (DWC-CA form 10250.1)',
@@ -383,6 +389,7 @@ function declarationOfReadiness() {
       w.checkbox(false, 'Need for further medical treatment');
       w.y -= 4;
       w.para(`Declarant states that a good-faith effort was made to resolve the disputed issues on claim ${c.claimNumber}, including written demand served 30 days before this filing, and that the QME panel process on the disputed body part is complete with the report served on the parties.`);
+      w.para('Filed by counsel of record for the applicant; the notice of representation was previously served and remains unchanged.', { size: 9.5 });
       w.para('Proof of service on all case participants is attached. Objections to this declaration must be filed within 10 days per 8 CCR §10744.');
       w.signature('Aaron Goldstein, Esq.', 'Attorney for Applicant', fmtDate(today));
     }),

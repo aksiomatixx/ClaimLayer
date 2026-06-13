@@ -482,18 +482,25 @@ async function _seedOneClaim(id, idx, plan, persona) {
     }
   }
 
-  // RFA if specified
+  // RFA if specified. A pending_adjuster_review RFA is seeded FRESH —
+  // received two days ago with the UR response clock still open —
+  // because a stale pending RFA would depict a blown §9792.9.1
+  // deadline, which the demo must never normalize.
   if (plan.rfa) {
+    const pending  = plan.rfa.decision === 'pending_adjuster_review';
+    const received = pending ? isoDaysAgo(2) : isoDaysAgo(Math.max(0, plan.daysAgo - 5));
     await supabase.from('rfas').insert({
       id:                   `rfa_demo_${idx + 1}`,
       claim_id:             id,
-      received_at:          isoDaysAgo(Math.max(0, plan.daysAgo - 5)),
-      requesting_physician: 'Dr. A. Demo',
+      received_at:          received,
+      requesting_physician: plan.rfa.physician || 'Dr. A. Demo',
       treatment_description: plan.rfa.desc,
       cpt_codes:            [plan.rfa.cpt],
+      urgency:              'routine',
       decision:             plan.rfa.decision,
-      decision_made_at:     plan.rfa.decision ? isoDaysAgo(Math.max(0, plan.daysAgo - 4)) : null,
-      created_at:           isoDaysAgo(Math.max(0, plan.daysAgo - 5)),
+      decision_made_at:     plan.rfa.decision === 'auto_approved' ? isoDaysAgo(Math.max(0, plan.daysAgo - 4)) : null,
+      response_due_at:      pending ? isoDaysAgo(-3) : null,
+      created_at:           received,
     });
   }
 

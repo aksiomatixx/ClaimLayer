@@ -64,16 +64,19 @@ async function main() {
         row.pass = routed === 'triage';
         row.note = `triage_reason=${document.triage_reason}`;
       } else {
+        // manifest routing may be a single diary type or an acceptable
+        // set, for documents where more than one disposition is policy.
+        const okRoutes = [].concat(f.routing);
         const checks = {
           category: document.category === f.category,
           claim:    document.claim_id === f.claim_id,
-          diary:    !!diary && diary.diary_type === f.routing,
+          diary:    !!diary && okRoutes.includes(diary.diary_type),
           filed:    routed === 'filed',
         };
         row.pass = Object.values(checks).every(Boolean);
         if (!row.pass) {
           row.note = Object.entries(checks).filter(([, ok]) => !ok)
-            .map(([k]) => `${k} mismatch (expected ${f[k === 'diary' ? 'routing' : k === 'claim' ? 'claim_id' : 'category']})`)
+            .map(([k]) => `${k} mismatch (expected ${k === 'diary' ? okRoutes.join(' | ') : f[k === 'claim' ? 'claim_id' : 'category']})`)
             .join('; ');
         }
       }

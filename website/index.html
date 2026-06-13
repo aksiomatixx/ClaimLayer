@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>ClaimLayer — an AI deployment case study by Akash Dixit</title>
-<meta name="description" content="A public case study in deploying AI agents into a regulated, deadline-driven insurance workflow — California workers' compensation. Built by Akash Dixit by directing Claude Code: guardrails enforced in code, every model call audited, a licensed human at every consequential decision."/>
+<meta name="description" content="A public case study in deploying AI agents into a regulated, deadline-driven insurance workflow — California workers' compensation. Built by Akash Dixit by directing Claude Code: guardrails enforced in code, model behavior eval-gated in CI with real calls, every model call audited, a licensed human at every consequential decision."/>
 <meta property="og:title" content="ClaimLayer — an AI deployment case study by Akash Dixit"/>
 <meta property="og:description" content="AI agents execute a regulated workers' comp workflow inside code-enforced guardrails, with a licensed human at every consequential decision. A full-stack reference implementation built by directing Claude Code."/>
 <meta property="og:image" content="https://claimlayer.org/assets/poster.jpg"/>
@@ -163,11 +163,11 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 
 <header class="hero" id="top"><div class="wrap">
   <h1>AI agents for workers' comp claims.<br/><em>A licensed human at every decision.</em></h1>
-  <p class="byline">A full-stack reference implementation built around California workers' compensation domain expertise — designed to demonstrate safe deployment of AI agents in regulated, deadline-driven workflows. Built by <a href="#about"><b>Akash Dixit</b></a>, by directing Claude Code.</p>
+  <p class="byline">A full-stack reference implementation built around California workers' compensation domain expertise — designed to demonstrate safe deployment of AI agents in regulated, deadline-driven workflows. Designed, built, and eval-gated solo by <a href="#about"><b>Akash Dixit</b></a> — a claims professional doing the AI deployment himself, by directing Claude Code.</p>
   <p>ClaimLayer is a regulatory-aware execution layer that runs Claude-powered agents on top of an existing claims system — drafting the analysis, applying the statutory math, generating the notices, and tracking the deadlines, inside guardrails enforced in code.</p>
   <div class="hero-cta">
     <a class="btn" href="demo/" target="_blank" rel="noopener">🖱 &nbsp;Launch the interactive demo</a>
-    <a class="btn" href="#video">▶ &nbsp;Watch the 5-minute tour</a>
+    <a class="btn" href="#video">▶ &nbsp;Watch the two-minute tour</a>
     <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">View source ↗</a>
   </div>
   <div class="chips">
@@ -175,13 +175,14 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="chip"><b>100%</b> of model calls audit-logged</div>
     <div class="chip"><b>0</b> auto-deny pathways — by construction</div>
     <div class="chip"><b>1,300+</b> automated tests, backend · frontend · schema contract</div>
+    <div class="chip"><b>13</b> golden documents — live-model eval gate in CI</div>
   </div>
 </div></header>
 
 <section id="video"><div class="wrap reveal">
   <div class="kicker">Product tour</div>
   <h2>See the whole claim lifecycle, end to end</h2>
-  <p class="sub" style="margin-bottom:38px">Narrated walkthrough captured live from the running application — from the first document to settlement, with the AI decision audit trail in between.</p>
+  <p class="sub" style="margin-bottom:38px">Narrated &amp; captioned walkthrough captured live from the running application — from the first document to settlement, with the AI decision audit trail in between.</p>
   <div class="video-frame">
     <video controls preload="metadata" poster="assets/poster.jpg">
       <source src="assets/tour.mp4" type="video/mp4"/>
@@ -194,10 +195,11 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 <section id="hiring"><div class="wrap reveal">
   <div class="kicker">About this case study</div>
   <h2>For hiring teams</h2>
-  <p class="sub">ClaimLayer is a public case study in deploying AI agents into a regulated, deadline-driven insurance workflow. It demonstrates how I translate domain expertise into product architecture, human-in-the-loop safeguards, audit trails, testable workflows, and AI-assisted software delivery.</p>
+  <p class="sub">ClaimLayer is a public case study in deploying AI agents into a regulated, deadline-driven insurance workflow. If you're hiring for AI deployment, forward-deployed engineering, or applied-AI roles, this is a working sample of that job: domain requirements translated into agent boundaries, guardrails enforced in code, model behavior eval-gated in CI, every call audited — shipped end to end by one person directing AI tooling.</p>
   <div class="feat">
     <div class="card"><div class="glyph">🏛️</div><h3>Regulated workflow design</h3><p>Designed regulated AI workflows for California workers' compensation claims — statutory deadlines, notices, benefits math, and audit obligations included.</p></div>
     <div class="card"><div class="glyph">🤝</div><h3>Agent boundaries</h3><p>Defined where the model stops: AI prepares the work; licensed humans make the consequential decisions — compensability, benefits, reserves, settlement.</p></div>
+    <div class="card"><div class="glyph">🧪</div><h3>Evals &amp; live-model CI</h3><p>A CI gate replays 13 golden claim documents through the production pipeline with real Claude calls — classification, claim matching, and action routing asserted on every run. A live run caught the model over-applying a signal; the fix ships as deterministic code, pinned by tests.</p></div>
     <div class="card"><div class="glyph">🧭</div><h3>AI-native delivery</h3><p>Directed Claude Code as the implementation partner while owning architecture, requirements, tests, and review.</p></div>
     <div class="card"><div class="glyph">🧱</div><h3>Full-stack build</h3><p>Built a full-stack demo on synthetic claims with statutory deadline logic, document intake, audit logs, and integration scaffolding.</p></div>
     <div class="card"><div class="glyph">🔍</div><h3>Review-driven hardening</h3><p>Hardened the project through review passes covering auth, migrations, stale approvals, idempotency, and public-copy truthfulness.</p></div>
@@ -269,6 +271,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="g-item"><span class="no">04</span><div><b>Statutory values are never model-generated</b><span>Rating schedules, fee schedules, and caps come from version-controlled DWC publications.</span></div></div>
     <div class="g-item"><span class="no">05</span><div><b>Penalty diaries cannot be snoozed</b><span>Statutory deadlines use the correct calendar/business-day basis per the governing code section.</span></div></div>
     <div class="g-item"><span class="no">06</span><div><b>Adversarially tested guardrails</b><span>The test suite actively tries to push agents past their bounds — and asserts the guardrails hold.</span></div></div>
+    <div class="g-item"><span class="no">07</span><div><b>Model behavior is regression-tested with real calls</b><span>A CI gate replays 13 golden documents through classification → claim match → action routing; a misroute fails the build.</span></div></div>
   </div>
   <p class="foot-note">Every model call is audit-logged — input snapshot, output, guardrails triggered, human-override status — queryable in the in-app Agents console. And everything here runs on synthetic demo data: ClaimLayer is a reference implementation with integration scaffolding, not a production system filing real notices.</p>
 </div></section>
@@ -325,8 +328,8 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <div class="about" style="margin-top:40px">
     <div>
       <p>I'm a California workers' compensation claims professional with a decade in the field. I designed, architected, and built ClaimLayer by directing Claude Code, Anthropic's AI coding agent. The hard part was never the keystrokes; it was knowing what to build, where the model must not be trusted, and how to make a regulated workflow safe.</p>
-      <p><b style="color:var(--text)">My role.</b> I defined the workflow, product requirements, agent boundaries, safety rules, statutory logic, demo dataset, acceptance criteria, and test expectations. I directed Claude Code as the implementation partner — reviewing outputs, correcting architecture, hardening edge cases, and iterating from code-review feedback. Domain architect, product lead, and QA reviewer on one head count.</p>
-      <p class="mono" style="font-size:12px;color:var(--muted)">Domain workflow design · AI agent boundary design · Human-in-the-loop decision architecture · Test &amp; acceptance criteria · Demo data &amp; product narrative · Review-driven hardening</p>
+      <p><b style="color:var(--text)">My role.</b> I defined the workflow, product requirements, agent boundaries, safety rules, statutory logic, demo dataset, acceptance criteria, and test expectations — including the eval gate that replays golden documents through the live model in CI. I directed Claude Code as the implementation partner — reviewing outputs, correcting architecture, hardening edge cases, and iterating from code-review feedback. Domain architect, product lead, and QA reviewer on one head count.</p>
+      <p class="mono" style="font-size:12px;color:var(--muted)">Domain workflow design · AI agent boundary design · Human-in-the-loop decision architecture · Model evals &amp; CI gating · Test &amp; acceptance criteria · Demo data &amp; product narrative · Review-driven hardening</p>
       <p>ClaimLayer is both an active project and a public worked example of a question I think matters: <b style="color:var(--text)">how do you get real leverage from AI agents in an environment where a wrong automated decision has legal consequences?</b> The answer it takes: agents execute, humans decide, code enforces the boundary, and everything is logged.</p>
       <p>The result is a concrete, reviewable artifact — prompts, guardrails, statutory math, and the full automated test suite (1,300+ tests), open for inspection on GitHub — showing how regulated AI deployment can be designed, tested, explained, and safely bounded.</p>
     </div>
@@ -336,6 +339,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
       <div class="fact"><span>AI</span><b>Anthropic Claude (6 agents)</b></div>
       <div class="fact"><span>Stack</span><b>Node / Express · React · PostgreSQL</b></div>
       <div class="fact"><span>Tests</span><b>1,300+ · backend, frontend, schema contract</b></div>
+      <div class="fact"><span>Evals</span><b>13 golden documents · live-model CI gate</b></div>
       <div class="fact"><span>Audit trail</span><b>Every model call, queryable</b></div>
       <div class="fact"><span>Status</span><b>Reference implementation · demo data</b></div>
       <div class="fact"><span>Source</span><b><a href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">github.com/aksiomatixx/ClaimLayer</a></b></div>
@@ -355,7 +359,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <div class="grid3" style="margin-top:44px">
     <div class="c-card"><b>📬 &nbsp;Email</b><span><a href="mailto:akashdixit@gmail.com">akashdixit@gmail.com</a></span></div>
     <div class="c-card"><b>💼 &nbsp;LinkedIn</b><span><a href="https://www.linkedin.com/in/akash-dixit-6835a522a" target="_blank" rel="noopener">linkedin.com/in/akash-dixit</a></span></div>
-    <div class="c-card"><b>🖱 &nbsp;Interactive demo</b><span><a href="demo/" target="_blank" rel="noopener">Launch it in your browser</a> — the real application on synthetic claims, no install, no keys. Prefer a guided walkthrough? Email me and I'll set one up.</span></div>
+    <div class="c-card"><b>🖱 &nbsp;Interactive demo</b><span><a href="demo/" target="_blank" rel="noopener">Launch it in your browser</a> — the real application, no install, no keys. A synthetic book spanning the whole lifecycle — intake, TD payments, MMI solicitation, PD rating, litigation, settlement — with every document openable as a real PDF. Prefer a guided walkthrough? Email me and I'll set one up.</span></div>
   </div>
 </div></section>
 
