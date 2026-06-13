@@ -1,6 +1,6 @@
 # California Workers' Compensation — Regulatory Constraints
 
-This document exists so that Matt understands **why** certain features are built the way they are, and which deadlines are statutory (enforced by law with penalties) versus operational (best practice). Every deadline in this document must be reflected in the diary engine.
+This document captures **why** certain features are built the way they are, and which deadlines are statutory (enforced by law with penalties) versus operational (best practice). Every deadline in this document is reflected in the diary engine.
 
 **When in doubt:** Escalate to Akash. Do not make assumptions about California WC law.
 

@@ -15,7 +15,7 @@
 - [ ] `.env.example` in root lists all required environment variables (no values)
 - [ ] `.gitignore` excludes `.env`, `node_modules`, `__pycache__`, build artifacts
 - [ ] Frontend scaffolded with Vite + React, existing JSX files committed to `frontend/src/`
-- [ ] Backend scaffolded (FastAPI or Express — Matt's choice, document the decision)
+- [ ] Backend scaffolded (Express / Node — chosen for a single-language stack with the React frontend)
 - [ ] GitHub Actions workflow: on PR → lint + type check; on merge to `main` → deploy
 - [ ] `staging` branch created, deploys to staging environment
 - [ ] README.md at root matches the file in `docs/`

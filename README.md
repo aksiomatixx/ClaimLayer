@@ -4,7 +4,7 @@
 
 # ClaimLayer
 
-**Compliance-grade agentic AI for workers' compensation claims**
+**Agentic AI for workers' compensation claims — deterministic guardrails, a licensed human at every decision.**
 
 A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.
 
@@ -16,15 +16,25 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 ## What this is
 
-ClaimLayer is a production-grade reference implementation of how to deploy AI agents into a highly regulated workflow — California workers' compensation claims — safely.
+ClaimLayer is a reference implementation of how to deploy AI agents into a highly regulated workflow — California workers' compensation claims — with the model boxed in by code rather than trusted. Five Claude agents draft compensability analyses, evaluate treatment authorizations, price settlements, and extract intake; a deterministic gate screens for Medicare interests. Each agent runs inside guardrails enforced in code, with a licensed human at every consequential decision and a queryable audit trail behind every model call. It runs on synthetic demo data — a worked example, not a live system (see [Status & scope](#status--scope)).
 
-A team of Claude-powered agents draft compensability analyses, evaluate treatment authorizations, price settlements, and screen for Medicare interests. Each agent operates inside guardrails enforced in code, with a licensed human at every consequential decision and a queryable audit trail behind every model call.
+**The hard problem it demonstrates:** how to get real leverage from LLM agents in a domain where a wrong automated decision has legal and financial consequences — which means deciding, concretely and in code, where the model must *not* be trusted, and proving those limits hold.
 
-It exists as both an active project and a public worked example of a question I think matters: how do you get real leverage from LLM agents in an environment where a wrong automated decision has legal consequences?
+## What I designed and own
+
+I'm a California workers' compensation claims professional with a decade in the field. I owned the work that makes this credible: the domain model and claim lifecycle, the product requirements, the system architecture, the agent boundaries and the deterministic guardrails, the eval design, the acceptance criteria, code review, and delivery. Claude Code accelerated the implementation; the judgment about what to build and where AI belongs is mine, and it's the substance on display here.
+
+## Reviewer path
+
+Three steps, ~90 seconds, to judge the work directly:
+
+1. **Try one prepared decision.** Open the [interactive demo](https://claimlayer.org/demo) → open any claim → **Complete action**. You'll see the dry-run of exactly what completing will do, with a required decision rationale, before anything commits.
+2. **Inspect one model call.** In the demo, open the **Agents** tab → open any decision. Every Claude call is logged with its inputs, outputs, confidence, and the guardrails it tripped.
+3. **Read the proof.** The [architecture writeup](docs/architecture.md); a guardrail enforced in code, not prompts ([`rfaService.js`](backend/src/services/rfaService.js) — no deny path); and the live-model eval gate ([`liveIngestionTest.js`](backend/src/scripts/liveIngestionTest.js), run by [this workflow](.github/workflows/live-ingestion-test.yml)).
 
 ## Why it's different
 
-Most AI in the claims space does prediction — scoring which claims are likely to be expensive, litigate, or go sideways. ClaimLayer does execution: it carries out the regulatory workflow itself — drafting the analysis, applying the statutory math, generating the notices, tracking the deadlines — inside compliance guardrails a licensed adjuster designed.
+Most AI in the claims space does prediction — scoring which claims are likely to be expensive, litigate, or go sideways. ClaimLayer does execution: it carries out the regulatory workflow itself — drafting the analysis, applying the statutory math, generating the notices, tracking the deadlines — inside guardrails a licensed adjuster designed and enforced in code.
 
 The deeper change is to the shape of the adjuster's day. Traditional adjusting is **reactive**: medical reports, work status reports, and legal documents arrive all day, and the job is to notice them, read them, file them, and work out what each one requires. ClaimLayer inverts that loop:
 
@@ -42,7 +52,7 @@ The wedge is agentic execution within hard regulatory limits, where every AI dec
 
 The system is a layer, not a replacement: it runs agentic workflows on top of a customer's retained system of record via a pluggable integration layer. ([Full architecture writeup →](docs/architecture.md) and an in-app `/architecture` view.)
 
-- **Six specialized agents** — compensability assessment, MTUS treatment authorization, C&R settlement pricing, MSA screening, voice-intake extraction, and inbound document classification — each with authored prompts, explicit invocation triggers, and bounded output schemas.
+- **Six specialized agents** — compensability assessment, MTUS treatment authorization, C&R settlement pricing, voice-intake extraction, and inbound document classification (Claude), plus a **deterministic** MSA screening gate (no model — Medicare eligibility is a threshold rule) — each with authored prompts, explicit invocation triggers, and bounded output schemas.
 - **Guardrails enforced in code** — not in prompts. The model cannot take certain actions regardless of what it returns (see below).
 - **Human-in-the-loop checkpoints** at every compensability, authorization, and settlement decision, backed by a licensed adjuster's judgment.
 - **Full AI decision audit trail** — every model call is logged with its input snapshot, output, guardrails triggered, and human-override status, surfaced in an in-app `/agents` review console.
@@ -51,9 +61,9 @@ The system is a layer, not a replacement: it runs agentic workflows on top of a 
 
 ## Engineering decisions that signal the intent
 
-These are the choices that make the system safe to point at a regulated workflow:
+These are the choices that show, in code, where the model is and isn't trusted. Guardrails live in the [service layer, not the prompts](backend/src/services/documentIngestionService.js) — the model cannot reach past them regardless of what it returns:
 
-- **No auto-deny pathway exists anywhere in the system.** On treatment authorizations, an agent may only return `auto_approve` or `physician_review` — never a denial. Denials are a licensed-human-only action by construction.
+- **No auto-deny pathway exists anywhere in the system.** On treatment authorizations, an agent may only return `auto_approve` or `physician_review` — never a denial ([`rfaService.js`](backend/src/services/rfaService.js)). Denials are a licensed-human-only action by construction.
 - **Reserve changes require a licensed adjuster's approval.** The AI may suggest reserves; nothing is written to the financial system of record until an adjuster approves it.
 - **A deterministic MSA screen gates every settlement** — Medicare-interest screening is not left to the model's discretion.
 - **Statutory values are never model-generated.** Rating schedules, fee schedules, and caps are sourced from authoritative DWC publications and version-controlled; the model reasons over them but never invents them.
@@ -64,13 +74,19 @@ These are the choices that make the system safe to point at a regulated workflow
 
 1,352 automated tests across 92 suites: 1,268 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
+Worth a reviewer's eye specifically:
+
+- **Live-model eval gate** — [`liveIngestionTest.js`](backend/src/scripts/liveIngestionTest.js), run in CI by [`live-ingestion-test.yml`](.github/workflows/live-ingestion-test.yml): 13 golden documents through the *real* classifier, asserting category, claim match, and routing on every run. It has already caught the model over-applying a signal — fixed deterministically in code.
+- **End-to-end document-to-action path** — [`document-to-action.e2e.test.js`](backend/tests/integration/document-to-action.e2e.test.js) walks arrival → classification → claim match → triage-or-file → action diary → write-back.
+- **Schema-contract test** — [`migration-contract-test.js`](backend/scripts/migration-contract-test.js) asserts every write shape the code performs against a schema built only from the migrations, so code and schema cannot silently drift.
+
 ## Tech stack
 
 Node.js / Express · React / Vite · PostgreSQL (Supabase) · Anthropic Claude API · server-side PDF generation (pdf-lib).
 
 ## How this was built
 
-Designed, architected, and built solo by directing Claude Code. I'm a workers' compensation claims professional with a decade in the field, not a career engineer — ClaimLayer is what domain expertise plus AI-assisted development can produce when the architecture, the regulatory constraints, and the judgment about where AI belongs come from someone who has lived inside the workflow. The hard part was never the keystrokes; it was knowing what to build, where the model must not be trusted, and how to make a regulated workflow safe.
+Built solo: I owned the domain model, architecture, agent boundaries, guardrails, eval design, acceptance criteria, review, and delivery (see [What I designed and own](#what-i-designed-and-own)); Claude Code accelerated the implementation. ClaimLayer is what a decade of claims domain expertise plus AI-assisted development produces when the architecture and the regulatory constraints come from someone who has lived inside the workflow.
 
 ## Status & scope
 
