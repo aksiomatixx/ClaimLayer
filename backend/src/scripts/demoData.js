@@ -146,12 +146,17 @@ const LIFECYCLE_PLANS = [
     aiCompensability: 'Likely Compensable', aiConfidence: 91,
     aiRedFlags: ['SUBROGATION_POTENTIAL — third-party vehicle involved'],
     subrogationStatus: 'under_evaluation',
-    rfa: { decision: null, cpt: '72141', desc: 'MRI cervical spine without contrast' },
+    // 'pending_adjuster_review' is the decision value the live agent
+    // writes when it routes to a human — it is what the RFA queue
+    // filters on, so the seeded queue shows one waiting decision.
+    rfa: { decision: 'pending_adjuster_review', cpt: '72141', desc: 'MRI cervical spine without contrast',
+           physician: 'Anita Krishnan, M.D.' },
     tdPeriods: [{ benefit_type: 'TTD', startOffset: 3, endOffset: null, reason_started: 'initial_disability' }],
     aiDecisions: [
       { type: 'compensability', tokens: { in: 800, out: 600 }, latency: 3500, daysOffset: 27, guardrails: [] },
-      // RFA still pending adjuster review — no human_decision yet
-      { type: 'rfa_mtus',       tokens: { in: 600, out: 400 }, latency: 2200, daysOffset: 23,
+      // RFA still pending adjuster review — no human_decision yet.
+      // daysOffset 2 matches the fresh seeded RFA (UR clock open).
+      { type: 'rfa_mtus',       tokens: { in: 600, out: 400 }, latency: 2200, daysOffset: 2,
         guardrails: [{ rule: 'no_auto_deny', triggered: false }],
         pendingHuman: true },
     ],

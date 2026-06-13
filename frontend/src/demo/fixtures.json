@@ -27,12 +27,12 @@
     "aww": 750.75,
     "tdRate": 500.5,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-06-11",
+    "dateOfInjury": "2026-06-12",
     "bodyPart": "Lumbar Spine / Lower Back",
     "injuryType": "Lifting Injury",
     "injuryDescription": "Felt sharp pain in lower back while transferring patient from bed to wheelchair.",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-06-11T23:39:14.999Z",
+    "filed_at": "2026-06-12T00:03:45.110Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -42,19 +42,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-06-11T23:39:14.999Z",
-    "updatedAt": "2026-06-11T23:39:14.999Z",
+    "createdAt": "2026-06-12T00:03:45.110Z",
+    "updatedAt": "2026-06-12T00:03:45.110Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-06-11T23:39:14.999Z",
+      "timestamp": "2026-06-12T00:03:45.110Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-06-11T23:39:14.999Z",
+      "timestamp": "2026-06-12T00:03:45.110Z",
       "data": {
        "aww": 750.75,
        "tdRate": 500.5
@@ -65,22 +65,22 @@
      {
       "diaryId": "diy_claim_demo_001_DWC1_ISSUE",
       "type": "DWC1_ISSUE",
-      "dueDate": "2026-06-13",
+      "dueDate": "2026-06-14",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Issue DWC-1 claim form",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.000Z"
+      "createdAt": "2026-06-13T00:03:45.110Z"
      },
      {
       "diaryId": "diy_claim_demo_001_DWC7_NOTICE",
       "type": "DWC7_NOTICE",
-      "dueDate": "2026-06-13",
+      "dueDate": "2026-06-14",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Mail DWC-7 notice of rights",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.000Z"
+      "createdAt": "2026-06-13T00:03:45.110Z"
      }
     ],
     "td_summary": {
@@ -115,12 +115,12 @@
     "aww": 1120,
     "tdRate": 746.67,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-06-09",
+    "dateOfInjury": "2026-06-10",
     "bodyPart": "Wrist / Hand",
     "injuryType": "Strain / Sprain",
     "injuryDescription": "Wrist pain after repetitive injection draws across long shift; gradual onset.",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-06-09T23:39:15.000Z",
+    "filed_at": "2026-06-10T00:03:45.111Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -130,19 +130,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-06-09T23:39:15.000Z",
-    "updatedAt": "2026-06-09T23:39:15.000Z",
+    "createdAt": "2026-06-10T00:03:45.111Z",
+    "updatedAt": "2026-06-10T00:03:45.111Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-06-09T23:39:15.000Z",
+      "timestamp": "2026-06-10T00:03:45.111Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-06-09T23:39:15.000Z",
+      "timestamp": "2026-06-10T00:03:45.111Z",
       "data": {
        "aww": 1120,
        "tdRate": 746.67
@@ -153,12 +153,12 @@
      {
       "diaryId": "diy_claim_demo_002_AI_ANALYSIS_PENDING",
       "type": "AI_ANALYSIS_PENDING",
-      "dueDate": "2026-06-12",
+      "dueDate": "2026-06-13",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "MEDIUM",
       "notes": "Run AI compensability analysis",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.000Z"
+      "createdAt": "2026-06-13T00:03:45.111Z"
      }
     ],
     "td_summary": {
@@ -193,12 +193,12 @@
     "aww": 621,
     "tdRate": 414,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-06-04",
+    "dateOfInjury": "2026-06-05",
     "bodyPart": "Shoulder",
     "injuryType": "Strain / Sprain",
     "injuryDescription": "Right shoulder pain reported next morning; no witnesses. Worker had a prior right shoulder injury resolved by stipulated award under linked claim HHW-2024-D09 (DOI 2024).",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-06-04T23:39:15.000Z",
+    "filed_at": "2026-06-05T00:03:45.111Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -225,19 +225,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-06-04T23:39:15.000Z",
-    "updatedAt": "2026-06-04T23:39:15.000Z",
+    "createdAt": "2026-06-05T00:03:45.111Z",
+    "updatedAt": "2026-06-05T00:03:45.111Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-06-04T23:39:15.000Z",
+      "timestamp": "2026-06-05T00:03:45.111Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-06-04T23:39:15.000Z",
+      "timestamp": "2026-06-05T00:03:45.111Z",
       "data": {
        "aww": 621,
        "tdRate": 414
@@ -245,7 +245,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-06-05T23:39:15.000Z",
+      "timestamp": "2026-06-06T00:03:45.111Z",
       "data": {
        "compensability": "Questionable",
        "compensabilityScore": 62,
@@ -267,9 +267,9 @@
      },
      {
       "type": "claim_linked",
-      "timestamp": "2026-06-12T23:39:15.007Z",
+      "timestamp": "2026-06-13T00:03:45.118Z",
       "data": {
-       "link_id": "clk_1781307555007_602b5b66",
+       "link_id": "clk_1781309025117_c761c70f",
        "linked_claim_id": "claim_demo_009",
        "relation_type": "prior_claim_same_worker",
        "note": "Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the HHW-2026-D03 investigation.",
@@ -281,12 +281,12 @@
      {
       "diaryId": "diy_claim_demo_003_COMPENSABILITY_NOTICE_DUE",
       "type": "COMPENSABILITY_NOTICE_DUE",
-      "dueDate": "2026-06-18",
+      "dueDate": "2026-06-19",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "CRITICAL",
       "notes": "Accept, deny, or delay within 14 calendar days of claim form receipt. A delay issues the delay notice and sets the final decision on the LC §5402 presumption date (90 calendar days from claim form receipt).",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.000Z"
+      "createdAt": "2026-06-13T00:03:45.111Z"
      }
     ],
     "td_summary": {
@@ -321,12 +321,12 @@
     "aww": 760.5,
     "tdRate": 507,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-05-25",
+    "dateOfInjury": "2026-05-26",
     "bodyPart": "Ankle / Foot",
     "injuryType": "Slip & Fall",
     "injuryDescription": "Rolled left ankle on exterior stairs leaving a patient home; accepted within the 14-day window. Off work per PTP; TTD running at the statutory rate.",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-05-25T23:39:15.003Z",
+    "filed_at": "2026-05-26T00:03:45.114Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -350,19 +350,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-05-25T23:39:15.003Z",
-    "updatedAt": "2026-05-25T23:39:15.003Z",
+    "createdAt": "2026-05-26T00:03:45.114Z",
+    "updatedAt": "2026-05-26T00:03:45.114Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-05-25T23:39:15.003Z",
+      "timestamp": "2026-05-26T00:03:45.114Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-05-25T23:39:15.003Z",
+      "timestamp": "2026-05-26T00:03:45.114Z",
       "data": {
        "aww": 760.5,
        "tdRate": 507
@@ -370,7 +370,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-05-26T23:39:15.003Z",
+      "timestamp": "2026-05-27T00:03:45.114Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 90,
@@ -392,22 +392,22 @@
      {
       "diaryId": "diy_claim_demo_010_TD_PAYMENT_REVIEW",
       "type": "TD_PAYMENT_REVIEW",
-      "dueDate": "2026-06-14",
+      "dueDate": "2026-06-15",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Biweekly TD payment due — confirm issuance within the LC §4650 window.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.003Z"
+      "createdAt": "2026-06-13T00:03:45.114Z"
      },
      {
       "diaryId": "diy_claim_demo_010_PR2_FOLLOW_UP",
       "type": "PR2_FOLLOW_UP",
-      "dueDate": "2026-06-22",
+      "dueDate": "2026-06-23",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "MEDIUM",
       "notes": "First PR-2 due from treating physician — confirm treatment trajectory.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.003Z"
+      "createdAt": "2026-06-13T00:03:45.114Z"
      }
     ],
     "td_summary": {
@@ -415,7 +415,7 @@
       "id": "tdp_demo_claim_demo_010_1",
       "benefit_type": "TTD",
       "weekly_rate": 507,
-      "start_date": "2026-05-28",
+      "start_date": "2026-05-29",
       "days_in": 16
      },
      "total_weeks_paid": 2.29,
@@ -423,7 +423,7 @@
      "periods_count": 1,
      "statutory_cap_weeks": 104,
      "weeks_remaining": 101.71,
-     "projected_exhaustion_date": "2028-05-23",
+     "projected_exhaustion_date": "2028-05-24",
      "suspension_reason_code_active": null
     }
    },
@@ -448,12 +448,12 @@
     "aww": 690,
     "tdRate": 460,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-05-22",
+    "dateOfInjury": "2026-05-23",
     "bodyPart": "Knee",
     "injuryType": "Slip & Fall",
     "injuryDescription": "Slipped on wet floor in patient bathroom; right knee twisted, immediate swelling.",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-05-22T23:39:15.001Z",
+    "filed_at": "2026-05-23T00:03:45.112Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -477,19 +477,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-05-22T23:39:15.001Z",
-    "updatedAt": "2026-05-22T23:39:15.001Z",
+    "createdAt": "2026-05-23T00:03:45.112Z",
+    "updatedAt": "2026-05-23T00:03:45.112Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-05-22T23:39:15.001Z",
+      "timestamp": "2026-05-23T00:03:45.112Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-05-22T23:39:15.001Z",
+      "timestamp": "2026-05-23T00:03:45.112Z",
       "data": {
        "aww": 690,
        "tdRate": 460
@@ -497,7 +497,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-05-23T23:39:15.001Z",
+      "timestamp": "2026-05-24T00:03:45.112Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 88,
@@ -519,22 +519,22 @@
      {
       "diaryId": "diy_claim_demo_004_PR2_FOLLOW_UP",
       "type": "PR2_FOLLOW_UP",
-      "dueDate": "2026-06-26",
+      "dueDate": "2026-06-27",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "MEDIUM",
       "notes": "Follow up on next PR-2 from treating physician",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.001Z"
+      "createdAt": "2026-06-13T00:03:45.112Z"
      },
      {
       "diaryId": "diy_claim_demo_004_TD_PAYMENT_REVIEW",
       "type": "TD_PAYMENT_REVIEW",
-      "dueDate": "2026-06-26",
+      "dueDate": "2026-06-27",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Confirm TD payment continuity",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.001Z"
+      "createdAt": "2026-06-13T00:03:45.112Z"
      },
      {
       "diaryId": "diy_demo_sup_due_today",
@@ -544,7 +544,7 @@
       "priority": "CRITICAL",
       "notes": "Biweekly TD payment review — due today (synthetic demo diary for the supervisor digest).",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.028Z"
+      "createdAt": "2026-06-13T00:03:45.139Z"
      }
     ],
     "td_summary": {
@@ -552,7 +552,7 @@
       "id": "tdp_demo_claim_demo_004_1",
       "benefit_type": "TTD",
       "weekly_rate": 460,
-      "start_date": "2026-05-25",
+      "start_date": "2026-05-26",
       "days_in": 19
      },
      "total_weeks_paid": 2.71,
@@ -560,7 +560,7 @@
      "periods_count": 1,
      "statutory_cap_weeks": 104,
      "weeks_remaining": 101.29,
-     "projected_exhaustion_date": "2028-05-21",
+     "projected_exhaustion_date": "2028-05-22",
      "suspension_reason_code_active": null
     }
    },
@@ -585,12 +585,12 @@
     "aww": 1480,
     "tdRate": 986.67,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-05-15",
+    "dateOfInjury": "2026-05-16",
     "bodyPart": "Cervical Spine / Neck",
     "injuryType": "Motor Vehicle",
     "injuryDescription": "Rear-ended while driving home health route; immediate neck stiffness, EMS evaluated on scene.",
     "employerName": "Westside Home Care Services",
-    "filed_at": "2026-05-15T23:39:15.001Z",
+    "filed_at": "2026-05-16T00:03:45.112Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -616,19 +616,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": "under_evaluation",
-    "createdAt": "2026-05-15T23:39:15.001Z",
-    "updatedAt": "2026-05-15T23:39:15.001Z",
+    "createdAt": "2026-05-16T00:03:45.112Z",
+    "updatedAt": "2026-05-16T00:03:45.112Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-05-15T23:39:15.001Z",
+      "timestamp": "2026-05-16T00:03:45.112Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-05-15T23:39:15.001Z",
+      "timestamp": "2026-05-16T00:03:45.112Z",
       "data": {
        "aww": 1480,
        "tdRate": 986.67
@@ -636,7 +636,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-05-16T23:39:15.001Z",
+      "timestamp": "2026-05-17T00:03:45.112Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 91,
@@ -660,22 +660,22 @@
      {
       "diaryId": "diy_claim_demo_005_PR2_FOLLOW_UP",
       "type": "PR2_FOLLOW_UP",
-      "dueDate": "2026-06-26",
+      "dueDate": "2026-06-27",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "MEDIUM",
       "notes": "Follow up on next PR-2 from treating physician",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.001Z"
+      "createdAt": "2026-06-13T00:03:45.112Z"
      },
      {
       "diaryId": "diy_claim_demo_005_TD_PAYMENT_REVIEW",
       "type": "TD_PAYMENT_REVIEW",
-      "dueDate": "2026-06-26",
+      "dueDate": "2026-06-27",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Confirm TD payment continuity",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.002Z"
+      "createdAt": "2026-06-13T00:03:45.112Z"
      },
      {
       "diaryId": "diy_demo_sup_overdue_1",
@@ -685,7 +685,7 @@
       "priority": "MEDIUM",
       "notes": "PR-2 follow-up — 3 days overdue (synthetic demo diary for the supervisor digest).",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.028Z"
+      "createdAt": "2026-06-13T00:03:45.139Z"
      }
     ],
     "td_summary": {
@@ -693,7 +693,7 @@
       "id": "tdp_demo_claim_demo_005_1",
       "benefit_type": "TTD",
       "weekly_rate": 986.67,
-      "start_date": "2026-05-18",
+      "start_date": "2026-05-19",
       "days_in": 26
      },
      "total_weeks_paid": 3.71,
@@ -701,7 +701,7 @@
      "periods_count": 1,
      "statutory_cap_weeks": 104,
      "weeks_remaining": 100.29,
-     "projected_exhaustion_date": "2028-05-14",
+     "projected_exhaustion_date": "2028-05-15",
      "suspension_reason_code_active": null
     }
    },
@@ -724,23 +724,23 @@
     },
     "aww": 765,
     "tdRate": 510,
-    "dateOfInjury": "2026-05-09",
+    "dateOfInjury": "2026-05-10",
     "bodyPart": "Knee",
     "injuryType": "Slip & Fall",
     "injuryDescription": "Slipped exiting patient bathroom; right knee twist + immediate swelling.",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-05-09T23:39:15.028Z",
+    "filed_at": "2026-05-10T00:03:45.139Z",
     "sourceSystem": "mock_legacy",
     "externalClaimId": "LEG-000",
     "syncStatus": "synced",
-    "lastSyncedAt": "2026-06-11T23:39:15.028Z",
+    "lastSyncedAt": "2026-06-12T00:03:45.139Z",
     "aiAnalysis": null,
     "priority": null,
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-05-09T23:39:15.028Z",
-    "updatedAt": "2026-06-11T23:39:15.028Z",
+    "createdAt": "2026-05-10T00:03:45.139Z",
+    "updatedAt": "2026-06-12T00:03:45.139Z",
     "events": [],
     "diaries": [],
     "td_summary": {
@@ -775,12 +775,12 @@
     "aww": 745.5,
     "tdRate": 497,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-04-26",
+    "dateOfInjury": "2026-04-27",
     "bodyPart": "Lumbar Spine / Lower Back",
     "injuryType": "Lifting Injury",
     "injuryDescription": "Lumbar strain from patient lift; conservative care; treating physician declared P&S last week.",
     "employerName": "Westside Home Care Services",
-    "filed_at": "2026-04-26T23:39:15.002Z",
+    "filed_at": "2026-04-27T00:03:45.113Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -804,19 +804,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-04-26T23:39:15.002Z",
-    "updatedAt": "2026-04-26T23:39:15.002Z",
+    "createdAt": "2026-04-27T00:03:45.113Z",
+    "updatedAt": "2026-04-27T00:03:45.113Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-04-26T23:39:15.002Z",
+      "timestamp": "2026-04-27T00:03:45.113Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-04-26T23:39:15.002Z",
+      "timestamp": "2026-04-27T00:03:45.113Z",
       "data": {
        "aww": 745.5,
        "tdRate": 497
@@ -824,7 +824,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-04-27T23:39:15.002Z",
+      "timestamp": "2026-04-28T00:03:45.113Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 86,
@@ -843,7 +843,7 @@
      },
      {
       "type": "p_and_s_recorded",
-      "timestamp": "2026-06-08T23:39:15.002Z",
+      "timestamp": "2026-06-09T00:03:45.113Z",
       "data": {
        "source": "pr2"
       }
@@ -853,12 +853,12 @@
      {
       "diaryId": "diy_claim_demo_006_PR4_SOLICITATION_DUE",
       "type": "PR4_SOLICITATION_DUE",
-      "dueDate": "2026-06-19",
+      "dueDate": "2026-06-20",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Solicit PR-4 from treating physician (LC §4061)",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.002Z"
+      "createdAt": "2026-06-13T00:03:45.113Z"
      },
      {
       "diaryId": "diy_demo_sup_overdue_2",
@@ -868,7 +868,7 @@
       "priority": "HIGH",
       "notes": "QME report review — 6 days overdue (synthetic demo diary for the supervisor digest).",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.028Z"
+      "createdAt": "2026-06-13T00:03:45.139Z"
      }
     ],
     "td_summary": {
@@ -903,12 +903,12 @@
     "aww": 605.25,
     "tdRate": 403.5,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-04-18",
+    "dateOfInjury": "2026-04-19",
     "bodyPart": "Shoulder",
     "injuryType": "Repetitive Motion",
     "injuryDescription": "Right shoulder impingement from repetitive overhead patient transfers; PR-4 received with WPI.",
     "employerName": "Westside Home Care Services",
-    "filed_at": "2026-04-18T23:39:15.002Z",
+    "filed_at": "2026-04-19T00:03:45.113Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -932,19 +932,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-04-18T23:39:15.002Z",
-    "updatedAt": "2026-04-18T23:39:15.002Z",
+    "createdAt": "2026-04-19T00:03:45.113Z",
+    "updatedAt": "2026-04-19T00:03:45.113Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-04-18T23:39:15.002Z",
+      "timestamp": "2026-04-19T00:03:45.113Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-04-18T23:39:15.002Z",
+      "timestamp": "2026-04-19T00:03:45.113Z",
       "data": {
        "aww": 605.25,
        "tdRate": 403.5
@@ -952,7 +952,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-04-19T23:39:15.002Z",
+      "timestamp": "2026-04-20T00:03:45.113Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 89,
@@ -971,7 +971,7 @@
      },
      {
       "type": "p_and_s_recorded",
-      "timestamp": "2026-05-31T23:39:15.002Z",
+      "timestamp": "2026-06-01T00:03:45.113Z",
       "data": {
        "source": "pr2"
       }
@@ -981,12 +981,12 @@
      {
       "diaryId": "diy_claim_demo_007_PD_ADVANCE_DUE",
       "type": "PD_ADVANCE_DUE",
-      "dueDate": "2026-06-26",
+      "dueDate": "2026-06-27",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "CRITICAL",
       "notes": "Initiate PD advance within 14 cal days of TD end (LC §4650(b))",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.002Z"
+      "createdAt": "2026-06-13T00:03:45.113Z"
      }
     ],
     "td_summary": {
@@ -1021,12 +1021,12 @@
     "aww": 1095,
     "tdRate": 730,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-04-13",
+    "dateOfInjury": "2026-04-14",
     "bodyPart": "Knee",
     "injuryType": "Slip & Fall",
     "injuryDescription": "Left knee meniscus tear from fall on stairs; surgery + PT; PD rated, C&R discussions opened.",
     "employerName": "Westside Home Care Services",
-    "filed_at": "2026-04-13T23:39:15.002Z",
+    "filed_at": "2026-04-14T00:03:45.113Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -1050,19 +1050,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-04-13T23:39:15.002Z",
-    "updatedAt": "2026-04-13T23:39:15.002Z",
+    "createdAt": "2026-04-14T00:03:45.113Z",
+    "updatedAt": "2026-04-14T00:03:45.113Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-04-13T23:39:15.002Z",
+      "timestamp": "2026-04-14T00:03:45.113Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-04-13T23:39:15.003Z",
+      "timestamp": "2026-04-14T00:03:45.113Z",
       "data": {
        "aww": 1095,
        "tdRate": 730
@@ -1070,7 +1070,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-04-14T23:39:15.003Z",
+      "timestamp": "2026-04-15T00:03:45.113Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 84,
@@ -1089,14 +1089,14 @@
      },
      {
       "type": "p_and_s_recorded",
-      "timestamp": "2026-05-25T23:39:15.003Z",
+      "timestamp": "2026-05-26T00:03:45.113Z",
       "data": {
        "source": "pr2"
       }
      },
      {
       "type": "cnr_priced",
-      "timestamp": "2026-06-11T23:39:15.003Z",
+      "timestamp": "2026-06-12T00:03:45.113Z",
       "data": {
        "stip": 21097.5,
        "cnr": 27500
@@ -1107,12 +1107,12 @@
      {
       "diaryId": "diy_claim_demo_008_CNR_OFFER_FOLLOWUP",
       "type": "CNR_OFFER_FOLLOWUP",
-      "dueDate": "2026-06-26",
+      "dueDate": "2026-06-27",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "MEDIUM",
       "notes": "Follow up on C&R offer with worker / attorney",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.003Z"
+      "createdAt": "2026-06-13T00:03:45.113Z"
      }
     ],
     "td_summary": {
@@ -1147,12 +1147,12 @@
     "aww": 1395,
     "tdRate": 930,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-03-09",
+    "dateOfInjury": "2026-03-10",
     "bodyPart": "Cervical Spine / Neck",
     "injuryType": "Strain / Sprain",
     "injuryDescription": "Cervical strain accepted; worker on modified duty. Applicant counsel filed an Application for Adjudication disputing a denied add-on right shoulder body part and the TD rate; QME panel process underway.",
     "employerName": "Westside Home Care Services",
-    "filed_at": "2026-03-09T23:39:15.004Z",
+    "filed_at": "2026-03-10T00:03:45.115Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -1179,19 +1179,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-03-09T23:39:15.004Z",
-    "updatedAt": "2026-03-09T23:39:15.004Z",
+    "createdAt": "2026-03-10T00:03:45.115Z",
+    "updatedAt": "2026-03-10T00:03:45.115Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-03-09T23:39:15.004Z",
+      "timestamp": "2026-03-10T00:03:45.115Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-03-09T23:39:15.004Z",
+      "timestamp": "2026-03-10T00:03:45.115Z",
       "data": {
        "aww": 1395,
        "tdRate": 930
@@ -1199,7 +1199,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-03-10T23:39:15.004Z",
+      "timestamp": "2026-03-11T00:03:45.115Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 83,
@@ -1224,22 +1224,22 @@
      {
       "diaryId": "diy_claim_demo_013_LEGAL_REVIEW",
       "type": "LEGAL_REVIEW",
-      "dueDate": "2026-06-17",
+      "dueDate": "2026-06-18",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "Review Application for Adjudication and prepare the MSC position with defense counsel.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.004Z"
+      "createdAt": "2026-06-13T00:03:45.115Z"
      },
      {
       "diaryId": "diy_claim_demo_013_QME_REPORT_REVIEW",
       "type": "QME_REPORT_REVIEW",
-      "dueDate": "2026-07-03",
+      "dueDate": "2026-07-04",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "MEDIUM",
       "notes": "QME evaluation pending on the disputed body part — calendar the report due date.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.004Z"
+      "createdAt": "2026-06-13T00:03:45.115Z"
      }
     ],
     "td_summary": {
@@ -1274,12 +1274,12 @@
     "aww": 1010,
     "tdRate": 673.33,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-02-20",
+    "dateOfInjury": "2026-02-21",
     "bodyPart": "Lumbar Spine / Lower Back",
     "injuryType": "Lifting Injury",
     "injuryDescription": "Lumbar strain from a patient lift; PT course complete and recent PR-2s read \"stable, at plateau.\" PR-4 solicited from the PTP — response pending; PD estimated on the reserve worksheet pending the rating.",
     "employerName": "Westside Home Care Services",
-    "filed_at": "2026-02-20T23:39:15.003Z",
+    "filed_at": "2026-02-21T00:03:45.114Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -1303,19 +1303,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-02-20T23:39:15.003Z",
-    "updatedAt": "2026-02-20T23:39:15.003Z",
+    "createdAt": "2026-02-21T00:03:45.114Z",
+    "updatedAt": "2026-02-21T00:03:45.114Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-02-20T23:39:15.003Z",
+      "timestamp": "2026-02-21T00:03:45.114Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-02-20T23:39:15.003Z",
+      "timestamp": "2026-02-21T00:03:45.114Z",
       "data": {
        "aww": 1010,
        "tdRate": 673.33
@@ -1323,7 +1323,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-02-21T23:39:15.003Z",
+      "timestamp": "2026-02-22T00:03:45.114Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 87,
@@ -1342,7 +1342,7 @@
      },
      {
       "type": "mmi_evaluated",
-      "timestamp": "2026-06-03T23:39:15.004Z",
+      "timestamp": "2026-06-04T00:03:45.114Z",
       "data": {
        "evaluationId": "bbbbbbbb-bbbb-4010-8bbb-000000000001",
        "recommendation": "solicit_pr4",
@@ -1352,11 +1352,11 @@
      },
      {
       "type": "pr4_solicited",
-      "timestamp": "2026-06-06T23:39:15.004Z",
+      "timestamp": "2026-06-07T00:03:45.114Z",
       "data": {
        "pr4Id": "cccccccc-cccc-4010-8ccc-000000000001",
        "physicianName": "Dr. Elena Vasquez, M.D.",
-       "responseDueDate": "2026-07-06",
+       "responseDueDate": "2026-07-07",
        "demo": true
       }
      }
@@ -1365,22 +1365,22 @@
      {
       "diaryId": "diy_claim_demo_011_PR4_RESPONSE_DUE",
       "type": "PR4_RESPONSE_DUE",
-      "dueDate": "2026-07-06",
+      "dueDate": "2026-07-07",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "PR-4 response due from Dr. Elena Vasquez, M.D. (30 calendar days from solicitation). Follow up if not received.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.003Z"
+      "createdAt": "2026-06-13T00:03:45.114Z"
      },
      {
       "diaryId": "diy_claim_demo_011_TD_PAYMENT_REVIEW",
       "type": "TD_PAYMENT_REVIEW",
-      "dueDate": "2026-06-19",
+      "dueDate": "2026-06-20",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "HIGH",
       "notes": "TTD continues pending the P&S determination — confirm payment continuity.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.003Z"
+      "createdAt": "2026-06-13T00:03:45.114Z"
      }
     ],
     "td_summary": {
@@ -1388,7 +1388,7 @@
       "id": "tdp_demo_claim_demo_011_1",
       "benefit_type": "TTD",
       "weekly_rate": 673.33,
-      "start_date": "2026-02-23",
+      "start_date": "2026-02-24",
       "days_in": 110
      },
      "total_weeks_paid": 15.71,
@@ -1396,7 +1396,7 @@
      "periods_count": 1,
      "statutory_cap_weeks": 104,
      "weeks_remaining": 88.29,
-     "projected_exhaustion_date": "2028-02-20",
+     "projected_exhaustion_date": "2028-02-21",
      "suspension_reason_code_active": null
     }
    },
@@ -1421,12 +1421,12 @@
     "aww": 665,
     "tdRate": 443.33,
     "weeksCalculated": 52,
-    "dateOfInjury": "2026-01-23",
+    "dateOfInjury": "2026-01-24",
     "bodyPart": "Wrist / Hand",
     "injuryType": "Repetitive Motion",
     "injuryDescription": "Right wrist De Quervain tenosynovitis from repetitive medication preps. Resolved by stipulated award with future medical open; RTW full duty, indemnity closed, PRN flare-up care continues.",
     "employerName": "BrightCare Home Health, Inc.",
-    "filed_at": "2026-01-23T23:39:15.004Z",
+    "filed_at": "2026-01-24T00:03:45.114Z",
     "sourceSystem": "native",
     "externalClaimId": null,
     "syncStatus": "native",
@@ -1450,19 +1450,19 @@
     "motorVehicleFields": null,
     "employerContests": false,
     "subrogationStatus": null,
-    "createdAt": "2026-01-23T23:39:15.004Z",
-    "updatedAt": "2026-01-23T23:39:15.004Z",
+    "createdAt": "2026-01-24T00:03:45.114Z",
+    "updatedAt": "2026-01-24T00:03:45.114Z",
     "events": [
      {
       "type": "claim_created",
-      "timestamp": "2026-01-23T23:39:15.004Z",
+      "timestamp": "2026-01-24T00:03:45.115Z",
       "data": {
        "source": "demo_seed"
       }
      },
      {
       "type": "adp_pull_complete",
-      "timestamp": "2026-01-23T23:39:15.004Z",
+      "timestamp": "2026-01-24T00:03:45.115Z",
       "data": {
        "aww": 665,
        "tdRate": 443.33
@@ -1470,7 +1470,7 @@
      },
      {
       "type": "ai_analysis_complete",
-      "timestamp": "2026-01-24T23:39:15.004Z",
+      "timestamp": "2026-01-25T00:03:45.115Z",
       "data": {
        "compensability": "Likely Compensable",
        "compensabilityScore": 92,
@@ -1492,12 +1492,12 @@
      {
       "diaryId": "diy_claim_demo_012_PR2_FOLLOW_UP",
       "type": "PR2_FOLLOW_UP",
-      "dueDate": "2026-07-12",
+      "dueDate": "2026-07-13",
       "assignedTo": "adjuster@claimlayer.example",
       "priority": "LOW",
       "notes": "Future-medical check-in — confirm continuing care remains related and necessary.",
       "status": "open",
-      "createdAt": "2026-06-12T23:39:15.004Z"
+      "createdAt": "2026-06-13T00:03:45.115Z"
      }
     ],
     "td_summary": {
@@ -1569,9 +1569,9 @@
      },
      {
       "type": "claim_linked",
-      "timestamp": "2026-06-12T23:39:15.007Z",
+      "timestamp": "2026-06-13T00:03:45.118Z",
       "data": {
-       "link_id": "clk_1781307555007_602b5b66",
+       "link_id": "clk_1781309025117_c761c70f",
        "linked_claim_id": "claim_demo_003",
        "relation_type": "prior_claim_same_worker",
        "note": "Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the HHW-2026-D03 investigation.",
@@ -1643,12 +1643,12 @@
   "aww": 750.75,
   "tdRate": 500.5,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-06-11",
+  "dateOfInjury": "2026-06-12",
   "bodyPart": "Lumbar Spine / Lower Back",
   "injuryType": "Lifting Injury",
   "injuryDescription": "Felt sharp pain in lower back while transferring patient from bed to wheelchair.",
   "employerName": "BrightCare Home Health, Inc.",
-  "filed_at": "2026-06-11T23:39:14.999Z",
+  "filed_at": "2026-06-12T00:03:45.110Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -1658,19 +1658,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-06-11T23:39:14.999Z",
-  "updatedAt": "2026-06-11T23:39:14.999Z",
+  "createdAt": "2026-06-12T00:03:45.110Z",
+  "updatedAt": "2026-06-12T00:03:45.110Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-06-11T23:39:14.999Z",
+    "timestamp": "2026-06-12T00:03:45.110Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-06-11T23:39:14.999Z",
+    "timestamp": "2026-06-12T00:03:45.110Z",
     "data": {
      "aww": 750.75,
      "tdRate": 500.5
@@ -1681,22 +1681,22 @@
    {
     "diaryId": "diy_claim_demo_001_DWC1_ISSUE",
     "type": "DWC1_ISSUE",
-    "dueDate": "2026-06-13",
+    "dueDate": "2026-06-14",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Issue DWC-1 claim form",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.110Z"
    },
    {
     "diaryId": "diy_claim_demo_001_DWC7_NOTICE",
     "type": "DWC7_NOTICE",
-    "dueDate": "2026-06-13",
+    "dueDate": "2026-06-14",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Mail DWC-7 notice of rights",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.110Z"
    }
   ]
  },
@@ -1705,22 +1705,22 @@
    {
     "diaryId": "diy_claim_demo_001_DWC1_ISSUE",
     "type": "DWC1_ISSUE",
-    "dueDate": "2026-06-13",
+    "dueDate": "2026-06-14",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Issue DWC-1 claim form",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.110Z"
    },
    {
     "diaryId": "diy_claim_demo_001_DWC7_NOTICE",
     "type": "DWC7_NOTICE",
-    "dueDate": "2026-06-13",
+    "dueDate": "2026-06-14",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Mail DWC-7 notice of rights",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.110Z"
    }
   ]
  },
@@ -1728,9 +1728,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_001_froi",
-    "created_at": "2026-06-11T23:39:15.000Z",
+    "created_at": "2026-06-12T00:03:45.110Z",
     "claim_id": "claim_demo_001",
-    "received_at": "2026-06-11T23:39:15.000Z",
+    "received_at": "2026-06-12T00:03:45.110Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -1755,8 +1755,8 @@
   "actions": [
    {
     "action": "Issue the DWC-1 claim form to the worker",
-    "why": "A new claim was reported on 2026-06-11. California requires the claim form to go out within one working day of notice (LC §5401).",
-    "due_date": "2026-06-13",
+    "why": "A new claim was reported on 2026-06-12. California requires the claim form to go out within one working day of notice (LC §5401).",
+    "due_date": "2026-06-14",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_001_DWC1_ISSUE",
     "document_ids": [
@@ -1766,7 +1766,7 @@
    {
     "action": "Mail the DWC-7 notice of rights",
     "why": "Every new claim triggers the notice-of-potential-eligibility requirement — it must be mailed with the claim form.",
-    "due_date": "2026-06-13",
+    "due_date": "2026-06-14",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_001_DWC7_NOTICE",
     "document_ids": []
@@ -1854,12 +1854,12 @@
   "aww": 1120,
   "tdRate": 746.67,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-06-09",
+  "dateOfInjury": "2026-06-10",
   "bodyPart": "Wrist / Hand",
   "injuryType": "Strain / Sprain",
   "injuryDescription": "Wrist pain after repetitive injection draws across long shift; gradual onset.",
   "employerName": "BrightCare Home Health, Inc.",
-  "filed_at": "2026-06-09T23:39:15.000Z",
+  "filed_at": "2026-06-10T00:03:45.111Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -1869,19 +1869,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-06-09T23:39:15.000Z",
-  "updatedAt": "2026-06-09T23:39:15.000Z",
+  "createdAt": "2026-06-10T00:03:45.111Z",
+  "updatedAt": "2026-06-10T00:03:45.111Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-06-09T23:39:15.000Z",
+    "timestamp": "2026-06-10T00:03:45.111Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-06-09T23:39:15.000Z",
+    "timestamp": "2026-06-10T00:03:45.111Z",
     "data": {
      "aww": 1120,
      "tdRate": 746.67
@@ -1892,12 +1892,12 @@
    {
     "diaryId": "diy_claim_demo_002_AI_ANALYSIS_PENDING",
     "type": "AI_ANALYSIS_PENDING",
-    "dueDate": "2026-06-12",
+    "dueDate": "2026-06-13",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Run AI compensability analysis",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.111Z"
    }
   ]
  },
@@ -1906,12 +1906,12 @@
    {
     "diaryId": "diy_claim_demo_002_AI_ANALYSIS_PENDING",
     "type": "AI_ANALYSIS_PENDING",
-    "dueDate": "2026-06-12",
+    "dueDate": "2026-06-13",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Run AI compensability analysis",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.111Z"
    }
   ]
  },
@@ -1919,9 +1919,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_002_intake_media",
-    "created_at": "2026-06-10T23:39:15.000Z",
+    "created_at": "2026-06-11T00:03:45.111Z",
     "claim_id": "claim_demo_002",
-    "received_at": "2026-06-10T23:39:15.000Z",
+    "received_at": "2026-06-11T00:03:45.111Z",
     "source": "employee_portal",
     "pages": 2,
     "status": "filed",
@@ -1939,9 +1939,9 @@
    },
    {
     "id": "doc_demo_claim_demo_002_froi",
-    "created_at": "2026-06-09T23:39:15.000Z",
+    "created_at": "2026-06-10T00:03:45.111Z",
     "claim_id": "claim_demo_002",
-    "received_at": "2026-06-09T23:39:15.000Z",
+    "received_at": "2026-06-10T00:03:45.111Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -1967,7 +1967,7 @@
    {
     "action": "Run the AI compensability analysis",
     "why": "Intake is complete. The compensability agent will draft the analysis, suggested reserves, and red flags for your review.",
-    "due_date": "2026-06-12",
+    "due_date": "2026-06-13",
     "priority": "MEDIUM",
     "diary_id": "diy_demo_claim_demo_002_AI_ANALYSIS_PENDING",
     "document_ids": [
@@ -2057,12 +2057,12 @@
   "aww": 621,
   "tdRate": 414,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-06-04",
+  "dateOfInjury": "2026-06-05",
   "bodyPart": "Shoulder",
   "injuryType": "Strain / Sprain",
   "injuryDescription": "Right shoulder pain reported next morning; no witnesses. Worker had a prior right shoulder injury resolved by stipulated award under linked claim HHW-2024-D09 (DOI 2024).",
   "employerName": "BrightCare Home Health, Inc.",
-  "filed_at": "2026-06-04T23:39:15.000Z",
+  "filed_at": "2026-06-05T00:03:45.111Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -2089,19 +2089,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-06-04T23:39:15.000Z",
-  "updatedAt": "2026-06-04T23:39:15.000Z",
+  "createdAt": "2026-06-05T00:03:45.111Z",
+  "updatedAt": "2026-06-05T00:03:45.111Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-06-04T23:39:15.000Z",
+    "timestamp": "2026-06-05T00:03:45.111Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-06-04T23:39:15.000Z",
+    "timestamp": "2026-06-05T00:03:45.111Z",
     "data": {
      "aww": 621,
      "tdRate": 414
@@ -2109,7 +2109,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-06-05T23:39:15.000Z",
+    "timestamp": "2026-06-06T00:03:45.111Z",
     "data": {
      "compensability": "Questionable",
      "compensabilityScore": 62,
@@ -2131,9 +2131,9 @@
    },
    {
     "type": "claim_linked",
-    "timestamp": "2026-06-12T23:39:15.007Z",
+    "timestamp": "2026-06-13T00:03:45.118Z",
     "data": {
-     "link_id": "clk_1781307555007_602b5b66",
+     "link_id": "clk_1781309025117_c761c70f",
      "linked_claim_id": "claim_demo_009",
      "relation_type": "prior_claim_same_worker",
      "note": "Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the HHW-2026-D03 investigation.",
@@ -2145,12 +2145,12 @@
    {
     "diaryId": "diy_claim_demo_003_COMPENSABILITY_NOTICE_DUE",
     "type": "COMPENSABILITY_NOTICE_DUE",
-    "dueDate": "2026-06-18",
+    "dueDate": "2026-06-19",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "CRITICAL",
     "notes": "Accept, deny, or delay within 14 calendar days of claim form receipt. A delay issues the delay notice and sets the final decision on the LC §5402 presumption date (90 calendar days from claim form receipt).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.111Z"
    }
   ]
  },
@@ -2159,12 +2159,12 @@
    {
     "diaryId": "diy_claim_demo_003_COMPENSABILITY_NOTICE_DUE",
     "type": "COMPENSABILITY_NOTICE_DUE",
-    "dueDate": "2026-06-18",
+    "dueDate": "2026-06-19",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "CRITICAL",
     "notes": "Accept, deny, or delay within 14 calendar days of claim form receipt. A delay issues the delay notice and sets the final decision on the LC §5402 presumption date (90 calendar days from claim form receipt).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.000Z"
+    "createdAt": "2026-06-13T00:03:45.111Z"
    }
   ]
  },
@@ -2172,9 +2172,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_003_med_initial",
-    "created_at": "2026-06-07T23:39:15.000Z",
+    "created_at": "2026-06-08T00:03:45.111Z",
     "claim_id": "claim_demo_003",
-    "received_at": "2026-06-07T23:39:15.000Z",
+    "received_at": "2026-06-08T00:03:45.111Z",
     "source": "provider",
     "pages": 6,
     "status": "filed",
@@ -2192,9 +2192,9 @@
    },
    {
     "id": "doc_demo_claim_demo_003_wage_stmt",
-    "created_at": "2026-06-06T23:39:15.000Z",
+    "created_at": "2026-06-07T00:03:45.111Z",
     "claim_id": "claim_demo_003",
-    "received_at": "2026-06-06T23:39:15.000Z",
+    "received_at": "2026-06-07T00:03:45.111Z",
     "source": "employer",
     "pages": 2,
     "status": "filed",
@@ -2212,9 +2212,9 @@
    },
    {
     "id": "doc_demo_claim_demo_003_froi",
-    "created_at": "2026-06-04T23:39:15.000Z",
+    "created_at": "2026-06-05T00:03:45.111Z",
     "claim_id": "claim_demo_003",
-    "received_at": "2026-06-04T23:39:15.000Z",
+    "received_at": "2026-06-05T00:03:45.111Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -2240,7 +2240,7 @@
    {
     "action": "Decide compensability — accept, deny, or delay",
     "why": "The claim form was received and the initial decision is due within 14 calendar days of receipt. Accept or deny resolves it now; a delay issues the delay notice and sets the final decision on the LC §5402 presumption date — 90 calendar days from claim form receipt. The AI assessment is \"Questionable\" at 62% confidence — the call is yours.",
-    "due_date": "2026-06-18",
+    "due_date": "2026-06-19",
     "priority": "CRITICAL",
     "diary_id": "diy_demo_claim_demo_003_COMPENSABILITY_NOTICE_DUE",
     "document_ids": [
@@ -2292,7 +2292,7 @@
    "medical": [
     {
      "id": "rli_demo_claim_demo_003_1",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.111Z",
      "claim_id": "claim_demo_003",
      "category": "medical",
      "label": "PTP office visits",
@@ -2303,11 +2303,11 @@
      "total": 1250,
      "basis_note": "PTP visits per PR-1 treatment plan (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.111Z"
     },
     {
      "id": "rli_demo_claim_demo_003_2",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.111Z",
      "claim_id": "claim_demo_003",
      "category": "medical",
      "label": "MRI — right shoulder",
@@ -2318,11 +2318,11 @@
      "total": 1400,
      "basis_note": "Ordered if symptoms persist past 4 weeks (synthetic demo estimate, not a fee-schedule figure)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.111Z"
     },
     {
      "id": "rli_demo_claim_demo_003_3",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.111Z",
      "claim_id": "claim_demo_003",
      "category": "medical",
      "label": "Physical therapy sessions",
@@ -2333,11 +2333,11 @@
      "total": 1500,
      "basis_note": "2x/week for 6 weeks per PR-1 plan (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.111Z"
     },
     {
      "id": "rli_demo_claim_demo_003_4",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.111Z",
      "claim_id": "claim_demo_003",
      "category": "medical",
      "label": "Pharmacy allowance",
@@ -2348,13 +2348,13 @@
      "total": 600,
      "basis_note": "NSAIDs + muscle relaxant course (synthetic demo allowance)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.111Z"
     }
    ],
    "indemnity": [
     {
      "id": "rli_demo_claim_demo_003_5",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.111Z",
      "claim_id": "claim_demo_003",
      "category": "indemnity",
      "label": "Temporary disability",
@@ -2365,11 +2365,11 @@
      "total": 2484,
      "basis_note": "Estimated 6 weeks TD at the claim TD rate (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.112Z"
     },
     {
      "id": "rli_demo_claim_demo_003_6",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.112Z",
      "claim_id": "claim_demo_003",
      "category": "indemnity",
      "label": "Estimated permanent disability",
@@ -2380,13 +2380,13 @@
      "total": 7500,
      "basis_note": "SYNTHETIC DEMO ESTIMATE — placeholder PD dollars pending rating; not a statutory or DEU figure",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.112Z"
     }
    ],
    "expense": [
     {
      "id": "rli_demo_claim_demo_003_7",
-     "created_at": "2026-06-12T23:39:15.001Z",
+     "created_at": "2026-06-13T00:03:45.112Z",
      "claim_id": "claim_demo_003",
      "category": "expense",
      "label": "Copy service / record retrieval",
@@ -2397,7 +2397,7 @@
      "total": 170,
      "basis_note": "Prior treatment records retrieval (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.001Z"
+     "updated_at": "2026-06-13T00:03:45.112Z"
     }
    ]
   },
@@ -2419,10 +2419,10 @@
  "GET /api/v1/claims/claim_demo_003/links": {
   "links": [
    {
-    "link_id": "clk_1781307555007_602b5b66",
+    "link_id": "clk_1781309025117_c761c70f",
     "relation_type": "prior_claim_same_worker",
     "note": "Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the HHW-2026-D03 investigation.",
-    "created_at": "2026-06-12T23:39:15.007Z",
+    "created_at": "2026-06-13T00:03:45.118Z",
     "linked_claim": {
      "id": "claim_demo_009",
      "claim_number": "HHW-2024-D09",
@@ -2454,12 +2454,12 @@
   "aww": 690,
   "tdRate": 460,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-05-22",
+  "dateOfInjury": "2026-05-23",
   "bodyPart": "Knee",
   "injuryType": "Slip & Fall",
   "injuryDescription": "Slipped on wet floor in patient bathroom; right knee twisted, immediate swelling.",
   "employerName": "BrightCare Home Health, Inc.",
-  "filed_at": "2026-05-22T23:39:15.001Z",
+  "filed_at": "2026-05-23T00:03:45.112Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -2483,19 +2483,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-05-22T23:39:15.001Z",
-  "updatedAt": "2026-05-22T23:39:15.001Z",
+  "createdAt": "2026-05-23T00:03:45.112Z",
+  "updatedAt": "2026-05-23T00:03:45.112Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-05-22T23:39:15.001Z",
+    "timestamp": "2026-05-23T00:03:45.112Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-05-22T23:39:15.001Z",
+    "timestamp": "2026-05-23T00:03:45.112Z",
     "data": {
      "aww": 690,
      "tdRate": 460
@@ -2503,7 +2503,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-05-23T23:39:15.001Z",
+    "timestamp": "2026-05-24T00:03:45.112Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 88,
@@ -2525,22 +2525,22 @@
    {
     "diaryId": "diy_claim_demo_004_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Follow up on next PR-2 from treating physician",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.001Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_claim_demo_004_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Confirm TD payment continuity",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.001Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_demo_sup_due_today",
@@ -2550,7 +2550,7 @@
     "priority": "CRITICAL",
     "notes": "Biweekly TD payment review — due today (synthetic demo diary for the supervisor digest).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.028Z"
+    "createdAt": "2026-06-13T00:03:45.139Z"
    }
   ]
  },
@@ -2559,22 +2559,22 @@
    {
     "diaryId": "diy_claim_demo_004_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Follow up on next PR-2 from treating physician",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.001Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_claim_demo_004_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Confirm TD payment continuity",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.001Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_demo_sup_due_today",
@@ -2584,7 +2584,7 @@
     "priority": "CRITICAL",
     "notes": "Biweekly TD payment review — due today (synthetic demo diary for the supervisor digest).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.028Z"
+    "createdAt": "2026-06-13T00:03:45.139Z"
    }
   ]
  },
@@ -2592,9 +2592,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_004_work_status",
-    "created_at": "2026-06-10T23:39:15.001Z",
+    "created_at": "2026-06-11T00:03:45.112Z",
     "claim_id": "claim_demo_004",
-    "received_at": "2026-06-10T23:39:15.001Z",
+    "received_at": "2026-06-11T00:03:45.112Z",
     "source": "provider",
     "pages": 1,
     "status": "filed",
@@ -2612,9 +2612,9 @@
    },
    {
     "id": "doc_demo_claim_demo_004_pr2",
-    "created_at": "2026-06-08T23:39:15.001Z",
+    "created_at": "2026-06-09T00:03:45.112Z",
     "claim_id": "claim_demo_004",
-    "received_at": "2026-06-08T23:39:15.001Z",
+    "received_at": "2026-06-09T00:03:45.112Z",
     "source": "provider",
     "pages": 4,
     "status": "filed",
@@ -2632,9 +2632,9 @@
    },
    {
     "id": "doc_demo_claim_demo_004_froi",
-    "created_at": "2026-05-22T23:39:15.001Z",
+    "created_at": "2026-05-23T00:03:45.112Z",
     "claim_id": "claim_demo_004",
-    "received_at": "2026-05-22T23:39:15.001Z",
+    "received_at": "2026-05-23T00:03:45.112Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -2671,7 +2671,7 @@
    {
     "action": "Pr2 follow up",
     "why": "Follow up on next PR-2 from treating physician",
-    "due_date": "2026-06-26",
+    "due_date": "2026-06-27",
     "priority": "MEDIUM",
     "diary_id": "diy_demo_claim_demo_004_PR2_FOLLOW_UP",
     "document_ids": []
@@ -2679,7 +2679,7 @@
    {
     "action": "Review the temporary disability payment",
     "why": "An active TD benefit is paying at $460/wk (two-thirds of AWW). Confirm work status before the next payment cycle to avoid an LC §4650 self-imposed penalty.",
-    "due_date": "2026-06-26",
+    "due_date": "2026-06-27",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_004_TD_PAYMENT_REVIEW",
     "document_ids": [
@@ -2693,10 +2693,10 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_004_1",
-    "created_at": "2026-05-25T23:39:15.001Z",
+    "created_at": "2026-05-26T00:03:45.112Z",
     "claim_id": "claim_demo_004",
     "benefit_type": "TTD",
-    "start_date": "2026-05-25",
+    "start_date": "2026-05-26",
     "end_date": null,
     "weekly_rate": 460,
     "reason_started": "initial_disability",
@@ -2705,7 +2705,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-05-25T23:39:15.001Z"
+    "updated_at": "2026-05-26T00:03:45.112Z"
    }
   ],
   "count": 1
@@ -2715,7 +2715,7 @@
    "id": "tdp_demo_claim_demo_004_1",
    "benefit_type": "TTD",
    "weekly_rate": 460,
-   "start_date": "2026-05-25",
+   "start_date": "2026-05-26",
    "days_in": 19
   },
   "total_weeks_paid": 2.71,
@@ -2723,7 +2723,7 @@
   "periods_count": 1,
   "statutory_cap_weeks": 104,
   "weeks_remaining": 101.29,
-  "projected_exhaustion_date": "2028-05-21",
+  "projected_exhaustion_date": "2028-05-22",
   "suspension_reason_code_active": null
  },
  "GET /api/v1/mmi/claim/claim_demo_004": {
@@ -2793,12 +2793,12 @@
   "aww": 1480,
   "tdRate": 986.67,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-05-15",
+  "dateOfInjury": "2026-05-16",
   "bodyPart": "Cervical Spine / Neck",
   "injuryType": "Motor Vehicle",
   "injuryDescription": "Rear-ended while driving home health route; immediate neck stiffness, EMS evaluated on scene.",
   "employerName": "Westside Home Care Services",
-  "filed_at": "2026-05-15T23:39:15.001Z",
+  "filed_at": "2026-05-16T00:03:45.112Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -2824,19 +2824,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": "under_evaluation",
-  "createdAt": "2026-05-15T23:39:15.001Z",
-  "updatedAt": "2026-05-15T23:39:15.001Z",
+  "createdAt": "2026-05-16T00:03:45.112Z",
+  "updatedAt": "2026-05-16T00:03:45.112Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-05-15T23:39:15.001Z",
+    "timestamp": "2026-05-16T00:03:45.112Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-05-15T23:39:15.001Z",
+    "timestamp": "2026-05-16T00:03:45.112Z",
     "data": {
      "aww": 1480,
      "tdRate": 986.67
@@ -2844,7 +2844,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-05-16T23:39:15.001Z",
+    "timestamp": "2026-05-17T00:03:45.112Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 91,
@@ -2868,22 +2868,22 @@
    {
     "diaryId": "diy_claim_demo_005_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Follow up on next PR-2 from treating physician",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.001Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_claim_demo_005_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Confirm TD payment continuity",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.002Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_demo_sup_overdue_1",
@@ -2893,7 +2893,7 @@
     "priority": "MEDIUM",
     "notes": "PR-2 follow-up — 3 days overdue (synthetic demo diary for the supervisor digest).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.028Z"
+    "createdAt": "2026-06-13T00:03:45.139Z"
    }
   ]
  },
@@ -2902,22 +2902,22 @@
    {
     "diaryId": "diy_claim_demo_005_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Follow up on next PR-2 from treating physician",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.001Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_claim_demo_005_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Confirm TD payment continuity",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.002Z"
+    "createdAt": "2026-06-13T00:03:45.112Z"
    },
    {
     "diaryId": "diy_demo_sup_overdue_1",
@@ -2927,7 +2927,7 @@
     "priority": "MEDIUM",
     "notes": "PR-2 follow-up — 3 days overdue (synthetic demo diary for the supervisor digest).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.028Z"
+    "createdAt": "2026-06-13T00:03:45.139Z"
    }
   ]
  },
@@ -2935,9 +2935,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_005_work_status",
-    "created_at": "2026-06-10T23:39:15.002Z",
+    "created_at": "2026-06-11T00:03:45.112Z",
     "claim_id": "claim_demo_005",
-    "received_at": "2026-06-10T23:39:15.002Z",
+    "received_at": "2026-06-11T00:03:45.112Z",
     "source": "provider",
     "pages": 1,
     "status": "filed",
@@ -2955,9 +2955,9 @@
    },
    {
     "id": "doc_demo_claim_demo_005_pr2",
-    "created_at": "2026-06-08T23:39:15.002Z",
+    "created_at": "2026-06-09T00:03:45.112Z",
     "claim_id": "claim_demo_005",
-    "received_at": "2026-06-08T23:39:15.002Z",
+    "received_at": "2026-06-09T00:03:45.112Z",
     "source": "provider",
     "pages": 4,
     "status": "filed",
@@ -2975,9 +2975,9 @@
    },
    {
     "id": "doc_demo_claim_demo_005_froi",
-    "created_at": "2026-05-15T23:39:15.002Z",
+    "created_at": "2026-05-16T00:03:45.112Z",
     "claim_id": "claim_demo_005",
-    "received_at": "2026-05-15T23:39:15.002Z",
+    "received_at": "2026-05-16T00:03:45.112Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -3011,7 +3011,7 @@
    {
     "action": "Pr2 follow up",
     "why": "Follow up on next PR-2 from treating physician",
-    "due_date": "2026-06-26",
+    "due_date": "2026-06-27",
     "priority": "MEDIUM",
     "diary_id": "diy_demo_claim_demo_005_PR2_FOLLOW_UP",
     "document_ids": []
@@ -3019,7 +3019,7 @@
    {
     "action": "Review the temporary disability payment",
     "why": "An active TD benefit is paying at $986.67/wk (two-thirds of AWW). Confirm work status before the next payment cycle to avoid an LC §4650 self-imposed penalty.",
-    "due_date": "2026-06-26",
+    "due_date": "2026-06-27",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_005_TD_PAYMENT_REVIEW",
     "document_ids": [
@@ -3033,10 +3033,10 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_005_1",
-    "created_at": "2026-05-18T23:39:15.002Z",
+    "created_at": "2026-05-19T00:03:45.112Z",
     "claim_id": "claim_demo_005",
     "benefit_type": "TTD",
-    "start_date": "2026-05-18",
+    "start_date": "2026-05-19",
     "end_date": null,
     "weekly_rate": 986.67,
     "reason_started": "initial_disability",
@@ -3045,7 +3045,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-05-18T23:39:15.002Z"
+    "updated_at": "2026-05-19T00:03:45.112Z"
    }
   ],
   "count": 1
@@ -3055,7 +3055,7 @@
    "id": "tdp_demo_claim_demo_005_1",
    "benefit_type": "TTD",
    "weekly_rate": 986.67,
-   "start_date": "2026-05-18",
+   "start_date": "2026-05-19",
    "days_in": 26
   },
   "total_weeks_paid": 3.71,
@@ -3063,7 +3063,7 @@
   "periods_count": 1,
   "statutory_cap_weeks": 104,
   "weeks_remaining": 100.29,
-  "projected_exhaustion_date": "2028-05-14",
+  "projected_exhaustion_date": "2028-05-15",
   "suspension_reason_code_active": null
  },
  "GET /api/v1/mmi/claim/claim_demo_005": {
@@ -3133,12 +3133,12 @@
   "aww": 745.5,
   "tdRate": 497,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-04-26",
+  "dateOfInjury": "2026-04-27",
   "bodyPart": "Lumbar Spine / Lower Back",
   "injuryType": "Lifting Injury",
   "injuryDescription": "Lumbar strain from patient lift; conservative care; treating physician declared P&S last week.",
   "employerName": "Westside Home Care Services",
-  "filed_at": "2026-04-26T23:39:15.002Z",
+  "filed_at": "2026-04-27T00:03:45.113Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -3162,19 +3162,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-04-26T23:39:15.002Z",
-  "updatedAt": "2026-04-26T23:39:15.002Z",
+  "createdAt": "2026-04-27T00:03:45.113Z",
+  "updatedAt": "2026-04-27T00:03:45.113Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-04-26T23:39:15.002Z",
+    "timestamp": "2026-04-27T00:03:45.113Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-04-26T23:39:15.002Z",
+    "timestamp": "2026-04-27T00:03:45.113Z",
     "data": {
      "aww": 745.5,
      "tdRate": 497
@@ -3182,7 +3182,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-04-27T23:39:15.002Z",
+    "timestamp": "2026-04-28T00:03:45.113Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 86,
@@ -3201,7 +3201,7 @@
    },
    {
     "type": "p_and_s_recorded",
-    "timestamp": "2026-06-08T23:39:15.002Z",
+    "timestamp": "2026-06-09T00:03:45.113Z",
     "data": {
      "source": "pr2"
     }
@@ -3211,12 +3211,12 @@
    {
     "diaryId": "diy_claim_demo_006_PR4_SOLICITATION_DUE",
     "type": "PR4_SOLICITATION_DUE",
-    "dueDate": "2026-06-19",
+    "dueDate": "2026-06-20",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Solicit PR-4 from treating physician (LC §4061)",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.002Z"
+    "createdAt": "2026-06-13T00:03:45.113Z"
    },
    {
     "diaryId": "diy_demo_sup_overdue_2",
@@ -3226,7 +3226,7 @@
     "priority": "HIGH",
     "notes": "QME report review — 6 days overdue (synthetic demo diary for the supervisor digest).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.028Z"
+    "createdAt": "2026-06-13T00:03:45.139Z"
    }
   ]
  },
@@ -3235,12 +3235,12 @@
    {
     "diaryId": "diy_claim_demo_006_PR4_SOLICITATION_DUE",
     "type": "PR4_SOLICITATION_DUE",
-    "dueDate": "2026-06-19",
+    "dueDate": "2026-06-20",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Solicit PR-4 from treating physician (LC §4061)",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.002Z"
+    "createdAt": "2026-06-13T00:03:45.113Z"
    },
    {
     "diaryId": "diy_demo_sup_overdue_2",
@@ -3250,7 +3250,7 @@
     "priority": "HIGH",
     "notes": "QME report review — 6 days overdue (synthetic demo diary for the supervisor digest).",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.028Z"
+    "createdAt": "2026-06-13T00:03:45.139Z"
    }
   ]
  },
@@ -3258,9 +3258,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_006_pr4",
-    "created_at": "2026-06-06T23:39:15.002Z",
+    "created_at": "2026-06-07T00:03:45.113Z",
     "claim_id": "claim_demo_006",
-    "received_at": "2026-06-06T23:39:15.002Z",
+    "received_at": "2026-06-07T00:03:45.113Z",
     "source": "provider",
     "pages": 9,
     "status": "filed",
@@ -3278,9 +3278,9 @@
    },
    {
     "id": "doc_demo_claim_demo_006_qme_panel",
-    "created_at": "2026-06-02T23:39:15.002Z",
+    "created_at": "2026-06-03T00:03:45.113Z",
     "claim_id": "claim_demo_006",
-    "received_at": "2026-06-02T23:39:15.002Z",
+    "received_at": "2026-06-03T00:03:45.113Z",
     "source": "dwc",
     "pages": 2,
     "status": "filed",
@@ -3298,9 +3298,9 @@
    },
    {
     "id": "doc_demo_claim_demo_006_froi",
-    "created_at": "2026-04-26T23:39:15.002Z",
+    "created_at": "2026-04-27T00:03:45.113Z",
     "claim_id": "claim_demo_006",
-    "received_at": "2026-04-26T23:39:15.002Z",
+    "received_at": "2026-04-27T00:03:45.113Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -3334,7 +3334,7 @@
    {
     "action": "Pr4 solicitation due",
     "why": "Solicit PR-4 from treating physician (LC §4061)",
-    "due_date": "2026-06-19",
+    "due_date": "2026-06-20",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_006_PR4_SOLICITATION_DUE",
     "document_ids": []
@@ -3345,11 +3345,11 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_006_1",
-    "created_at": "2026-04-29T23:39:15.002Z",
+    "created_at": "2026-04-30T00:03:45.113Z",
     "claim_id": "claim_demo_006",
     "benefit_type": "TTD",
-    "start_date": "2026-04-29",
-    "end_date": "2026-06-08",
+    "start_date": "2026-04-30",
+    "end_date": "2026-06-09",
     "weekly_rate": 497,
     "reason_started": "initial_disability",
     "reason_ended": "mmi_reached",
@@ -3357,7 +3357,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-04-29T23:39:15.002Z"
+    "updated_at": "2026-04-30T00:03:45.113Z"
    }
   ],
   "count": 1
@@ -3439,12 +3439,12 @@
   "aww": 605.25,
   "tdRate": 403.5,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-04-18",
+  "dateOfInjury": "2026-04-19",
   "bodyPart": "Shoulder",
   "injuryType": "Repetitive Motion",
   "injuryDescription": "Right shoulder impingement from repetitive overhead patient transfers; PR-4 received with WPI.",
   "employerName": "Westside Home Care Services",
-  "filed_at": "2026-04-18T23:39:15.002Z",
+  "filed_at": "2026-04-19T00:03:45.113Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -3468,19 +3468,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-04-18T23:39:15.002Z",
-  "updatedAt": "2026-04-18T23:39:15.002Z",
+  "createdAt": "2026-04-19T00:03:45.113Z",
+  "updatedAt": "2026-04-19T00:03:45.113Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-04-18T23:39:15.002Z",
+    "timestamp": "2026-04-19T00:03:45.113Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-04-18T23:39:15.002Z",
+    "timestamp": "2026-04-19T00:03:45.113Z",
     "data": {
      "aww": 605.25,
      "tdRate": 403.5
@@ -3488,7 +3488,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-04-19T23:39:15.002Z",
+    "timestamp": "2026-04-20T00:03:45.113Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 89,
@@ -3507,7 +3507,7 @@
    },
    {
     "type": "p_and_s_recorded",
-    "timestamp": "2026-05-31T23:39:15.002Z",
+    "timestamp": "2026-06-01T00:03:45.113Z",
     "data": {
      "source": "pr2"
     }
@@ -3517,12 +3517,12 @@
    {
     "diaryId": "diy_claim_demo_007_PD_ADVANCE_DUE",
     "type": "PD_ADVANCE_DUE",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "CRITICAL",
     "notes": "Initiate PD advance within 14 cal days of TD end (LC §4650(b))",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.002Z"
+    "createdAt": "2026-06-13T00:03:45.113Z"
    }
   ]
  },
@@ -3531,12 +3531,12 @@
    {
     "diaryId": "diy_claim_demo_007_PD_ADVANCE_DUE",
     "type": "PD_ADVANCE_DUE",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "CRITICAL",
     "notes": "Initiate PD advance within 14 cal days of TD end (LC §4650(b))",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.002Z"
+    "createdAt": "2026-06-13T00:03:45.113Z"
    }
   ]
  },
@@ -3544,9 +3544,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_007_pr4",
-    "created_at": "2026-06-06T23:39:15.002Z",
+    "created_at": "2026-06-07T00:03:45.113Z",
     "claim_id": "claim_demo_007",
-    "received_at": "2026-06-06T23:39:15.002Z",
+    "received_at": "2026-06-07T00:03:45.113Z",
     "source": "provider",
     "pages": 9,
     "status": "filed",
@@ -3564,9 +3564,9 @@
    },
    {
     "id": "doc_demo_claim_demo_007_qme_panel",
-    "created_at": "2026-06-02T23:39:15.002Z",
+    "created_at": "2026-06-03T00:03:45.113Z",
     "claim_id": "claim_demo_007",
-    "received_at": "2026-06-02T23:39:15.002Z",
+    "received_at": "2026-06-03T00:03:45.113Z",
     "source": "dwc",
     "pages": 2,
     "status": "filed",
@@ -3584,9 +3584,9 @@
    },
    {
     "id": "doc_demo_claim_demo_007_froi",
-    "created_at": "2026-04-18T23:39:15.002Z",
+    "created_at": "2026-04-19T00:03:45.113Z",
     "claim_id": "claim_demo_007",
-    "received_at": "2026-04-18T23:39:15.002Z",
+    "received_at": "2026-04-19T00:03:45.113Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -3612,7 +3612,7 @@
    {
     "action": "Start permanent disability advances",
     "why": "The claim is rated for permanent disability. PD is owed within 14 days of TD ending (LC §4650(b)).",
-    "due_date": "2026-06-26",
+    "due_date": "2026-06-27",
     "priority": "CRITICAL",
     "diary_id": "diy_demo_claim_demo_007_PD_ADVANCE_DUE",
     "document_ids": [
@@ -3626,11 +3626,11 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_007_2",
-    "created_at": "2026-05-19T23:39:15.002Z",
+    "created_at": "2026-05-20T00:03:45.113Z",
     "claim_id": "claim_demo_007",
     "benefit_type": "TPD",
-    "start_date": "2026-05-19",
-    "end_date": "2026-05-31",
+    "start_date": "2026-05-20",
+    "end_date": "2026-06-01",
     "weekly_rate": 242.1,
     "reason_started": "benefit_type_change",
     "reason_ended": "mmi_reached",
@@ -3638,15 +3638,15 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-05-19T23:39:15.002Z"
+    "updated_at": "2026-05-20T00:03:45.113Z"
    },
    {
     "id": "tdp_demo_claim_demo_007_1",
-    "created_at": "2026-04-21T23:39:15.002Z",
+    "created_at": "2026-04-22T00:03:45.113Z",
     "claim_id": "claim_demo_007",
     "benefit_type": "TTD",
-    "start_date": "2026-04-21",
-    "end_date": "2026-05-18",
+    "start_date": "2026-04-22",
+    "end_date": "2026-05-19",
     "weekly_rate": 403.5,
     "reason_started": "initial_disability",
     "reason_ended": "rtw_modified",
@@ -3654,7 +3654,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-04-21T23:39:15.002Z"
+    "updated_at": "2026-04-22T00:03:45.113Z"
    }
   ],
   "count": 2
@@ -3680,7 +3680,7 @@
  "GET /api/v1/pd/claim/claim_demo_007": {
   "pdEvaluation": {
    "id": "pdeval_demo_7",
-   "created_at": "2026-06-12T23:39:15.002Z",
+   "created_at": "2026-06-13T00:03:45.113Z",
    "claim_id": "claim_demo_007",
    "wpi": 10,
    "pd_percent": 16,
@@ -3690,7 +3690,7 @@
    "apportionment_percent": 0,
    "adjusted_pd_percent": 16,
    "adjusted_total_value": 13920,
-   "calculated_at": "2026-05-31T23:39:15.002Z"
+   "calculated_at": "2026-06-01T00:03:45.113Z"
   },
   "pdAdvances": [],
   "stipulation": null
@@ -3749,12 +3749,12 @@
   "aww": 1095,
   "tdRate": 730,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-04-13",
+  "dateOfInjury": "2026-04-14",
   "bodyPart": "Knee",
   "injuryType": "Slip & Fall",
   "injuryDescription": "Left knee meniscus tear from fall on stairs; surgery + PT; PD rated, C&R discussions opened.",
   "employerName": "Westside Home Care Services",
-  "filed_at": "2026-04-13T23:39:15.002Z",
+  "filed_at": "2026-04-14T00:03:45.113Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -3778,19 +3778,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-04-13T23:39:15.002Z",
-  "updatedAt": "2026-04-13T23:39:15.002Z",
+  "createdAt": "2026-04-14T00:03:45.113Z",
+  "updatedAt": "2026-04-14T00:03:45.113Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-04-13T23:39:15.002Z",
+    "timestamp": "2026-04-14T00:03:45.113Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-04-13T23:39:15.003Z",
+    "timestamp": "2026-04-14T00:03:45.113Z",
     "data": {
      "aww": 1095,
      "tdRate": 730
@@ -3798,7 +3798,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-04-14T23:39:15.003Z",
+    "timestamp": "2026-04-15T00:03:45.113Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 84,
@@ -3817,14 +3817,14 @@
    },
    {
     "type": "p_and_s_recorded",
-    "timestamp": "2026-05-25T23:39:15.003Z",
+    "timestamp": "2026-05-26T00:03:45.113Z",
     "data": {
      "source": "pr2"
     }
    },
    {
     "type": "cnr_priced",
-    "timestamp": "2026-06-11T23:39:15.003Z",
+    "timestamp": "2026-06-12T00:03:45.113Z",
     "data": {
      "stip": 21097.5,
      "cnr": 27500
@@ -3835,12 +3835,12 @@
    {
     "diaryId": "diy_claim_demo_008_CNR_OFFER_FOLLOWUP",
     "type": "CNR_OFFER_FOLLOWUP",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Follow up on C&R offer with worker / attorney",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.113Z"
    }
   ]
  },
@@ -3849,12 +3849,12 @@
    {
     "diaryId": "diy_claim_demo_008_CNR_OFFER_FOLLOWUP",
     "type": "CNR_OFFER_FOLLOWUP",
-    "dueDate": "2026-06-26",
+    "dueDate": "2026-06-27",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "Follow up on C&R offer with worker / attorney",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.113Z"
    }
   ]
  },
@@ -3862,9 +3862,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_008_cnr_draft",
-    "created_at": "2026-06-09T23:39:15.003Z",
+    "created_at": "2026-06-10T00:03:45.113Z",
     "claim_id": "claim_demo_008",
-    "received_at": "2026-06-09T23:39:15.003Z",
+    "received_at": "2026-06-10T00:03:45.113Z",
     "source": "internal",
     "pages": 12,
     "status": "filed",
@@ -3883,9 +3883,9 @@
    },
    {
     "id": "doc_demo_claim_demo_008_atty_letter",
-    "created_at": "2026-06-07T23:39:15.003Z",
+    "created_at": "2026-06-08T00:03:45.113Z",
     "claim_id": "claim_demo_008",
-    "received_at": "2026-06-07T23:39:15.003Z",
+    "received_at": "2026-06-08T00:03:45.113Z",
     "source": "attorney",
     "pages": 2,
     "status": "filed",
@@ -3903,9 +3903,9 @@
    },
    {
     "id": "doc_demo_claim_demo_008_pr4",
-    "created_at": "2026-05-31T23:39:15.003Z",
+    "created_at": "2026-06-01T00:03:45.113Z",
     "claim_id": "claim_demo_008",
-    "received_at": "2026-05-31T23:39:15.003Z",
+    "received_at": "2026-06-01T00:03:45.113Z",
     "source": "provider",
     "pages": 9,
     "status": "filed",
@@ -3923,9 +3923,9 @@
    },
    {
     "id": "doc_demo_claim_demo_008_froi",
-    "created_at": "2026-04-13T23:39:15.003Z",
+    "created_at": "2026-04-14T00:03:45.113Z",
     "claim_id": "claim_demo_008",
-    "received_at": "2026-04-13T23:39:15.003Z",
+    "received_at": "2026-04-14T00:03:45.113Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -3951,7 +3951,7 @@
    {
     "action": "Follow up on the C&R settlement offer",
     "why": "A Compromise & Release offer is outstanding. The pricing agent's valuation and the MSA screen are on file.",
-    "due_date": "2026-06-26",
+    "due_date": "2026-06-27",
     "priority": "MEDIUM",
     "diary_id": "diy_demo_claim_demo_008_CNR_OFFER_FOLLOWUP",
     "document_ids": [
@@ -3966,11 +3966,11 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_008_2",
-    "created_at": "2026-05-18T23:39:15.003Z",
+    "created_at": "2026-05-19T00:03:45.113Z",
     "claim_id": "claim_demo_008",
     "benefit_type": "TTD",
-    "start_date": "2026-05-18",
-    "end_date": "2026-05-25",
+    "start_date": "2026-05-19",
+    "end_date": "2026-05-26",
     "weekly_rate": 730,
     "reason_started": "reinstatement",
     "reason_ended": "mmi_reached",
@@ -3978,15 +3978,15 @@
     "reinstated_from_period_id": "tdp_demo_claim_demo_008_1",
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-05-18T23:39:15.003Z"
+    "updated_at": "2026-05-19T00:03:45.113Z"
    },
    {
     "id": "tdp_demo_claim_demo_008_1",
-    "created_at": "2026-04-16T23:39:15.003Z",
+    "created_at": "2026-04-17T00:03:45.113Z",
     "claim_id": "claim_demo_008",
     "benefit_type": "TTD",
-    "start_date": "2026-04-16",
-    "end_date": "2026-05-08",
+    "start_date": "2026-04-17",
+    "end_date": "2026-05-09",
     "weekly_rate": 730,
     "reason_started": "initial_disability",
     "reason_ended": "rtw_full",
@@ -3994,7 +3994,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-04-16T23:39:15.003Z"
+    "updated_at": "2026-04-17T00:03:45.113Z"
    }
   ],
   "count": 2
@@ -4020,7 +4020,7 @@
  "GET /api/v1/pd/claim/claim_demo_008": {
   "pdEvaluation": {
    "id": "pdeval_demo_8",
-   "created_at": "2026-06-12T23:39:15.003Z",
+   "created_at": "2026-06-13T00:03:45.113Z",
    "claim_id": "claim_demo_008",
    "wpi": 15,
    "pd_percent": 24,
@@ -4030,7 +4030,7 @@
    "apportionment_percent": 0,
    "adjusted_pd_percent": 24,
    "adjusted_total_value": 21097.5,
-   "calculated_at": "2026-05-25T23:39:15.003Z"
+   "calculated_at": "2026-05-26T00:03:45.113Z"
   },
   "pdAdvances": [],
   "stipulation": null
@@ -4126,9 +4126,9 @@
    },
    {
     "type": "claim_linked",
-    "timestamp": "2026-06-12T23:39:15.007Z",
+    "timestamp": "2026-06-13T00:03:45.118Z",
     "data": {
-     "link_id": "clk_1781307555007_602b5b66",
+     "link_id": "clk_1781309025117_c761c70f",
      "linked_claim_id": "claim_demo_003",
      "relation_type": "prior_claim_same_worker",
      "note": "Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the HHW-2026-D03 investigation.",
@@ -4304,7 +4304,7 @@
    "medical": [
     {
      "id": "rli_demo_claim_demo_009_1",
-     "created_at": "2026-06-12T23:39:15.005Z",
+     "created_at": "2026-06-13T00:03:45.117Z",
      "claim_id": "claim_demo_009",
      "category": "medical",
      "label": "PTP visits (final)",
@@ -4315,11 +4315,11 @@
      "total": 1440,
      "basis_note": "Actual visits billed through claim closure (synthetic demo figure)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.005Z"
+     "updated_at": "2026-06-13T00:03:45.117Z"
     },
     {
      "id": "rli_demo_claim_demo_009_2",
-     "created_at": "2026-06-12T23:39:15.005Z",
+     "created_at": "2026-06-13T00:03:45.117Z",
      "claim_id": "claim_demo_009",
      "category": "medical",
      "label": "Physical therapy (final)",
@@ -4330,13 +4330,13 @@
      "total": 1200,
      "basis_note": "Completed PT course (synthetic demo figure)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.005Z"
+     "updated_at": "2026-06-13T00:03:45.117Z"
     }
    ],
    "indemnity": [
     {
      "id": "rli_demo_claim_demo_009_3",
-     "created_at": "2026-06-12T23:39:15.005Z",
+     "created_at": "2026-06-13T00:03:45.117Z",
      "claim_id": "claim_demo_009",
      "category": "indemnity",
      "label": "Temporary disability (paid)",
@@ -4347,11 +4347,11 @@
      "total": 1966.65,
      "basis_note": "5 weeks TD actually paid at the 2024 claim rate (synthetic demo figure)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.005Z"
+     "updated_at": "2026-06-13T00:03:45.117Z"
     },
     {
      "id": "rli_demo_claim_demo_009_4",
-     "created_at": "2026-06-12T23:39:15.005Z",
+     "created_at": "2026-06-13T00:03:45.117Z",
      "claim_id": "claim_demo_009",
      "category": "indemnity",
      "label": "PD per stipulated award",
@@ -4362,13 +4362,13 @@
      "total": 6960,
      "basis_note": "SYNTHETIC DEMO FIGURE — 8% PD per the approved stipulation; not a DEU calculation",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.005Z"
+     "updated_at": "2026-06-13T00:03:45.117Z"
     }
    ],
    "expense": [
     {
      "id": "rli_demo_claim_demo_009_5",
-     "created_at": "2026-06-12T23:39:15.005Z",
+     "created_at": "2026-06-13T00:03:45.117Z",
      "claim_id": "claim_demo_009",
      "category": "expense",
      "label": "Copy service / filing",
@@ -4379,7 +4379,7 @@
      "total": 140,
      "basis_note": "EAMS filing + records (synthetic demo figure)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.005Z"
+     "updated_at": "2026-06-13T00:03:45.117Z"
     }
    ]
   },
@@ -4408,14 +4408,14 @@
  "GET /api/v1/claims/claim_demo_009/links": {
   "links": [
    {
-    "link_id": "clk_1781307555007_602b5b66",
+    "link_id": "clk_1781309025117_c761c70f",
     "relation_type": "prior_claim_same_worker",
     "note": "Same worker (DEMO-3). 2024 right shoulder strain resolved by stipulated award; compare PR-1 findings against the HHW-2026-D03 investigation.",
-    "created_at": "2026-06-12T23:39:15.007Z",
+    "created_at": "2026-06-13T00:03:45.118Z",
     "linked_claim": {
      "id": "claim_demo_003",
      "claim_number": "HHW-2026-D03",
-     "date_of_injury": "2026-06-04",
+     "date_of_injury": "2026-06-05",
      "body_part": "Shoulder",
      "status": "under_investigation"
     }
@@ -4443,12 +4443,12 @@
   "aww": 760.5,
   "tdRate": 507,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-05-25",
+  "dateOfInjury": "2026-05-26",
   "bodyPart": "Ankle / Foot",
   "injuryType": "Slip & Fall",
   "injuryDescription": "Rolled left ankle on exterior stairs leaving a patient home; accepted within the 14-day window. Off work per PTP; TTD running at the statutory rate.",
   "employerName": "BrightCare Home Health, Inc.",
-  "filed_at": "2026-05-25T23:39:15.003Z",
+  "filed_at": "2026-05-26T00:03:45.114Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -4472,19 +4472,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-05-25T23:39:15.003Z",
-  "updatedAt": "2026-05-25T23:39:15.003Z",
+  "createdAt": "2026-05-26T00:03:45.114Z",
+  "updatedAt": "2026-05-26T00:03:45.114Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-05-25T23:39:15.003Z",
+    "timestamp": "2026-05-26T00:03:45.114Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-05-25T23:39:15.003Z",
+    "timestamp": "2026-05-26T00:03:45.114Z",
     "data": {
      "aww": 760.5,
      "tdRate": 507
@@ -4492,7 +4492,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-05-26T23:39:15.003Z",
+    "timestamp": "2026-05-27T00:03:45.114Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 90,
@@ -4514,22 +4514,22 @@
    {
     "diaryId": "diy_claim_demo_010_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-14",
+    "dueDate": "2026-06-15",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Biweekly TD payment due — confirm issuance within the LC §4650 window.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    },
    {
     "diaryId": "diy_claim_demo_010_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-06-22",
+    "dueDate": "2026-06-23",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "First PR-2 due from treating physician — confirm treatment trajectory.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    }
   ]
  },
@@ -4538,22 +4538,22 @@
    {
     "diaryId": "diy_claim_demo_010_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-14",
+    "dueDate": "2026-06-15",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Biweekly TD payment due — confirm issuance within the LC §4650 window.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    },
    {
     "diaryId": "diy_claim_demo_010_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-06-22",
+    "dueDate": "2026-06-23",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "First PR-2 due from treating physician — confirm treatment trajectory.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    }
   ]
  },
@@ -4561,9 +4561,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_010_pr1",
-    "created_at": "2026-05-29T23:39:15.003Z",
+    "created_at": "2026-05-30T00:03:45.114Z",
     "claim_id": "claim_demo_010",
-    "received_at": "2026-05-29T23:39:15.003Z",
+    "received_at": "2026-05-30T00:03:45.114Z",
     "source": "provider",
     "pages": 5,
     "status": "filed",
@@ -4581,9 +4581,9 @@
    },
    {
     "id": "doc_demo_claim_demo_010_work_status",
-    "created_at": "2026-05-29T23:39:15.003Z",
+    "created_at": "2026-05-30T00:03:45.114Z",
     "claim_id": "claim_demo_010",
-    "received_at": "2026-05-29T23:39:15.003Z",
+    "received_at": "2026-05-30T00:03:45.114Z",
     "source": "provider",
     "pages": 1,
     "status": "filed",
@@ -4601,9 +4601,9 @@
    },
    {
     "id": "doc_demo_claim_demo_010_froi",
-    "created_at": "2026-05-25T23:39:15.003Z",
+    "created_at": "2026-05-26T00:03:45.114Z",
     "claim_id": "claim_demo_010",
-    "received_at": "2026-05-25T23:39:15.003Z",
+    "received_at": "2026-05-26T00:03:45.114Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -4629,7 +4629,7 @@
    {
     "action": "Review the temporary disability payment",
     "why": "An active TD benefit is paying at $507/wk (two-thirds of AWW). Confirm work status before the next payment cycle to avoid an LC §4650 self-imposed penalty.",
-    "due_date": "2026-06-14",
+    "due_date": "2026-06-15",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_010_TD_PAYMENT_REVIEW",
     "document_ids": [
@@ -4639,7 +4639,7 @@
    {
     "action": "Pr2 follow up",
     "why": "First PR-2 due from treating physician — confirm treatment trajectory.",
-    "due_date": "2026-06-22",
+    "due_date": "2026-06-23",
     "priority": "MEDIUM",
     "diary_id": "diy_demo_claim_demo_010_PR2_FOLLOW_UP",
     "document_ids": [
@@ -4652,10 +4652,10 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_010_1",
-    "created_at": "2026-05-28T23:39:15.003Z",
+    "created_at": "2026-05-29T00:03:45.114Z",
     "claim_id": "claim_demo_010",
     "benefit_type": "TTD",
-    "start_date": "2026-05-28",
+    "start_date": "2026-05-29",
     "end_date": null,
     "weekly_rate": 507,
     "reason_started": "initial_disability",
@@ -4664,7 +4664,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-05-28T23:39:15.003Z"
+    "updated_at": "2026-05-29T00:03:45.114Z"
    }
   ],
   "count": 1
@@ -4674,7 +4674,7 @@
    "id": "tdp_demo_claim_demo_010_1",
    "benefit_type": "TTD",
    "weekly_rate": 507,
-   "start_date": "2026-05-28",
+   "start_date": "2026-05-29",
    "days_in": 16
   },
   "total_weeks_paid": 2.29,
@@ -4682,7 +4682,7 @@
   "periods_count": 1,
   "statutory_cap_weeks": 104,
   "weeks_remaining": 101.71,
-  "projected_exhaustion_date": "2028-05-23",
+  "projected_exhaustion_date": "2028-05-24",
   "suspension_reason_code_active": null
  },
  "GET /api/v1/mmi/claim/claim_demo_010": {
@@ -4752,12 +4752,12 @@
   "aww": 1010,
   "tdRate": 673.33,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-02-20",
+  "dateOfInjury": "2026-02-21",
   "bodyPart": "Lumbar Spine / Lower Back",
   "injuryType": "Lifting Injury",
   "injuryDescription": "Lumbar strain from a patient lift; PT course complete and recent PR-2s read \"stable, at plateau.\" PR-4 solicited from the PTP — response pending; PD estimated on the reserve worksheet pending the rating.",
   "employerName": "Westside Home Care Services",
-  "filed_at": "2026-02-20T23:39:15.003Z",
+  "filed_at": "2026-02-21T00:03:45.114Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -4781,19 +4781,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-02-20T23:39:15.003Z",
-  "updatedAt": "2026-02-20T23:39:15.003Z",
+  "createdAt": "2026-02-21T00:03:45.114Z",
+  "updatedAt": "2026-02-21T00:03:45.114Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-02-20T23:39:15.003Z",
+    "timestamp": "2026-02-21T00:03:45.114Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-02-20T23:39:15.003Z",
+    "timestamp": "2026-02-21T00:03:45.114Z",
     "data": {
      "aww": 1010,
      "tdRate": 673.33
@@ -4801,7 +4801,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-02-21T23:39:15.003Z",
+    "timestamp": "2026-02-22T00:03:45.114Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 87,
@@ -4820,7 +4820,7 @@
    },
    {
     "type": "mmi_evaluated",
-    "timestamp": "2026-06-03T23:39:15.004Z",
+    "timestamp": "2026-06-04T00:03:45.114Z",
     "data": {
      "evaluationId": "bbbbbbbb-bbbb-4010-8bbb-000000000001",
      "recommendation": "solicit_pr4",
@@ -4830,11 +4830,11 @@
    },
    {
     "type": "pr4_solicited",
-    "timestamp": "2026-06-06T23:39:15.004Z",
+    "timestamp": "2026-06-07T00:03:45.114Z",
     "data": {
      "pr4Id": "cccccccc-cccc-4010-8ccc-000000000001",
      "physicianName": "Dr. Elena Vasquez, M.D.",
-     "responseDueDate": "2026-07-06",
+     "responseDueDate": "2026-07-07",
      "demo": true
     }
    }
@@ -4843,22 +4843,22 @@
    {
     "diaryId": "diy_claim_demo_011_PR4_RESPONSE_DUE",
     "type": "PR4_RESPONSE_DUE",
-    "dueDate": "2026-07-06",
+    "dueDate": "2026-07-07",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "PR-4 response due from Dr. Elena Vasquez, M.D. (30 calendar days from solicitation). Follow up if not received.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    },
    {
     "diaryId": "diy_claim_demo_011_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-19",
+    "dueDate": "2026-06-20",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "TTD continues pending the P&S determination — confirm payment continuity.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    }
   ]
  },
@@ -4867,22 +4867,22 @@
    {
     "diaryId": "diy_claim_demo_011_PR4_RESPONSE_DUE",
     "type": "PR4_RESPONSE_DUE",
-    "dueDate": "2026-07-06",
+    "dueDate": "2026-07-07",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "PR-4 response due from Dr. Elena Vasquez, M.D. (30 calendar days from solicitation). Follow up if not received.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    },
    {
     "diaryId": "diy_claim_demo_011_TD_PAYMENT_REVIEW",
     "type": "TD_PAYMENT_REVIEW",
-    "dueDate": "2026-06-19",
+    "dueDate": "2026-06-20",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "TTD continues pending the P&S determination — confirm payment continuity.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.003Z"
+    "createdAt": "2026-06-13T00:03:45.114Z"
    }
   ]
  },
@@ -4890,9 +4890,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_011_pr4_solicitation",
-    "created_at": "2026-06-06T23:39:15.003Z",
+    "created_at": "2026-06-07T00:03:45.114Z",
     "claim_id": "claim_demo_011",
-    "received_at": "2026-06-06T23:39:15.003Z",
+    "received_at": "2026-06-07T00:03:45.114Z",
     "source": "internal",
     "pages": 2,
     "status": "filed",
@@ -4910,9 +4910,9 @@
    },
    {
     "id": "doc_demo_claim_demo_011_pr2_plateau",
-    "created_at": "2026-05-29T23:39:15.003Z",
+    "created_at": "2026-05-30T00:03:45.114Z",
     "claim_id": "claim_demo_011",
-    "received_at": "2026-05-29T23:39:15.003Z",
+    "received_at": "2026-05-30T00:03:45.114Z",
     "source": "provider",
     "pages": 4,
     "status": "filed",
@@ -4930,9 +4930,9 @@
    },
    {
     "id": "doc_demo_claim_demo_011_froi",
-    "created_at": "2026-02-20T23:39:15.003Z",
+    "created_at": "2026-02-21T00:03:45.114Z",
     "claim_id": "claim_demo_011",
-    "received_at": "2026-02-20T23:39:15.003Z",
+    "received_at": "2026-02-21T00:03:45.114Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -4958,7 +4958,7 @@
    {
     "action": "Review the temporary disability payment",
     "why": "An active TD benefit is paying at $673.33/wk (two-thirds of AWW). Confirm work status before the next payment cycle to avoid an LC §4650 self-imposed penalty.",
-    "due_date": "2026-06-19",
+    "due_date": "2026-06-20",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_011_TD_PAYMENT_REVIEW",
     "document_ids": [
@@ -4968,7 +4968,7 @@
    {
     "action": "Pr4 response due",
     "why": "PR-4 response due from Dr. Elena Vasquez, M.D. (30 calendar days from solicitation). Follow up if not received.",
-    "due_date": "2026-07-06",
+    "due_date": "2026-07-07",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_011_PR4_RESPONSE_DUE",
     "document_ids": [
@@ -4981,10 +4981,10 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_011_1",
-    "created_at": "2026-02-23T23:39:15.003Z",
+    "created_at": "2026-02-24T00:03:45.114Z",
     "claim_id": "claim_demo_011",
     "benefit_type": "TTD",
-    "start_date": "2026-02-23",
+    "start_date": "2026-02-24",
     "end_date": null,
     "weekly_rate": 673.33,
     "reason_started": "initial_disability",
@@ -4993,7 +4993,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-02-23T23:39:15.003Z"
+    "updated_at": "2026-02-24T00:03:45.114Z"
    }
   ],
   "count": 1
@@ -5003,7 +5003,7 @@
    "id": "tdp_demo_claim_demo_011_1",
    "benefit_type": "TTD",
    "weekly_rate": 673.33,
-   "start_date": "2026-02-23",
+   "start_date": "2026-02-24",
    "days_in": 110
   },
   "total_weeks_paid": 15.71,
@@ -5011,16 +5011,16 @@
   "periods_count": 1,
   "statutory_cap_weeks": 104,
   "weeks_remaining": 88.29,
-  "projected_exhaustion_date": "2028-02-20",
+  "projected_exhaustion_date": "2028-02-21",
   "suspension_reason_code_active": null
  },
  "GET /api/v1/mmi/claim/claim_demo_011": {
   "evaluations": [
    {
     "id": "bbbbbbbb-bbbb-4010-8bbb-000000000001",
-    "created_at": "2026-06-12T23:39:15.004Z",
+    "created_at": "2026-06-13T00:03:45.114Z",
     "claim_id": "claim_demo_011",
-    "evaluated_at": "2026-06-03T23:39:15.004Z",
+    "evaluated_at": "2026-06-04T00:03:45.114Z",
     "signals": [
      {
       "type": "pr2_stable_plateau",
@@ -5042,7 +5042,7 @@
     "recommendation": "solicit_pr4",
     "rationale": "Synthetic demo rationale: two weight-2 signals (plateau language in consecutive PR-2s, TD beyond 90 days on a soft-tissue injury) plus declining treatment frequency total weight 5 — solicit a PR-4 from the treating physician.",
     "adjuster_action": "pr4_solicited",
-    "acted_at": "2026-06-06T23:39:15.004Z"
+    "acted_at": "2026-06-07T00:03:45.114Z"
    }
   ],
   "count": 1
@@ -5051,11 +5051,11 @@
   "solicitations": [
    {
     "id": "cccccccc-cccc-4010-8ccc-000000000001",
-    "created_at": "2026-06-06T23:39:15.004Z",
+    "created_at": "2026-06-07T00:03:45.114Z",
     "claim_id": "claim_demo_011",
     "mmi_evaluation_id": "bbbbbbbb-bbbb-4010-8bbb-000000000001",
-    "solicitation_date": "2026-06-06",
-    "response_due_date": "2026-07-06",
+    "solicitation_date": "2026-06-07",
+    "response_due_date": "2026-07-07",
     "physician_name": "Dr. Elena Vasquez, M.D.",
     "method": "lob",
     "lob_letter_id": "ltr_demo_claim_demo_011",
@@ -5083,7 +5083,7 @@
    "medical": [
     {
      "id": "rli_demo_claim_demo_011_1",
-     "created_at": "2026-06-12T23:39:15.003Z",
+     "created_at": "2026-06-13T00:03:45.114Z",
      "claim_id": "claim_demo_011",
      "category": "medical",
      "label": "PTP office visits (through P&S)",
@@ -5094,11 +5094,11 @@
      "total": 750,
      "basis_note": "Remaining PTP visits to the P&S determination (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.003Z"
+     "updated_at": "2026-06-13T00:03:45.114Z"
     },
     {
      "id": "rli_demo_claim_demo_011_2",
-     "created_at": "2026-06-12T23:39:15.003Z",
+     "created_at": "2026-06-13T00:03:45.114Z",
      "claim_id": "claim_demo_011",
      "category": "medical",
      "label": "Home exercise program transition",
@@ -5109,13 +5109,13 @@
      "total": 500,
      "basis_note": "Maintenance PT taper per the last PR-2 (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.003Z"
+     "updated_at": "2026-06-13T00:03:45.114Z"
     }
    ],
    "indemnity": [
     {
      "id": "rli_demo_claim_demo_011_3",
-     "created_at": "2026-06-12T23:39:15.003Z",
+     "created_at": "2026-06-13T00:03:45.114Z",
      "claim_id": "claim_demo_011",
      "category": "indemnity",
      "label": "Temporary disability (to projected P&S)",
@@ -5126,11 +5126,11 @@
      "total": 3366.65,
      "basis_note": "Estimated 5 more weeks TTD to the PR-4 response (synthetic demo estimate)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.003Z"
+     "updated_at": "2026-06-13T00:03:45.114Z"
     },
     {
      "id": "rli_demo_claim_demo_011_4",
-     "created_at": "2026-06-12T23:39:15.003Z",
+     "created_at": "2026-06-13T00:03:45.114Z",
      "claim_id": "claim_demo_011",
      "category": "indemnity",
      "label": "Estimated permanent disability",
@@ -5141,13 +5141,13 @@
      "total": 9500,
      "basis_note": "SYNTHETIC DEMO ESTIMATE — placeholder PD dollars pending the PR-4 rating; not a statutory or DEU figure",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.003Z"
+     "updated_at": "2026-06-13T00:03:45.114Z"
     }
    ],
    "expense": [
     {
      "id": "rli_demo_claim_demo_011_5",
-     "created_at": "2026-06-12T23:39:15.003Z",
+     "created_at": "2026-06-13T00:03:45.114Z",
      "claim_id": "claim_demo_011",
      "category": "expense",
      "label": "PR-4 solicitation / med-legal handling",
@@ -5158,7 +5158,7 @@
      "total": 450,
      "basis_note": "PR-4 report fee + handling (synthetic demo allowance)",
      "created_by": "seed@demo",
-     "updated_at": "2026-06-12T23:39:15.003Z"
+     "updated_at": "2026-06-13T00:03:45.114Z"
     }
    ]
   },
@@ -5201,12 +5201,12 @@
   "aww": 665,
   "tdRate": 443.33,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-01-23",
+  "dateOfInjury": "2026-01-24",
   "bodyPart": "Wrist / Hand",
   "injuryType": "Repetitive Motion",
   "injuryDescription": "Right wrist De Quervain tenosynovitis from repetitive medication preps. Resolved by stipulated award with future medical open; RTW full duty, indemnity closed, PRN flare-up care continues.",
   "employerName": "BrightCare Home Health, Inc.",
-  "filed_at": "2026-01-23T23:39:15.004Z",
+  "filed_at": "2026-01-24T00:03:45.114Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -5230,19 +5230,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-01-23T23:39:15.004Z",
-  "updatedAt": "2026-01-23T23:39:15.004Z",
+  "createdAt": "2026-01-24T00:03:45.114Z",
+  "updatedAt": "2026-01-24T00:03:45.114Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-01-23T23:39:15.004Z",
+    "timestamp": "2026-01-24T00:03:45.115Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-01-23T23:39:15.004Z",
+    "timestamp": "2026-01-24T00:03:45.115Z",
     "data": {
      "aww": 665,
      "tdRate": 443.33
@@ -5250,7 +5250,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-01-24T23:39:15.004Z",
+    "timestamp": "2026-01-25T00:03:45.115Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 92,
@@ -5272,12 +5272,12 @@
    {
     "diaryId": "diy_claim_demo_012_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-07-12",
+    "dueDate": "2026-07-13",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "LOW",
     "notes": "Future-medical check-in — confirm continuing care remains related and necessary.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.004Z"
+    "createdAt": "2026-06-13T00:03:45.115Z"
    }
   ]
  },
@@ -5286,12 +5286,12 @@
    {
     "diaryId": "diy_claim_demo_012_PR2_FOLLOW_UP",
     "type": "PR2_FOLLOW_UP",
-    "dueDate": "2026-07-12",
+    "dueDate": "2026-07-13",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "LOW",
     "notes": "Future-medical check-in — confirm continuing care remains related and necessary.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.004Z"
+    "createdAt": "2026-06-13T00:03:45.115Z"
    }
   ]
  },
@@ -5299,9 +5299,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_012_pr2_maint",
-    "created_at": "2026-05-13T23:39:15.004Z",
+    "created_at": "2026-05-14T00:03:45.115Z",
     "claim_id": "claim_demo_012",
-    "received_at": "2026-05-13T23:39:15.004Z",
+    "received_at": "2026-05-14T00:03:45.115Z",
     "source": "provider",
     "pages": 3,
     "status": "filed",
@@ -5319,9 +5319,9 @@
    },
    {
     "id": "doc_demo_claim_demo_012_rtw_release",
-    "created_at": "2026-03-05T23:39:15.004Z",
+    "created_at": "2026-03-06T00:03:45.115Z",
     "claim_id": "claim_demo_012",
-    "received_at": "2026-03-05T23:39:15.004Z",
+    "received_at": "2026-03-06T00:03:45.115Z",
     "source": "provider",
     "pages": 1,
     "status": "filed",
@@ -5337,9 +5337,9 @@
    },
    {
     "id": "doc_demo_claim_demo_012_froi",
-    "created_at": "2026-01-23T23:39:15.004Z",
+    "created_at": "2026-01-24T00:03:45.115Z",
     "claim_id": "claim_demo_012",
-    "received_at": "2026-01-23T23:39:15.004Z",
+    "received_at": "2026-01-24T00:03:45.115Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -5365,7 +5365,7 @@
    {
     "action": "Pr2 follow up",
     "why": "Future-medical check-in — confirm continuing care remains related and necessary.",
-    "due_date": "2026-07-12",
+    "due_date": "2026-07-13",
     "priority": "LOW",
     "diary_id": "diy_demo_claim_demo_012_PR2_FOLLOW_UP",
     "document_ids": [
@@ -5378,11 +5378,11 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_012_1",
-    "created_at": "2026-01-26T23:39:15.004Z",
+    "created_at": "2026-01-27T00:03:45.115Z",
     "claim_id": "claim_demo_012",
     "benefit_type": "TTD",
-    "start_date": "2026-01-26",
-    "end_date": "2026-03-05",
+    "start_date": "2026-01-27",
+    "end_date": "2026-03-06",
     "weekly_rate": 443.33,
     "reason_started": "initial_disability",
     "reason_ended": "rtw_full",
@@ -5390,7 +5390,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-01-26T23:39:15.004Z"
+    "updated_at": "2026-01-27T00:03:45.115Z"
    }
   ],
   "count": 1
@@ -5472,12 +5472,12 @@
   "aww": 1395,
   "tdRate": 930,
   "weeksCalculated": 52,
-  "dateOfInjury": "2026-03-09",
+  "dateOfInjury": "2026-03-10",
   "bodyPart": "Cervical Spine / Neck",
   "injuryType": "Strain / Sprain",
   "injuryDescription": "Cervical strain accepted; worker on modified duty. Applicant counsel filed an Application for Adjudication disputing a denied add-on right shoulder body part and the TD rate; QME panel process underway.",
   "employerName": "Westside Home Care Services",
-  "filed_at": "2026-03-09T23:39:15.004Z",
+  "filed_at": "2026-03-10T00:03:45.115Z",
   "sourceSystem": "native",
   "externalClaimId": null,
   "syncStatus": "native",
@@ -5504,19 +5504,19 @@
   "motorVehicleFields": null,
   "employerContests": false,
   "subrogationStatus": null,
-  "createdAt": "2026-03-09T23:39:15.004Z",
-  "updatedAt": "2026-03-09T23:39:15.004Z",
+  "createdAt": "2026-03-10T00:03:45.115Z",
+  "updatedAt": "2026-03-10T00:03:45.115Z",
   "events": [
    {
     "type": "claim_created",
-    "timestamp": "2026-03-09T23:39:15.004Z",
+    "timestamp": "2026-03-10T00:03:45.115Z",
     "data": {
      "source": "demo_seed"
     }
    },
    {
     "type": "adp_pull_complete",
-    "timestamp": "2026-03-09T23:39:15.004Z",
+    "timestamp": "2026-03-10T00:03:45.115Z",
     "data": {
      "aww": 1395,
      "tdRate": 930
@@ -5524,7 +5524,7 @@
    },
    {
     "type": "ai_analysis_complete",
-    "timestamp": "2026-03-10T23:39:15.004Z",
+    "timestamp": "2026-03-11T00:03:45.115Z",
     "data": {
      "compensability": "Likely Compensable",
      "compensabilityScore": 83,
@@ -5549,22 +5549,22 @@
    {
     "diaryId": "diy_claim_demo_013_LEGAL_REVIEW",
     "type": "LEGAL_REVIEW",
-    "dueDate": "2026-06-17",
+    "dueDate": "2026-06-18",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Review Application for Adjudication and prepare the MSC position with defense counsel.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.004Z"
+    "createdAt": "2026-06-13T00:03:45.115Z"
    },
    {
     "diaryId": "diy_claim_demo_013_QME_REPORT_REVIEW",
     "type": "QME_REPORT_REVIEW",
-    "dueDate": "2026-07-03",
+    "dueDate": "2026-07-04",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "QME evaluation pending on the disputed body part — calendar the report due date.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.004Z"
+    "createdAt": "2026-06-13T00:03:45.115Z"
    }
   ]
  },
@@ -5573,22 +5573,22 @@
    {
     "diaryId": "diy_claim_demo_013_LEGAL_REVIEW",
     "type": "LEGAL_REVIEW",
-    "dueDate": "2026-06-17",
+    "dueDate": "2026-06-18",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "HIGH",
     "notes": "Review Application for Adjudication and prepare the MSC position with defense counsel.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.004Z"
+    "createdAt": "2026-06-13T00:03:45.115Z"
    },
    {
     "diaryId": "diy_claim_demo_013_QME_REPORT_REVIEW",
     "type": "QME_REPORT_REVIEW",
-    "dueDate": "2026-07-03",
+    "dueDate": "2026-07-04",
     "assignedTo": "adjuster@claimlayer.example",
     "priority": "MEDIUM",
     "notes": "QME evaluation pending on the disputed body part — calendar the report due date.",
     "status": "open",
-    "createdAt": "2026-06-12T23:39:15.004Z"
+    "createdAt": "2026-06-13T00:03:45.115Z"
    }
   ]
  },
@@ -5596,9 +5596,9 @@
   "documents": [
    {
     "id": "doc_demo_claim_demo_013_application",
-    "created_at": "2026-05-13T23:39:15.004Z",
+    "created_at": "2026-05-14T00:03:45.115Z",
     "claim_id": "claim_demo_013",
-    "received_at": "2026-05-13T23:39:15.004Z",
+    "received_at": "2026-05-14T00:03:45.115Z",
     "source": "attorney",
     "pages": 4,
     "status": "filed",
@@ -5616,9 +5616,9 @@
    },
    {
     "id": "doc_demo_claim_demo_013_atty_rep",
-    "created_at": "2026-05-03T23:39:15.004Z",
+    "created_at": "2026-05-04T00:03:45.115Z",
     "claim_id": "claim_demo_013",
-    "received_at": "2026-05-03T23:39:15.004Z",
+    "received_at": "2026-05-04T00:03:45.115Z",
     "source": "attorney",
     "pages": 2,
     "status": "filed",
@@ -5636,9 +5636,9 @@
    },
    {
     "id": "doc_demo_claim_demo_013_froi",
-    "created_at": "2026-03-09T23:39:15.004Z",
+    "created_at": "2026-03-10T00:03:45.115Z",
     "claim_id": "claim_demo_013",
-    "received_at": "2026-03-09T23:39:15.004Z",
+    "received_at": "2026-03-10T00:03:45.115Z",
     "source": "employer",
     "pages": 3,
     "status": "filed",
@@ -5664,7 +5664,7 @@
    {
     "action": "Legal review",
     "why": "Review Application for Adjudication and prepare the MSC position with defense counsel.",
-    "due_date": "2026-06-17",
+    "due_date": "2026-06-18",
     "priority": "HIGH",
     "diary_id": "diy_demo_claim_demo_013_LEGAL_REVIEW",
     "document_ids": [
@@ -5675,7 +5675,7 @@
    {
     "action": "Qme report review",
     "why": "QME evaluation pending on the disputed body part — calendar the report due date.",
-    "due_date": "2026-07-03",
+    "due_date": "2026-07-04",
     "priority": "MEDIUM",
     "diary_id": "diy_demo_claim_demo_013_QME_REPORT_REVIEW",
     "document_ids": []
@@ -5686,11 +5686,11 @@
   "periods": [
    {
     "id": "tdp_demo_claim_demo_013_1",
-    "created_at": "2026-03-12T23:39:15.004Z",
+    "created_at": "2026-03-13T00:03:45.116Z",
     "claim_id": "claim_demo_013",
     "benefit_type": "TTD",
-    "start_date": "2026-03-12",
-    "end_date": "2026-05-08",
+    "start_date": "2026-03-13",
+    "end_date": "2026-05-09",
     "weekly_rate": 930,
     "reason_started": "initial_disability",
     "reason_ended": "rtw_modified",
@@ -5698,7 +5698,7 @@
     "reinstated_from_period_id": null,
     "notes": null,
     "created_by": "system@demo",
-    "updated_at": "2026-03-12T23:39:15.004Z"
+    "updated_at": "2026-03-13T00:03:45.116Z"
    }
   ],
   "count": 1
@@ -5760,8 +5760,24 @@
   "links": []
  },
  "GET /api/v1/rfas?status=pending_adjuster_review": {
-  "rfas": [],
-  "count": 0
+  "rfas": [
+   {
+    "id": "rfa_demo_5",
+    "created_at": "2026-06-11T00:03:45.112Z",
+    "claim_id": "claim_demo_005",
+    "received_at": "2026-06-11T00:03:45.112Z",
+    "requesting_physician": "Anita Krishnan, M.D.",
+    "treatment_description": "MRI cervical spine without contrast",
+    "cpt_codes": [
+     "72141"
+    ],
+    "urgency": "routine",
+    "decision": "pending_adjuster_review",
+    "decision_made_at": null,
+    "response_due_at": "2026-06-16T00:03:45.112Z"
+   }
+  ],
+  "count": 1
  },
  "GET /api/v1/rfas?status=approved": {
   "rfas": [],
@@ -5812,7 +5828,7 @@
   "rows": [
    {
     "id": "aaaaaaaa-aaaa-4008-8aaa-000000000002",
-    "created_at": "2026-06-10T23:39:15.003Z",
+    "created_at": "2026-06-11T00:03:45.114Z",
     "claim_id": "claim_demo_008",
     "decision_type": "cnr_pricing",
     "prompt_name": "cnr_pricing",
@@ -5848,182 +5864,11 @@
      }
     ],
     "human_decision": "offer_accepted_by_adjuster (worker)",
-    "human_decision_at": "2026-06-11T23:39:15.003Z"
-   },
-   {
-    "id": "aaaaaaaa-aaaa-4008-8aaa-000000000003",
-    "created_at": "2026-06-09T23:39:15.003Z",
-    "claim_id": "claim_demo_008",
-    "decision_type": "msa_screening",
-    "prompt_name": "msa_threshold_evaluation",
-    "model": "deterministic",
-    "input_snapshot": {
-     "ageAtScreening": 56,
-     "ssdiReceiving": false,
-     "projectedSettlementValue": 27500,
-     "thresholds": {
-      "MEDICARE_ELIGIBLE_SETTLEMENT": 25000,
-      "LIKELY_ELIGIBLE_SETTLEMENT": 250000,
-      "MEDICARE_AGE": 65,
-      "LIKELY_ELIGIBLE_MIN_AGE": 35
-     }
-    },
-    "output_parsed": {
-     "medicare_eligible": false,
-     "msa_required": false,
-     "msa_required_reason": null
-    },
-    "output_raw": null,
-    "input_tokens": null,
-    "output_tokens": null,
-    "latency_ms": 1100,
-    "confidence": null,
-    "guardrail_actions": [],
-    "human_decision": null,
-    "human_decision_at": "2026-06-10T23:39:15.003Z"
-   },
-   {
-    "id": "aaaaaaaa-aaaa-4003-8aaa-000000000001",
-    "created_at": "2026-06-05T23:39:15.000Z",
-    "claim_id": "claim_demo_003",
-    "decision_type": "compensability",
-    "prompt_name": "compensability_analysis",
-    "model": "claude-sonnet-4-6",
-    "input_snapshot": {
-     "bodyPart": "Shoulder",
-     "injuryType": "Strain / Sprain",
-     "injuryDescription": "Right shoulder pain reported next morning; no witnesses. Worker had a prior right shoulder injury resolved by stipulated award under linked claim HHW-2024-D09 (DOI 2024).",
-     "jobTitle": "Personal Care Worker",
-     "aww": 621,
-     "tdRate": 414,
-     "stateOfJurisdiction": "CA"
-    },
-    "output_parsed": {
-     "compensability": "Questionable",
-     "compensabilityScore": 62,
-     "priority": "High",
-     "suggestedMedicalReserve": 25000,
-     "suggestedIndemnityReserve": 18000,
-     "suggestedExpenseReserve": 4500,
-     "redFlags": [
-      "No witnesses to mechanism",
-      "Prior right shoulder treatment under linked claim HHW-2024-D09"
-     ]
-    },
-    "output_raw": null,
-    "input_tokens": 800,
-    "output_tokens": 600,
-    "latency_ms": 3500,
-    "confidence": 62,
-    "guardrail_actions": [],
-    "human_decision": null,
-    "human_decision_at": "2026-06-06T23:39:15.001Z"
-   },
-   {
-    "id": "aaaaaaaa-aaaa-4009-8aaa-000000000001",
-    "created_at": "2026-05-27T23:39:15.003Z",
-    "claim_id": "claim_demo_010",
-    "decision_type": "compensability",
-    "prompt_name": "compensability_analysis",
-    "model": "claude-sonnet-4-6",
-    "input_snapshot": {
-     "bodyPart": "Ankle / Foot",
-     "injuryType": "Slip & Fall",
-     "injuryDescription": "Rolled left ankle on exterior stairs leaving a patient home; accepted within the 14-day window. Off work per PTP; TTD running at the statutory rate.",
-     "jobTitle": "Home Health Aide II",
-     "aww": 760.5,
-     "tdRate": 507,
-     "stateOfJurisdiction": "CA"
-    },
-    "output_parsed": {
-     "compensability": "Likely Compensable",
-     "compensabilityScore": 90,
-     "priority": "Medium",
-     "suggestedMedicalReserve": 25000,
-     "suggestedIndemnityReserve": 18000,
-     "suggestedExpenseReserve": 4500,
-     "redFlags": []
-    },
-    "output_raw": null,
-    "input_tokens": 800,
-    "output_tokens": 600,
-    "latency_ms": 3500,
-    "confidence": 90,
-    "guardrail_actions": [],
-    "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-05-28T23:39:15.003Z"
-   },
-   {
-    "id": "aaaaaaaa-aaaa-4004-8aaa-000000000002",
-    "created_at": "2026-05-25T23:39:15.001Z",
-    "claim_id": "claim_demo_004",
-    "decision_type": "rfa_mtus",
-    "prompt_name": "rfa_mtus_evaluation",
-    "model": "claude-sonnet-4-6",
-    "input_snapshot": {
-     "requestedTreatment": "Therapeutic exercise, 12 visits",
-     "requestedCptCodes": [
-      "97110"
-     ],
-     "bodyPart": "Knee",
-     "stateOfJurisdiction": "CA"
-    },
-    "output_parsed": {
-     "recommendedAction": "auto_approve",
-     "mtusConsistency": "consistent",
-     "confidence": 92
-    },
-    "output_raw": null,
-    "input_tokens": 600,
-    "output_tokens": 400,
-    "latency_ms": 2200,
-    "confidence": 92,
-    "guardrail_actions": [
-     {
-      "rule": "no_auto_deny",
-      "triggered": false
-     }
-    ],
-    "human_decision": "auto_approved (no override)",
-    "human_decision_at": "2026-05-26T23:39:15.001Z"
-   },
-   {
-    "id": "aaaaaaaa-aaaa-4004-8aaa-000000000001",
-    "created_at": "2026-05-23T23:39:15.001Z",
-    "claim_id": "claim_demo_004",
-    "decision_type": "compensability",
-    "prompt_name": "compensability_analysis",
-    "model": "claude-sonnet-4-6",
-    "input_snapshot": {
-     "bodyPart": "Knee",
-     "injuryType": "Slip & Fall",
-     "injuryDescription": "Slipped on wet floor in patient bathroom; right knee twisted, immediate swelling.",
-     "jobTitle": "Home Health Aide I",
-     "aww": 690,
-     "tdRate": 460,
-     "stateOfJurisdiction": "CA"
-    },
-    "output_parsed": {
-     "compensability": "Likely Compensable",
-     "compensabilityScore": 88,
-     "priority": "Medium",
-     "suggestedMedicalReserve": 25000,
-     "suggestedIndemnityReserve": 18000,
-     "suggestedExpenseReserve": 4500,
-     "redFlags": []
-    },
-    "output_raw": null,
-    "input_tokens": 800,
-    "output_tokens": 600,
-    "latency_ms": 3500,
-    "confidence": 88,
-    "guardrail_actions": [],
-    "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-05-24T23:39:15.001Z"
+    "human_decision_at": "2026-06-12T00:03:45.114Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4005-8aaa-000000000002",
-    "created_at": "2026-05-20T23:39:15.002Z",
+    "created_at": "2026-06-11T00:03:45.113Z",
     "claim_id": "claim_demo_005",
     "decision_type": "rfa_mtus",
     "prompt_name": "rfa_mtus_evaluation",
@@ -6056,8 +5901,179 @@
     "human_decision_at": null
    },
    {
+    "id": "aaaaaaaa-aaaa-4008-8aaa-000000000003",
+    "created_at": "2026-06-10T00:03:45.114Z",
+    "claim_id": "claim_demo_008",
+    "decision_type": "msa_screening",
+    "prompt_name": "msa_threshold_evaluation",
+    "model": "deterministic",
+    "input_snapshot": {
+     "ageAtScreening": 56,
+     "ssdiReceiving": false,
+     "projectedSettlementValue": 27500,
+     "thresholds": {
+      "MEDICARE_ELIGIBLE_SETTLEMENT": 25000,
+      "LIKELY_ELIGIBLE_SETTLEMENT": 250000,
+      "MEDICARE_AGE": 65,
+      "LIKELY_ELIGIBLE_MIN_AGE": 35
+     }
+    },
+    "output_parsed": {
+     "medicare_eligible": false,
+     "msa_required": false,
+     "msa_required_reason": null
+    },
+    "output_raw": null,
+    "input_tokens": null,
+    "output_tokens": null,
+    "latency_ms": 1100,
+    "confidence": null,
+    "guardrail_actions": [],
+    "human_decision": null,
+    "human_decision_at": "2026-06-11T00:03:45.114Z"
+   },
+   {
+    "id": "aaaaaaaa-aaaa-4003-8aaa-000000000001",
+    "created_at": "2026-06-06T00:03:45.111Z",
+    "claim_id": "claim_demo_003",
+    "decision_type": "compensability",
+    "prompt_name": "compensability_analysis",
+    "model": "claude-sonnet-4-6",
+    "input_snapshot": {
+     "bodyPart": "Shoulder",
+     "injuryType": "Strain / Sprain",
+     "injuryDescription": "Right shoulder pain reported next morning; no witnesses. Worker had a prior right shoulder injury resolved by stipulated award under linked claim HHW-2024-D09 (DOI 2024).",
+     "jobTitle": "Personal Care Worker",
+     "aww": 621,
+     "tdRate": 414,
+     "stateOfJurisdiction": "CA"
+    },
+    "output_parsed": {
+     "compensability": "Questionable",
+     "compensabilityScore": 62,
+     "priority": "High",
+     "suggestedMedicalReserve": 25000,
+     "suggestedIndemnityReserve": 18000,
+     "suggestedExpenseReserve": 4500,
+     "redFlags": [
+      "No witnesses to mechanism",
+      "Prior right shoulder treatment under linked claim HHW-2024-D09"
+     ]
+    },
+    "output_raw": null,
+    "input_tokens": 800,
+    "output_tokens": 600,
+    "latency_ms": 3500,
+    "confidence": 62,
+    "guardrail_actions": [],
+    "human_decision": null,
+    "human_decision_at": "2026-06-07T00:03:45.111Z"
+   },
+   {
+    "id": "aaaaaaaa-aaaa-4009-8aaa-000000000001",
+    "created_at": "2026-05-28T00:03:45.114Z",
+    "claim_id": "claim_demo_010",
+    "decision_type": "compensability",
+    "prompt_name": "compensability_analysis",
+    "model": "claude-sonnet-4-6",
+    "input_snapshot": {
+     "bodyPart": "Ankle / Foot",
+     "injuryType": "Slip & Fall",
+     "injuryDescription": "Rolled left ankle on exterior stairs leaving a patient home; accepted within the 14-day window. Off work per PTP; TTD running at the statutory rate.",
+     "jobTitle": "Home Health Aide II",
+     "aww": 760.5,
+     "tdRate": 507,
+     "stateOfJurisdiction": "CA"
+    },
+    "output_parsed": {
+     "compensability": "Likely Compensable",
+     "compensabilityScore": 90,
+     "priority": "Medium",
+     "suggestedMedicalReserve": 25000,
+     "suggestedIndemnityReserve": 18000,
+     "suggestedExpenseReserve": 4500,
+     "redFlags": []
+    },
+    "output_raw": null,
+    "input_tokens": 800,
+    "output_tokens": 600,
+    "latency_ms": 3500,
+    "confidence": 90,
+    "guardrail_actions": [],
+    "human_decision": "accepted by adjuster@homecaretpa.com",
+    "human_decision_at": "2026-05-29T00:03:45.114Z"
+   },
+   {
+    "id": "aaaaaaaa-aaaa-4004-8aaa-000000000002",
+    "created_at": "2026-05-26T00:03:45.112Z",
+    "claim_id": "claim_demo_004",
+    "decision_type": "rfa_mtus",
+    "prompt_name": "rfa_mtus_evaluation",
+    "model": "claude-sonnet-4-6",
+    "input_snapshot": {
+     "requestedTreatment": "Therapeutic exercise, 12 visits",
+     "requestedCptCodes": [
+      "97110"
+     ],
+     "bodyPart": "Knee",
+     "stateOfJurisdiction": "CA"
+    },
+    "output_parsed": {
+     "recommendedAction": "auto_approve",
+     "mtusConsistency": "consistent",
+     "confidence": 92
+    },
+    "output_raw": null,
+    "input_tokens": 600,
+    "output_tokens": 400,
+    "latency_ms": 2200,
+    "confidence": 92,
+    "guardrail_actions": [
+     {
+      "rule": "no_auto_deny",
+      "triggered": false
+     }
+    ],
+    "human_decision": "auto_approved (no override)",
+    "human_decision_at": "2026-05-27T00:03:45.112Z"
+   },
+   {
+    "id": "aaaaaaaa-aaaa-4004-8aaa-000000000001",
+    "created_at": "2026-05-24T00:03:45.112Z",
+    "claim_id": "claim_demo_004",
+    "decision_type": "compensability",
+    "prompt_name": "compensability_analysis",
+    "model": "claude-sonnet-4-6",
+    "input_snapshot": {
+     "bodyPart": "Knee",
+     "injuryType": "Slip & Fall",
+     "injuryDescription": "Slipped on wet floor in patient bathroom; right knee twisted, immediate swelling.",
+     "jobTitle": "Home Health Aide I",
+     "aww": 690,
+     "tdRate": 460,
+     "stateOfJurisdiction": "CA"
+    },
+    "output_parsed": {
+     "compensability": "Likely Compensable",
+     "compensabilityScore": 88,
+     "priority": "Medium",
+     "suggestedMedicalReserve": 25000,
+     "suggestedIndemnityReserve": 18000,
+     "suggestedExpenseReserve": 4500,
+     "redFlags": []
+    },
+    "output_raw": null,
+    "input_tokens": 800,
+    "output_tokens": 600,
+    "latency_ms": 3500,
+    "confidence": 88,
+    "guardrail_actions": [],
+    "human_decision": "accepted by adjuster@homecaretpa.com",
+    "human_decision_at": "2026-05-25T00:03:45.112Z"
+   },
+   {
     "id": "aaaaaaaa-aaaa-4005-8aaa-000000000001",
-    "created_at": "2026-05-16T23:39:15.002Z",
+    "created_at": "2026-05-17T00:03:45.113Z",
     "claim_id": "claim_demo_005",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6089,11 +6105,11 @@
     "confidence": 91,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-05-17T23:39:15.002Z"
+    "human_decision_at": "2026-05-18T00:03:45.113Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4006-8aaa-000000000001",
-    "created_at": "2026-04-27T23:39:15.002Z",
+    "created_at": "2026-04-28T00:03:45.113Z",
     "claim_id": "claim_demo_006",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6123,11 +6139,11 @@
     "confidence": 86,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-04-28T23:39:15.002Z"
+    "human_decision_at": "2026-04-29T00:03:45.113Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4007-8aaa-000000000001",
-    "created_at": "2026-04-19T23:39:15.002Z",
+    "created_at": "2026-04-20T00:03:45.113Z",
     "claim_id": "claim_demo_007",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6157,11 +6173,11 @@
     "confidence": 89,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-04-20T23:39:15.002Z"
+    "human_decision_at": "2026-04-21T00:03:45.113Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4008-8aaa-000000000001",
-    "created_at": "2026-04-14T23:39:15.003Z",
+    "created_at": "2026-04-15T00:03:45.113Z",
     "claim_id": "claim_demo_008",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6191,11 +6207,11 @@
     "confidence": 84,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-04-15T23:39:15.003Z"
+    "human_decision_at": "2026-04-16T00:03:45.114Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4012-8aaa-000000000001",
-    "created_at": "2026-03-11T23:39:15.004Z",
+    "created_at": "2026-03-12T00:03:45.116Z",
     "claim_id": "claim_demo_013",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6228,11 +6244,11 @@
     "confidence": 83,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-03-12T23:39:15.004Z"
+    "human_decision_at": "2026-03-13T00:03:45.116Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4010-8aaa-000000000001",
-    "created_at": "2026-02-22T23:39:15.003Z",
+    "created_at": "2026-02-23T00:03:45.114Z",
     "claim_id": "claim_demo_011",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6262,11 +6278,11 @@
     "confidence": 87,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-02-23T23:39:15.003Z"
+    "human_decision_at": "2026-02-24T00:03:45.114Z"
    },
    {
     "id": "aaaaaaaa-aaaa-4011-8aaa-000000000001",
-    "created_at": "2026-01-25T23:39:15.004Z",
+    "created_at": "2026-01-26T00:03:45.115Z",
     "claim_id": "claim_demo_012",
     "decision_type": "compensability",
     "prompt_name": "compensability_analysis",
@@ -6296,7 +6312,7 @@
     "confidence": 92,
     "guardrail_actions": [],
     "human_decision": "accepted by adjuster@homecaretpa.com",
-    "human_decision_at": "2026-01-26T23:39:15.004Z"
+    "human_decision_at": "2026-01-27T00:03:45.115Z"
    }
   ],
   "total": 14
@@ -6318,7 +6334,7 @@
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4003-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4003-8aaa-000000000001",
-  "created_at": "2026-06-05T23:39:15.000Z",
+  "created_at": "2026-06-06T00:03:45.111Z",
   "claim_id": "claim_demo_003",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6351,11 +6367,11 @@
   "confidence": 62,
   "guardrail_actions": [],
   "human_decision": null,
-  "human_decision_at": "2026-06-06T23:39:15.001Z"
+  "human_decision_at": "2026-06-07T00:03:45.111Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4004-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4004-8aaa-000000000001",
-  "created_at": "2026-05-23T23:39:15.001Z",
+  "created_at": "2026-05-24T00:03:45.112Z",
   "claim_id": "claim_demo_004",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6385,11 +6401,11 @@
   "confidence": 88,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-05-24T23:39:15.001Z"
+  "human_decision_at": "2026-05-25T00:03:45.112Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4004-8aaa-000000000002": {
   "id": "aaaaaaaa-aaaa-4004-8aaa-000000000002",
-  "created_at": "2026-05-25T23:39:15.001Z",
+  "created_at": "2026-05-26T00:03:45.112Z",
   "claim_id": "claim_demo_004",
   "decision_type": "rfa_mtus",
   "prompt_name": "rfa_mtus_evaluation",
@@ -6419,11 +6435,11 @@
    }
   ],
   "human_decision": "auto_approved (no override)",
-  "human_decision_at": "2026-05-26T23:39:15.001Z"
+  "human_decision_at": "2026-05-27T00:03:45.112Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4005-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4005-8aaa-000000000001",
-  "created_at": "2026-05-16T23:39:15.002Z",
+  "created_at": "2026-05-17T00:03:45.113Z",
   "claim_id": "claim_demo_005",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6455,11 +6471,11 @@
   "confidence": 91,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-05-17T23:39:15.002Z"
+  "human_decision_at": "2026-05-18T00:03:45.113Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4005-8aaa-000000000002": {
   "id": "aaaaaaaa-aaaa-4005-8aaa-000000000002",
-  "created_at": "2026-05-20T23:39:15.002Z",
+  "created_at": "2026-06-11T00:03:45.113Z",
   "claim_id": "claim_demo_005",
   "decision_type": "rfa_mtus",
   "prompt_name": "rfa_mtus_evaluation",
@@ -6493,7 +6509,7 @@
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4006-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4006-8aaa-000000000001",
-  "created_at": "2026-04-27T23:39:15.002Z",
+  "created_at": "2026-04-28T00:03:45.113Z",
   "claim_id": "claim_demo_006",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6523,11 +6539,11 @@
   "confidence": 86,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-04-28T23:39:15.002Z"
+  "human_decision_at": "2026-04-29T00:03:45.113Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4007-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4007-8aaa-000000000001",
-  "created_at": "2026-04-19T23:39:15.002Z",
+  "created_at": "2026-04-20T00:03:45.113Z",
   "claim_id": "claim_demo_007",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6557,11 +6573,11 @@
   "confidence": 89,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-04-20T23:39:15.002Z"
+  "human_decision_at": "2026-04-21T00:03:45.113Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4008-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4008-8aaa-000000000001",
-  "created_at": "2026-04-14T23:39:15.003Z",
+  "created_at": "2026-04-15T00:03:45.113Z",
   "claim_id": "claim_demo_008",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6591,11 +6607,11 @@
   "confidence": 84,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-04-15T23:39:15.003Z"
+  "human_decision_at": "2026-04-16T00:03:45.114Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4008-8aaa-000000000002": {
   "id": "aaaaaaaa-aaaa-4008-8aaa-000000000002",
-  "created_at": "2026-06-10T23:39:15.003Z",
+  "created_at": "2026-06-11T00:03:45.114Z",
   "claim_id": "claim_demo_008",
   "decision_type": "cnr_pricing",
   "prompt_name": "cnr_pricing",
@@ -6631,11 +6647,11 @@
    }
   ],
   "human_decision": "offer_accepted_by_adjuster (worker)",
-  "human_decision_at": "2026-06-11T23:39:15.003Z"
+  "human_decision_at": "2026-06-12T00:03:45.114Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4008-8aaa-000000000003": {
   "id": "aaaaaaaa-aaaa-4008-8aaa-000000000003",
-  "created_at": "2026-06-09T23:39:15.003Z",
+  "created_at": "2026-06-10T00:03:45.114Z",
   "claim_id": "claim_demo_008",
   "decision_type": "msa_screening",
   "prompt_name": "msa_threshold_evaluation",
@@ -6663,11 +6679,11 @@
   "confidence": null,
   "guardrail_actions": [],
   "human_decision": null,
-  "human_decision_at": "2026-06-10T23:39:15.003Z"
+  "human_decision_at": "2026-06-11T00:03:45.114Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4009-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4009-8aaa-000000000001",
-  "created_at": "2026-05-27T23:39:15.003Z",
+  "created_at": "2026-05-28T00:03:45.114Z",
   "claim_id": "claim_demo_010",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6697,11 +6713,11 @@
   "confidence": 90,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-05-28T23:39:15.003Z"
+  "human_decision_at": "2026-05-29T00:03:45.114Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4010-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4010-8aaa-000000000001",
-  "created_at": "2026-02-22T23:39:15.003Z",
+  "created_at": "2026-02-23T00:03:45.114Z",
   "claim_id": "claim_demo_011",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6731,11 +6747,11 @@
   "confidence": 87,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-02-23T23:39:15.003Z"
+  "human_decision_at": "2026-02-24T00:03:45.114Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4011-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4011-8aaa-000000000001",
-  "created_at": "2026-01-25T23:39:15.004Z",
+  "created_at": "2026-01-26T00:03:45.115Z",
   "claim_id": "claim_demo_012",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6765,11 +6781,11 @@
   "confidence": 92,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-01-26T23:39:15.004Z"
+  "human_decision_at": "2026-01-27T00:03:45.115Z"
  },
  "GET /api/v1/ai-decisions/aaaaaaaa-aaaa-4012-8aaa-000000000001": {
   "id": "aaaaaaaa-aaaa-4012-8aaa-000000000001",
-  "created_at": "2026-03-11T23:39:15.004Z",
+  "created_at": "2026-03-12T00:03:45.116Z",
   "claim_id": "claim_demo_013",
   "decision_type": "compensability",
   "prompt_name": "compensability_analysis",
@@ -6802,7 +6818,7 @@
   "confidence": 83,
   "guardrail_actions": [],
   "human_decision": "accepted by adjuster@homecaretpa.com",
-  "human_decision_at": "2026-03-12T23:39:15.004Z"
+  "human_decision_at": "2026-03-13T00:03:45.116Z"
  },
  "GET /api/v1/prompts/compensability_analysis": {
   "name": "compensability_analysis",
@@ -6820,12 +6836,12 @@
   "documents": [
    {
     "id": "doc_demo_triage_001",
-    "created_at": "2026-06-11T23:39:14.998Z",
+    "created_at": "2026-06-12T00:03:45.108Z",
     "claim_id": null,
     "title": "Faxed medical note — illegible header",
     "category": "other",
     "source": "fax",
-    "received_at": "2026-06-11T23:39:14.998Z",
+    "received_at": "2026-06-12T00:03:45.108Z",
     "pages": 1,
     "status": "triage",
     "ai_summary": "Single-page handwritten clinical note. Patient name partially legible; no claim number found in text. Appears to reference knee treatment.",
@@ -6835,7 +6851,7 @@
     "triage_status": "pending",
     "triage_reason": "confidence_below_threshold (41 < 70)",
     "version": 1,
-    "updated_at": "2026-06-11T23:39:14.998Z"
+    "updated_at": "2026-06-12T00:03:45.108Z"
    }
   ]
  },
@@ -6853,12 +6869,12 @@
   "insurers": [
    {
     "id": "ins_demo_pacific",
-    "created_at": "2025-05-08T23:39:14.997Z",
+    "created_at": "2025-05-09T00:03:45.107Z",
     "fein": "954000001",
     "name": "Pacific Compass Insurance Co.",
     "naic_code": "12345",
     "active": true,
-    "updated_at": "2025-05-08T23:39:14.997Z"
+    "updated_at": "2025-05-09T00:03:45.107Z"
    }
   ]
  },
@@ -6866,14 +6882,14 @@
   "policies": [
    {
     "id": "pol_demo_brightcare_2026",
-    "created_at": "2025-05-08T23:39:14.997Z",
+    "created_at": "2025-05-09T00:03:45.108Z",
     "employer_id": "employer-brightcare-001",
     "insurer_id": "ins_demo_pacific",
     "policy_number": "WC-2026-88421",
     "effective_date": "2026-01-01",
     "expiration_date": "2026-12-31",
     "self_insured": false,
-    "updated_at": "2025-05-08T23:39:14.997Z"
+    "updated_at": "2025-05-09T00:03:45.108Z"
    }
   ]
  },
@@ -6881,14 +6897,14 @@
   "policies": [
    {
     "id": "pol_demo_westside_2026",
-    "created_at": "2025-05-08T23:39:14.997Z",
+    "created_at": "2025-05-09T00:03:45.108Z",
     "employer_id": "employer-westside-001",
     "insurer_id": null,
     "policy_number": "SI-CERT-04417",
     "effective_date": "2026-01-01",
     "expiration_date": null,
     "self_insured": true,
-    "updated_at": "2025-05-08T23:39:14.997Z"
+    "updated_at": "2025-05-09T00:03:45.108Z"
    }
   ]
  },
@@ -7352,7 +7368,7 @@
   "claims": [
    {
     "id": "claim_legacy_LEG-000",
-    "created_at": "2026-05-09T23:39:15.028Z",
+    "created_at": "2026-05-10T00:03:45.139Z",
     "claim_number": "LEG-EG-000",
     "employer_id": null,
     "employer_name": "BrightCare Home Health, Inc.",
@@ -7369,22 +7385,22 @@
      }
     },
     "status": "active_medical",
-    "date_of_injury": "2026-05-09",
+    "date_of_injury": "2026-05-10",
     "body_part": "Knee",
     "injury_type": "Slip & Fall",
     "injury_description": "Slipped exiting patient bathroom; right knee twist + immediate swelling.",
     "aww": 765,
     "td_rate": 510,
-    "filed_at": "2026-05-09T23:39:15.028Z",
+    "filed_at": "2026-05-10T00:03:45.139Z",
     "source_system": "mock_legacy",
     "external_claim_id": "LEG-000",
     "sync_status": "synced",
-    "last_synced_at": "2026-06-11T23:39:15.028Z",
+    "last_synced_at": "2026-06-12T00:03:45.139Z",
     "metadata": {
      "demo": true,
      "migrated_from": "mock_legacy"
     },
-    "updated_at": "2026-06-11T23:39:15.028Z"
+    "updated_at": "2026-06-12T00:03:45.139Z"
    }
   ]
  },

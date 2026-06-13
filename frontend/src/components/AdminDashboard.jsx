@@ -6,13 +6,34 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchRFAs } from '../services/rfas.js';
 import { C, PRI_COLOR, TD_TYPE_COLOR } from '../theme.js';
 import { fmt$ } from '../utils.js';
-import { Badge, Btn, StatCard, Tabs, SyncBadge } from '../ui/primitives.jsx';
+import { Btn, StatCard, Tabs, SyncBadge } from '../ui/primitives.jsx';
 import { TriageQueue, WcisQualityStrip } from './TriageQueue.jsx';
 
 const ACTION_STATUSES=new Set(["new_claim","intake_complete","under_investigation"]);
 const AGE_MS=d=>Date.now()-new Date(d).getTime();
 const DAYS=ms=>Math.floor(ms/(86400*1000));
 const PRI_ORDER={Critical:0,High:1,Medium:2,Low:3};
+
+// Claim lifecycle badge — covers every claims.status value (the shared
+// theme STATUS_CFG is the RFA pipeline's map and knows none of them).
+const CLAIM_STATUS_CFG={
+  new_claim:{label:"New Claim",color:"#f59e0b",bg:"#1a1100",bd:"#f59e0b33"},
+  intake_complete:{label:"Intake Done",color:"#4a8df0",bg:"#06122a",bd:"#4a8df033"},
+  under_investigation:{label:"Investigation",color:"#a78bfa",bg:"#0e0920",bd:"#a78bfa33"},
+  accepted:{label:"Accepted",color:"#0eb87a",bg:"#001510",bd:"#0eb87a33"},
+  active_medical:{label:"Active Medical",color:"#4a8df0",bg:"#06122a",bd:"#4a8df033"},
+  future_medical_only:{label:"Future Med",color:"#2dd4bf",bg:"#02201c",bd:"#2dd4bf33"},
+  p_and_s:{label:"P&S",color:"#f59e0b",bg:"#1a1100",bd:"#f59e0b33"},
+  pd_evaluation:{label:"PD Eval",color:"#a78bfa",bg:"#0e0920",bd:"#a78bfa33"},
+  settlement_discussions:{label:"Settlement",color:"#22d3ee",bg:"#03191f",bd:"#22d3ee33"},
+  litigated:{label:"Litigated",color:"#fb7185",bg:"#1f060c",bd:"#fb718533"},
+  denied:{label:"Denied",color:"#f04040",bg:"#1a0303",bd:"#f0404033"},
+  closed:{label:"Closed",color:"#6b7f99",bg:"#0b1626",bd:"#24364f"},
+};
+function ClaimBadge({status}){
+  const c=CLAIM_STATUS_CFG[status]||{label:status,color:C.muted,bg:C.card,bd:C.border};
+  return <span style={{display:"inline-block",background:c.bg,color:c.color,border:`1px solid ${c.bd}`,padding:"3px 9px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c.label}</span>;
+}
 
 function ActionQueue({claims,onSelect}){
   const today=new Date().toISOString().split('T')[0];
@@ -27,15 +48,7 @@ function ActionQueue({claims,onSelect}){
     return new Date(a.createdAt)-new Date(b.createdAt);
   });
 
-  const STATUS_CFG_LIVE={
-    new_claim:{label:"New Claim",color:"#f59e0b",bg:"#1a1100",bd:"#f59e0b33"},
-    intake_complete:{label:"Intake Done",color:"#4a8df0",bg:"#06122a",bd:"#4a8df033"},
-    under_investigation:{label:"Investigation",color:"#a78bfa",bg:"#0e0920",bd:"#a78bfa33"},
-  };
-  function LiveBadge({status}){
-    const c=STATUS_CFG_LIVE[status]||{label:status,color:C.muted,bg:C.card,bd:C.border};
-    return <span style={{display:"inline-block",background:c.bg,color:c.color,border:`1px solid ${c.bd}`,padding:"3px 9px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c.label}</span>;
-  }
+  const LiveBadge=ClaimBadge;
 
   if(actionable.length===0){
     return(
@@ -138,15 +151,15 @@ export default function AdminDashboard({claims,onSelect,onAnalyze,aiLoading,onGe
                 <tr key={c.id} className="rh" onClick={()=>onSelect(c.id)} style={{borderBottom:i<claims.length-1?`1px solid ${C.border}`:"none",animation:`fadeUp .3s ease ${i*.04}s both`}}>
                   <td style={{padding:"12px 13px"}}>
                     <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                      <span style={{fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{c.id}</span>
+                      <span style={{fontFamily:C.mono,fontSize:12,color:C.amber,fontWeight:600}}>{c.claimNumber||c.id}</span>
                       <SyncBadge source_system={c.sourceSystem} sync_status={c.syncStatus} small/>
                     </div>
                   </td>
-                  <td style={{padding:"12px 13px",fontSize:13,fontWeight:500}}>{c.claimant}</td>
-                  <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{c.employer}</td>
+                  <td style={{padding:"12px 13px",fontSize:13,fontWeight:500}}>{c.employee?`${c.employee.firstName||''} ${c.employee.lastName||''}`.trim():"—"}</td>
+                  <td style={{padding:"12px 13px",fontSize:12,color:C.dim}}>{c.employerName||"—"}</td>
                   <td style={{padding:"12px 13px",fontSize:12,fontFamily:C.mono,color:C.dim}}>{c.dateOfInjury}</td>
                   <td style={{padding:"12px 13px"}}><div style={{fontSize:12,color:C.dim}}>{c.injuryType}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{c.bodyPart}</div></td>
-                  <td style={{padding:"12px 13px"}}><Badge status={c.status}/></td>
+                  <td style={{padding:"12px 13px"}}><ClaimBadge status={c.status}/></td>
                   <td style={{padding:"12px 13px"}}>{tdActive?<span style={{fontFamily:C.mono,fontSize:11,fontWeight:600,color:TD_TYPE_COLOR[tdActive.benefit_type]||C.blue}}>{tdActive.benefit_type} {fmt$(tdActive.weekly_rate)}/wk</span>:<span style={{color:C.dim}}>—</span>}</td>
                   <td style={{padding:"12px 13px"}}>
                     <div style={{display:"flex",alignItems:"center",gap:6}}>
