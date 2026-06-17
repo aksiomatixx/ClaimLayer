@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>README — ClaimLayer</title>
+<meta name="description" content="ClaimLayer README — what it is, what Akash Dixit owns, the problem it demonstrates, and where to see proof. A reference implementation on synthetic data."/>
+<meta name="robots" content="index,follow"/>
+<link rel="icon" href="assets/mark.png"/>
+<style>
+:root{
+  --bg:#07101a; --surface:#0b1826; --card:#0e1f30; --border:#16293d; --border-mid:#23374e;
+  --amber:#e8a33d; --amber-d:#b97b1f;
+  --text:#eef3f8; --dim:#aebccb; --muted:#5d7185;
+  --green:#3ecf8e; --blue:#58a6ff; --red:#f47067;
+  --sans:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono','SFMono-Regular',Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--amber);text-decoration:none}
+a:hover{text-decoration:underline}
+img{max-width:100%;display:block}
+nav{position:sticky;top:0;z-index:100;background:rgba(7,16,26,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.nav-i{max-width:920px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:18px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--text);font-size:17px}
+.brand img{width:28px;height:28px;border-radius:7px}
+.nav-i .spacer{flex:1}
+.nav-i a.link{color:var(--dim);font-size:14px;font-weight:600}
+.nav-i a.link:hover{color:var(--text);text-decoration:none}
+.btn{display:inline-block;background:var(--amber);color:#06101c;font-weight:700;font-size:13px;padding:8px 16px;border-radius:8px}
+.btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--border-mid)}
+main{max-width:920px;margin:0 auto;padding:48px 24px 96px}
+.banner{font-family:var(--mono);font-size:12.5px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:40px}
+.banner a{font-weight:700}
+.md > div[align="center"]{text-align:center;margin-bottom:8px}
+.md h1{font-size:clamp(30px,4vw,42px);font-weight:800;letter-spacing:-.5px;line-height:1.12;margin:0 0 18px;text-align:center}
+.md h2{font-size:clamp(22px,2.6vw,28px);font-weight:800;letter-spacing:-.3px;margin:52px 0 16px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.md h3{font-size:18px;font-weight:700;margin:32px 0 12px}
+.md p{color:var(--dim);margin:0 0 16px}
+.md strong{color:var(--text);font-weight:700}
+.md ul,.md ol{color:var(--dim);margin:0 0 18px;padding-left:24px}
+.md li{margin:0 0 9px}
+.md li::marker{color:var(--muted)}
+.md code{font-family:var(--mono);font-size:.86em;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:1.5px 6px;color:var(--text)}
+.md pre{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto;margin:0 0 20px}
+.md pre code{background:none;border:none;padding:0;font-size:12.5px;color:var(--dim);line-height:1.6}
+.md a{font-weight:600}
+.md blockquote{border-left:3px solid var(--amber);background:var(--amber-d)11;padding:8px 18px;margin:0 0 18px;color:var(--dim)}
+.md hr{border:none;border-top:1px solid var(--border);margin:40px 0}
+.md table{width:100%;border-collapse:collapse;margin:0 0 22px;font-size:14px;display:block;overflow-x:auto}
+.md th,.md td{border:1px solid var(--border);padding:9px 13px;text-align:left;color:var(--dim);vertical-align:top}
+.md th{background:var(--surface);color:var(--text);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.md img{margin:0 auto 18px}
+footer{border-top:1px solid var(--border);padding:28px 24px;text-align:center;color:var(--muted);font-size:13px}
+footer a{font-weight:600}
+@media (max-width:640px){ .nav-i a.link{display:none} }
+</style>
+</head>
+<body>
+<nav><div class="nav-i">
+  <a class="brand" href="index.html"><img src="assets/mark.png" alt=""/>ClaimLayer</a>
+  <div class="spacer"></div>
+  <a class="link" href="index.html">← Site</a>
+  <a class="link" href="demo/" target="_blank" rel="noopener">Live Demo</a>
+  <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">GitHub ↗</a>
+</div></nav>
+<main>
+  <div class="banner">This is a rendered copy of the project <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/README.md" target="_blank" rel="noopener">README</a> on GitHub. Source links open the repository.</div>
+  <article class="md">
+<div align="center"><img src="assets/mark.png" width="84" alt="ClaimLayer logo"/><h1 id="claimlayer">ClaimLayer</h1>
+<p><strong>Agentic AI for workers&#39; compensation claims — deterministic guardrails, a licensed human at every decision.</strong></p>
+<p>A regulatory-aware execution layer that runs AI agents on top of existing claims systems — without replacing them.</p>
+<p><strong><a href="https://claimlayer.org">claimlayer.org</a></strong> — product site, narrated tour, and the interactive demo</p>
+<p><code>1,352 tests · 92 suites</code> · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API</p>
+</div><h2 id="what-this-is">What this is</h2>
+<p>ClaimLayer is a reference implementation of how to deploy AI agents into a highly regulated workflow — California workers&#39; compensation claims — with the model boxed in by code rather than trusted. Five Claude agents draft compensability analyses, evaluate treatment authorizations, price settlements, and extract intake; a deterministic gate screens for Medicare interests. Each agent runs inside guardrails enforced in code, with a licensed human at every consequential decision and a queryable audit trail behind every model call. It runs on synthetic demo data — a worked example, not a live system (see <a href="#status--scope">Status &amp; scope</a>).</p>
+<p><strong>The hard problem it demonstrates:</strong> how to get real leverage from LLM agents in a domain where a wrong automated decision has legal and financial consequences — which means deciding, concretely and in code, where the model must <em>not</em> be trusted, and proving those limits hold.</p>
+<h2 id="what-i-designed-and-own">What I designed and own</h2>
+<p>I&#39;m a California workers&#39; compensation claims professional with a decade in the field. I owned the work that makes this credible: the domain model and claim lifecycle, the product requirements, the system architecture, the agent boundaries and the deterministic guardrails, the eval design, the acceptance criteria, code review, and delivery. Claude Code accelerated the implementation; the judgment about what to build and where AI belongs is mine, and it&#39;s the substance on display here.</p>
+<h2 id="reviewer-path">Reviewer path</h2>
+<p>Three steps, ~90 seconds, to judge the work directly:</p>
+<ol>
+<li><strong>Try one prepared decision.</strong> Open the <a href="https://claimlayer.org/demo">interactive demo</a> → open any claim → <strong>Complete action</strong>. You&#39;ll see the dry-run of exactly what completing will do, with a required decision rationale, before anything commits.</li>
+<li><strong>Inspect one model call.</strong> In the demo, open the <strong>Agents</strong> tab → open any decision. Every Claude call is logged with its inputs, outputs, confidence, and the guardrails it tripped.</li>
+<li><strong>Read the proof.</strong> The <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/docs/architecture.md">architecture writeup</a>; a guardrail enforced in code, not prompts (<a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/services/rfaService.js"><code>rfaService.js</code></a> — no deny path); and the live-model eval gate (<a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/scripts/liveIngestionTest.js"><code>liveIngestionTest.js</code></a>, run by <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/.github/workflows/live-ingestion-test.yml">this workflow</a>).</li>
+</ol>
+<h2 id="why-its-different">Why it&#39;s different</h2>
+<p>Most AI in the claims space does prediction — scoring which claims are likely to be expensive, litigate, or go sideways. ClaimLayer does execution: it carries out the regulatory workflow itself — drafting the analysis, applying the statutory math, generating the notices, tracking the deadlines — inside guardrails a licensed adjuster designed and enforced in code.</p>
+<p>The deeper change is to the shape of the adjuster&#39;s day. Traditional adjusting is <strong>reactive</strong>: medical reports, work status reports, and legal documents arrive all day, and the job is to notice them, read them, file them, and work out what each one requires. ClaimLayer inverts that loop:</p>
+<ul>
+<li><strong>Inbound is automated.</strong> Every incoming document is ingested, classified against a controlled category list, documented to the claim file, and translated into the action it requires — what reaches the adjuster is a queued decision, not a PDF.</li>
+<li><strong>The human makes the decision.</strong> Compensability, authorization, settlement — every consequential call is a licensed adjuster&#39;s, made from a ranked action queue where the analysis is already drafted and the deadline already computed.</li>
+<li><strong>Outbound is automated.</strong> Once the decision is made, the aftermath executes itself: the decision is documented in the audit trail, statutory notices generate and mail, completed diaries close, and the next deadline diaries are set.</li>
+</ul>
+<p>The adjuster stops being a router of paperwork and becomes what the license is for: the decision-maker.</p>
+<p>That loop is implemented end to end: a document arrives as an <strong>actual PDF</strong> (uploaded in the drawer, or as an email attachment via the inbound-email webhook) or as extracted text; PDFs extract their text layer locally, and scanned documents with no text layer fall back to classification of the document itself via a Claude document block — same guardrails either way; the document is classified into a controlled category by a Claude agent (every call logged to the audit trail); it is matched to its claim — or routed to a <strong>human triage queue</strong> when confidence is low, never silently filed; key fields are extracted and an AI summary attached; a <strong>deterministic rules table</strong> translates the document into the action it requires; the action surfaces in the claim drawer with the source document one click away; the adjuster sees a dry-run of <strong>exactly what completing will do</strong>, then approves, edits (audited — penalty diaries refuse to move), or declines with a documented reason; on approval the decision note writes back to the retained system of record, the diary completes, the successor deadline is set, and the statutory notice generates and queues. One integration test walks all ten steps.</p>
+<p>The wedge is agentic execution within hard regulatory limits, where every AI decision is bounded, auditable, and reversible by a human.</p>
+<h2 id="architecture-at-a-glance">Architecture at a glance</h2>
+<p>The system is a layer, not a replacement: it runs agentic workflows on top of a customer&#39;s retained system of record via a pluggable integration layer. (<a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/docs/architecture.md">Full architecture writeup →</a> and an in-app <code>/architecture</code> view.)</p>
+<ul>
+<li><strong>Six specialized agents</strong> — compensability assessment, MTUS treatment authorization, C&amp;R settlement pricing, voice-intake extraction, and inbound document classification (Claude), plus a <strong>deterministic</strong> MSA screening gate (no model — Medicare eligibility is a threshold rule) — each with authored prompts, explicit invocation triggers, and bounded output schemas.</li>
+<li><strong>Guardrails enforced in code</strong> — not in prompts. The model cannot take certain actions regardless of what it returns (see below).</li>
+<li><strong>Human-in-the-loop checkpoints</strong> at every compensability, authorization, and settlement decision, backed by a licensed adjuster&#39;s judgment.</li>
+<li><strong>Full AI decision audit trail</strong> — every model call is logged with its input snapshot, output, guardrails triggered, and human-override status, surfaced in an in-app <code>/agents</code> review console.</li>
+<li><strong>Legacy-system integration layer</strong> — pluggable adapters ingest claims from an existing system and push diaries, documents, and notices back, so agents deploy onto a system of record rather than demanding migration off it.</li>
+<li><strong>Regulatory data discipline</strong> — statutory values come from authoritative DWC sources, never from the model.</li>
+</ul>
+<h2 id="engineering-decisions-that-signal-the-intent">Engineering decisions that signal the intent</h2>
+<p>These are the choices that show, in code, where the model is and isn&#39;t trusted. Guardrails live in the <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/services/documentIngestionService.js">service layer, not the prompts</a> — the model cannot reach past them regardless of what it returns:</p>
+<ul>
+<li><strong>No auto-deny pathway exists anywhere in the system.</strong> On treatment authorizations, an agent may only return <code>auto_approve</code> or <code>physician_review</code> — never a denial (<a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/services/rfaService.js"><code>rfaService.js</code></a>). Denials are a licensed-human-only action by construction.</li>
+<li><strong>Reserve changes require a licensed adjuster&#39;s approval.</strong> The AI may suggest reserves; nothing is written to the financial system of record until an adjuster approves it.</li>
+<li><strong>A deterministic MSA screen gates every settlement</strong> — Medicare-interest screening is not left to the model&#39;s discretion.</li>
+<li><strong>Statutory values are never model-generated.</strong> Rating schedules, fee schedules, and caps are sourced from authoritative DWC publications and version-controlled; the model reasons over them but never invents them.</li>
+<li><strong>Penalty and deadline diaries cannot be snoozed</strong>, and statutory deadlines use the correct calendar/business-day basis per the governing code section.</li>
+<li><strong>Supervisor oversight is deterministic.</strong> A daily business-morning digest lists every CRITICAL/no-snooze diary due today and every overdue diary across the book, grouped by adjuster — plain queries, no model involvement, acknowledged with an audit trail.</li>
+</ul>
+<h2 id="testing">Testing</h2>
+<p>1,352 automated tests across 92 suites: 1,268 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.</p>
+<p>Worth a reviewer&#39;s eye specifically:</p>
+<ul>
+<li><strong>Live-model eval gate</strong> — <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/scripts/liveIngestionTest.js"><code>liveIngestionTest.js</code></a>, run in CI by <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/.github/workflows/live-ingestion-test.yml"><code>live-ingestion-test.yml</code></a>: 13 golden documents through the <em>real</em> classifier, asserting category, claim match, and routing on every run. It has already caught the model over-applying a signal — fixed deterministically in code.</li>
+<li><strong>End-to-end document-to-action path</strong> — <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/tests/integration/document-to-action.e2e.test.js"><code>document-to-action.e2e.test.js</code></a> walks arrival → classification → claim match → triage-or-file → action diary → write-back.</li>
+<li><strong>Schema-contract test</strong> — <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/scripts/migration-contract-test.js"><code>migration-contract-test.js</code></a> asserts every write shape the code performs against a schema built only from the migrations, so code and schema cannot silently drift.</li>
+</ul>
+<h2 id="tech-stack">Tech stack</h2>
+<p>Node.js / Express · React / Vite · PostgreSQL (Supabase) · Anthropic Claude API · server-side PDF generation (pdf-lib).</p>
+<h2 id="how-this-was-built">How this was built</h2>
+<p>Built solo: I owned the domain model, architecture, agent boundaries, guardrails, eval design, acceptance criteria, review, and delivery (see <a href="#what-i-designed-and-own">What I designed and own</a>); Claude Code accelerated the implementation. ClaimLayer is what a decade of claims domain expertise plus AI-assisted development produces when the architecture and the regulatory constraints come from someone who has lived inside the workflow.</p>
+<h2 id="status--scope">Status &amp; scope</h2>
+<p>A reference implementation and active project — not a live system processing real claims. It runs on synthetic demo data and is not affiliated with any employer. It&#39;s meant to demonstrate the deployment patterns, not to serve as legal or claims-handling advice.</p>
+<h2 id="try-the-demo">Try the demo</h2>
+<h3 id="prerequisites">Prerequisites</h3>
+<p>The demo runs against a real PostgreSQL database via Supabase — there is no in-memory fallback, because the audit trail and row-level security are part of what&#39;s being demonstrated.</p>
+<ol>
+<li><strong>Node.js 20+</strong> (CI runs on 24).</li>
+<li><strong>A Supabase project</strong> — either of:<ul>
+<li><strong>Local (recommended):</strong> install the <a href="https://supabase.com/docs/guides/cli">Supabase CLI</a> and Docker, then run <code>supabase start</code> from the repo root. The repo ships a <code>supabase/config.toml</code>, so this spins up a full local stack and applies every migration in <code>supabase/migrations/</code> automatically. The command prints the <code>API URL</code>, <code>anon key</code>, and <code>service_role key</code> to put in <code>backend/.env</code>.</li>
+<li><strong>Hosted:</strong> a free-tier project at <a href="https://supabase.com">supabase.com</a>; apply the migrations in <code>supabase/migrations/</code> in filename order (SQL editor, <code>psql</code>, or <code>supabase db push</code>).</li>
+</ul>
+</li>
+<li><strong>Environment</strong> — copy <code>backend/.env.example</code> to <code>backend/.env</code>, then fill in:<ul>
+<li><code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>SUPABASE_ANON_KEY</code> (printed by <code>supabase start</code>)</li>
+<li><code>JWT_SECRET</code> (any random string for local use — <code>node -e &quot;console.log(require(&#39;crypto&#39;).randomBytes(64).toString(&#39;hex&#39;))&quot;</code>)</li>
+<li><code>ANTHROPIC_API_KEY</code> — optional; without it the app runs but agent analyses are unavailable</li>
+<li><code>FILEHANDLER_API_KEY</code>, <code>ADP_CLIENT_ID</code>, <code>ADP_CLIENT_SECRET</code> — required to be <em>set</em> (the backend refuses to boot without them), but the demo-safe mock values already in <code>.env.example</code> (<code>mock-fh-key</code> / <code>mock</code> / <code>mock</code>) are all the demo needs; no real vendor accounts</li>
+<li>SendGrid / Twilio / Lob keys are <strong>not</strong> required for the demo</li>
+</ul>
+</li>
+</ol>
+<h3 id="run-it">Run it</h3>
+<pre><code class="language-bash">npm ci --prefix backend &amp;&amp; npm ci --prefix frontend   # lockfile-exact installs (no root install needed)
+npm run dev:demo      # wipes demo-flagged rows, seeds 14 synthetic claims, starts backend (:3001) + frontend (:5173)
+</code></pre>
+<h3 id="test-the-document-pipeline-with-real-pdfs">Test the document pipeline with real PDFs</h3>
+<pre><code class="language-bash">npm run gen:test-docs   # writes test-documents/*.pdf + manifest.json
+</code></pre>
+<p>Generates 13 realistic inbound claim documents (PR-2s, a DWC Form RFA, a PR-4, a QME notice, bills, a wage statement, attorney filings…) as actual PDFs whose claim numbers, claimants, DOIs, and employers match the seeded demo book — each one is the natural next inbound document for its claim&#39;s lifecycle stage. Upload one through the claim drawer (or <code>POST /api/v1/documents/ingest-file</code>) and watch it classify, match by extracted claim number, file to the claim, and queue its action diary. One file deliberately carries no claim number so it lands in the human triage queue. Claim numbers embed the current year and dates are relative to the generation date, so regenerate after each re-seed. <code>manifest.json</code> lists the expected category and routing for every file.</p>
+<h3 id="deploying">Deploying</h3>
+<p>Apply migrations <strong>before</strong> deploying the matching backend (the code
+writes columns the migrations create — <code>migrate → deploy</code>, always).
+CI proves the chain on every push: all migrations apply in filename
+order to a clean PostgreSQL 16, the hardening migration re-applies
+idempotently, and schema-contract integration tests assert every write
+shape the code performs (<code>backend/scripts/migration-contract-test.js</code>).</p>
+<p>Three workers must run in production (cron or scheduler, all also
+triggerable via authenticated admin endpoints):</p>
+<table>
+<thead>
+<tr>
+<th>Worker</th>
+<th>Module</th>
+<th>Endpoint</th>
+<th>Schedule</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Notice delivery</td>
+<td><code>backend/src/cron/noticeDeliveryWorker.js</code></td>
+<td><code>POST /api/v1/admin/workers/notice-delivery/run</code></td>
+<td>every 15 min</td>
+</tr>
+<tr>
+<td>Integration outbox</td>
+<td><code>backend/src/cron/outboxWorker.js</code></td>
+<td><code>POST /api/v1/admin/workers/outbox/run</code></td>
+<td>every 5 min</td>
+</tr>
+<tr>
+<td>Supervisor alerts</td>
+<td><code>backend/src/cron/supervisorAlertWorker.js</code></td>
+<td><code>POST /api/v1/admin/workers/supervisor-alerts/run</code></td>
+<td>06:30 America/Los_Angeles, Mon–Fri</td>
+</tr>
+</tbody></table>
+<p>Physical mail is only marked <strong>delivered</strong> by a signature-verified Lob
+webhook (<code>POST /webhooks/lob/delivery</code>); until then a submitted letter
+is truthfully <code>submitted</code>. Set <code>LOB_WEBHOOK_SECRET</code> (and the DxF/Enlyte
+secrets) in production — webhook verification fails closed without them.</p>
+<p>The email-in document channel (<code>POST /webhooks/email/inbound</code>) is shaped
+for SendGrid Inbound Parse / Mailgun Routes: point the vendor&#39;s route at
+it with <code>?token=</code> matching <code>EMAIL_INBOUND_TOKEN</code> (required in
+production — fails closed without it). PDF attachments run through the
+standard ingestion pipeline, idempotent on the email Message-ID. The
+vendor account + inbound DNS (MX) configuration is the remaining setup.</p>
+<p>Then open the <code>/architecture</code> and <code>/agents</code> views to see the agent registry, guardrail catalog, and live decision audit trail.</p>
+<h2 id="repository-structure">Repository structure</h2>
+<pre><code>backend/    Express API, agent services, prompts/, guardrails, tests
+frontend/   React/Vite app — workspace, /architecture, /agents views
+supabase/   schema migrations (staged, applied manually)
+docs/       architecture writeup, case study, regulatory sources
+</code></pre>
+
+  </article>
+</main>
+<footer>
+  Built by <b>Akash Dixit</b> · <a href="mailto:akashdixit@gmail.com">Email</a> · <a href="https://www.linkedin.com/in/akash-dixit-6835a522a" target="_blank" rel="noopener">LinkedIn</a> · <a href="index.html">ClaimLayer site</a>
+</footer>
+</body>
+</html>
