@@ -4,9 +4,9 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>ClaimLayer — an AI deployment case study by Akash Dixit</title>
-<meta name="description" content="A public case study in deploying AI agents into a regulated, deadline-driven insurance workflow — California workers' compensation. Built by Akash Dixit by directing Claude Code: guardrails enforced in code, model behavior eval-gated in CI with real calls, every model call audited, a licensed human at every consequential decision."/>
+<meta name="description" content="A public case study in deploying AI agents into a regulated, deadline-driven insurance workflow — California workers' compensation. By Akash Dixit: guardrails enforced in code, model behavior eval-gated in CI with real calls, every model call audited, a licensed human at every consequential decision. Reference implementation on synthetic data."/>
 <meta property="og:title" content="ClaimLayer — an AI deployment case study by Akash Dixit"/>
-<meta property="og:description" content="AI agents execute a regulated workers' comp workflow inside code-enforced guardrails, with a licensed human at every consequential decision. A full-stack reference implementation built by directing Claude Code."/>
+<meta property="og:description" content="AI agents execute a regulated workers' comp workflow inside code-enforced guardrails, with a licensed human at every consequential decision. A full-stack reference implementation by Akash Dixit, on synthetic data."/>
 <meta property="og:image" content="https://claimlayer.org/assets/poster.jpg"/>
 <meta property="og:url" content="https://claimlayer.org/"/>
 <meta property="og:type" content="website"/>
@@ -155,15 +155,15 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 <nav><div class="wrap nav-i">
   <a class="brand" href="#top"><img src="assets/mark.png" alt=""/>ClaimLayer</a>
   <div class="nav-l">
-    <a href="demo/" target="_blank" rel="noopener">Live Demo</a><a href="#video">Tour</a><a href="#hiring">For hiring teams</a><a href="#features">Product</a><a href="#how">How it works</a>
-    <a href="#stories">Who it's for</a><a href="#screens">Screenshots</a><a href="#about">About</a><a href="#contact">Contact</a>
+    <a href="demo/" target="_blank" rel="noopener">Live Demo</a><a href="#hiring">For hiring teams</a><a href="#video">Tour</a><a href="#features">Product</a><a href="#how">How it works</a>
+    <a href="#stories">Who it's for</a><a href="#screens">Screenshots</a><a href="readme.html">README</a><a href="#about">About</a><a href="#contact">Contact</a>
   </div>
   <a class="btn small ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">GitHub ↗</a>
 </div></nav>
 
 <header class="hero" id="top"><div class="wrap">
   <h1>AI agents for workers' comp claims.<br/><em>A licensed human at every decision.</em></h1>
-  <p class="byline">A full-stack reference implementation built around California workers' compensation domain expertise — designed to demonstrate safe deployment of AI agents in regulated, deadline-driven workflows. Designed, built, and eval-gated solo by <a href="#about"><b>Akash Dixit</b></a> — a claims professional doing the AI deployment himself, by directing Claude Code.</p>
+  <p class="byline">Designed and built solo by <a href="#about"><b>Akash Dixit</b></a> — a California workers' compensation professional who owned the domain model, architecture, agent boundaries, deterministic guardrails, and eval design. A full-stack reference implementation that shows how AI agents can be deployed into a regulated, deadline-driven workflow with the model boxed in by code.</p>
   <p>ClaimLayer is a regulatory-aware execution layer that runs Claude-powered agents on top of an existing claims system — drafting the analysis, applying the statutory math, generating the notices, and tracking the deadlines, inside guardrails enforced in code.</p>
   <div class="hero-cta">
     <a class="btn" href="demo/" target="_blank" rel="noopener">🖱 &nbsp;Launch the interactive demo</a>
@@ -171,13 +171,43 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">View source ↗</a>
   </div>
   <div class="chips">
-    <div class="chip"><b>6</b> specialized Claude agents</div>
+    <div class="chip"><b>6</b> specialized agents — 5 Claude + 1 deterministic gate</div>
     <div class="chip"><b>100%</b> of model calls audit-logged</div>
     <div class="chip"><b>0</b> auto-deny pathways — by construction</div>
     <div class="chip"><b>1,300+</b> automated tests, backend · frontend · schema contract</div>
     <div class="chip"><b>13</b> golden documents — live-model eval gate in CI</div>
   </div>
 </div></header>
+
+<section id="reviewer-path"><div class="wrap reveal">
+  <div class="kicker">90-second reviewer path</div>
+  <h2>Judge the work in three steps</h2>
+  <p class="sub">No setup, no keys — the demo is the real app on synthetic data.</p>
+  <div class="steps">
+    <div class="step"><h3>1 · Try a prepared decision</h3><p>Open a claim in the demo and click <b>Complete action</b>. You'll see a dry-run of exactly what completing will do, with a required decision rationale, before anything commits.</p><p style="margin-top:10px"><a href="demo/" target="_blank" rel="noopener" style="color:var(--amber)">Launch the demo ↗</a></p></div>
+    <div class="step"><h3>2 · Inspect a model call</h3><p>In the demo's <b>Agents</b> tab, open any decision: its inputs, output, confidence, tokens, latency, and the guardrails it tripped — every Claude call is on the record.</p><p style="margin-top:10px"><a href="demo/" target="_blank" rel="noopener" style="color:var(--amber)">Open the demo → Agents ↗</a></p></div>
+    <div class="step"><h3>3 · Read the proof</h3><p>The architecture writeup, a guardrail enforced in code (no deny path), and the live-model eval gate that replays 13 golden documents through the real classifier in CI.</p><p style="margin-top:10px"><a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/docs/architecture.md" target="_blank" rel="noopener" style="color:var(--amber)">Architecture ↗</a> · <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/services/rfaService.js" target="_blank" rel="noopener" style="color:var(--amber)">guardrail ↗</a> · <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/.github/workflows/live-ingestion-test.yml" target="_blank" rel="noopener" style="color:var(--amber)">eval gate ↗</a></p></div>
+  </div>
+</div></section>
+
+<section id="hiring" class="band"><div class="wrap reveal">
+  <div class="kicker">About this case study</div>
+  <h2>For hiring teams</h2>
+  <p class="sub">ClaimLayer is a public case study in deploying AI agents into a regulated, deadline-driven insurance workflow. If you're hiring for AI deployment, forward-deployed engineering, or applied-AI roles, this is a working sample of that job: domain requirements translated into agent boundaries, guardrails enforced in code, model behavior eval-gated in CI, every call audited — shipped end to end.</p>
+  <div class="feat">
+    <div class="card"><div class="glyph">🏛️</div><h3>Regulated workflow design</h3><p>Designed regulated AI workflows for California workers' compensation claims — statutory deadlines, notices, benefits math, and audit obligations included.</p></div>
+    <div class="card"><div class="glyph">🤝</div><h3>Agent boundaries</h3><p>Defined where the model stops: AI prepares the work; licensed humans make the consequential decisions — compensability, benefits, reserves, settlement.</p></div>
+    <div class="card"><div class="glyph">🧪</div><h3>Evals &amp; live-model CI</h3><p>A CI gate replays 13 golden claim documents through the pipeline with real Claude calls — classification, claim matching, and action routing asserted on every run. A live run caught the model over-applying a signal; the fix ships as deterministic code, pinned by tests.</p></div>
+    <div class="card"><div class="glyph">🧭</div><h3>Ownership of the hard calls</h3><p>Owned the domain model, architecture, agent boundaries, guardrails, eval design, acceptance criteria, and review. Claude Code accelerated the implementation; the judgment about where AI belongs is the work on display.</p></div>
+    <div class="card"><div class="glyph">🧱</div><h3>Full-stack build</h3><p>Built a full-stack demo on synthetic claims with statutory deadline logic, document intake, audit logs, and integration scaffolding.</p></div>
+    <div class="card"><div class="glyph">🔍</div><h3>Review-driven hardening</h3><p>Hardened the project through review passes covering auth, migrations, stale approvals, idempotency, and public-copy truthfulness.</p></div>
+  </div>
+  <div class="hero-cta" style="justify-content:flex-start;margin-top:38px">
+    <a class="btn" href="#video">▶ &nbsp;Watch the demo</a>
+    <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">View source ↗</a>
+    <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer/blob/main/docs/architecture.md" target="_blank" rel="noopener">Read architecture ↗</a>
+  </div>
+</div></section>
 
 <section id="video"><div class="wrap reveal">
   <div class="kicker">Product tour</div>
@@ -190,25 +220,6 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     </video>
   </div>
   <p style="margin-top:14px;font-size:.85rem;color:var(--muted);text-align:center">Demo environment: synthetic claims only. WCIS submissions and acknowledgments shown are simulated end to end — production transmission runs through the customer's DWC trading-partner credentials.</p>
-</div></section>
-
-<section id="hiring"><div class="wrap reveal">
-  <div class="kicker">About this case study</div>
-  <h2>For hiring teams</h2>
-  <p class="sub">ClaimLayer is a public case study in deploying AI agents into a regulated, deadline-driven insurance workflow. If you're hiring for AI deployment, forward-deployed engineering, or applied-AI roles, this is a working sample of that job: domain requirements translated into agent boundaries, guardrails enforced in code, model behavior eval-gated in CI, every call audited — shipped end to end by one person directing AI tooling.</p>
-  <div class="feat">
-    <div class="card"><div class="glyph">🏛️</div><h3>Regulated workflow design</h3><p>Designed regulated AI workflows for California workers' compensation claims — statutory deadlines, notices, benefits math, and audit obligations included.</p></div>
-    <div class="card"><div class="glyph">🤝</div><h3>Agent boundaries</h3><p>Defined where the model stops: AI prepares the work; licensed humans make the consequential decisions — compensability, benefits, reserves, settlement.</p></div>
-    <div class="card"><div class="glyph">🧪</div><h3>Evals &amp; live-model CI</h3><p>A CI gate replays 13 golden claim documents through the production pipeline with real Claude calls — classification, claim matching, and action routing asserted on every run. A live run caught the model over-applying a signal; the fix ships as deterministic code, pinned by tests.</p></div>
-    <div class="card"><div class="glyph">🧭</div><h3>AI-native delivery</h3><p>Directed Claude Code as the implementation partner while owning architecture, requirements, tests, and review.</p></div>
-    <div class="card"><div class="glyph">🧱</div><h3>Full-stack build</h3><p>Built a full-stack demo on synthetic claims with statutory deadline logic, document intake, audit logs, and integration scaffolding.</p></div>
-    <div class="card"><div class="glyph">🔍</div><h3>Review-driven hardening</h3><p>Hardened the project through review passes covering auth, migrations, stale approvals, idempotency, and public-copy truthfulness.</p></div>
-  </div>
-  <div class="hero-cta" style="justify-content:flex-start;margin-top:38px">
-    <a class="btn" href="#video">▶ &nbsp;Watch the demo</a>
-    <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">View source ↗</a>
-    <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer/blob/main/docs/architecture.md" target="_blank" rel="noopener">Read architecture ↗</a>
-  </div>
 </div></section>
 
 <section class="band"><div class="wrap reveal">
@@ -232,7 +243,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     </div>
   </div>
   <div style="margin-top:22px;background:var(--amber-f);border:1px solid rgba(232,163,61,.4);border-radius:12px;padding:18px 24px;font-size:15.5px;color:var(--amber);font-weight:600">
-    The operating contract: as long as the adjuster works the generated action queue, statutory timelines are met, penalties are avoided, and the state reporting files itself. The adjuster's job becomes the two things that need a human: impactful decisions — with everything relevant presented, summarized, and organized — and taking care of people.
+    The operating contract: as long as the adjuster works the generated action queue, statutory deadlines are computed and tracked, the required notices and state-reporting transactions are drafted and queued, and nothing falls through unread. The adjuster's job becomes the two things that need a human: impactful decisions — with everything relevant presented, summarized, and organized — and taking care of people.
   </div>
 </div></section>
 
@@ -262,7 +273,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 
 <section><div class="wrap reveal">
   <div class="kicker">Safety architecture</div>
-  <h2>Regulated AI design — safe to point at a real workflow</h2>
+  <h2>Regulated AI design — the model boxed in by code</h2>
   <p class="sub">Human approval for every consequential decision, guardrails encoded in code rather than policy copy, and deterministic statutory math the model can read but never write.</p>
   <div class="g-list">
     <div class="g-item"><span class="no">01</span><div><b>No auto-deny pathway exists anywhere in the system</b><span>Denials are a licensed-human-only action by construction — the output schema doesn't include one.</span></div></div>
@@ -273,7 +284,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
     <div class="g-item"><span class="no">06</span><div><b>Adversarially tested guardrails</b><span>The test suite actively tries to push agents past their bounds — and asserts the guardrails hold.</span></div></div>
     <div class="g-item"><span class="no">07</span><div><b>Model behavior is regression-tested with real calls</b><span>A CI gate replays 13 golden documents through classification → claim match → action routing; a misroute fails the build.</span></div></div>
   </div>
-  <p class="foot-note">Every model call is audit-logged — input snapshot, output, guardrails triggered, human-override status — queryable in the in-app Agents console. And everything here runs on synthetic demo data: ClaimLayer is a reference implementation with integration scaffolding, not a production system filing real notices.</p>
+  <p class="foot-note">See it in the source: the <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/src/services/rfaService.js" target="_blank" rel="noopener">RFA guardrail</a> (no deny path), the <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/.github/workflows/live-ingestion-test.yml" target="_blank" rel="noopener">live-model eval gate</a>, and the <a href="https://github.com/aksiomatixx/ClaimLayer/blob/main/backend/scripts/migration-contract-test.js" target="_blank" rel="noopener">schema-contract test</a>. Every model call is audit-logged — input snapshot, output, guardrails triggered, human-override status — queryable in the in-app Agents console. Everything here runs on synthetic demo data: ClaimLayer is a reference implementation with integration scaffolding, not a production system filing real notices.</p>
 </div></section>
 
 <section id="stories" class="band"><div class="wrap reveal">
@@ -290,7 +301,7 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
         <li>After the decision, the AI does the follow-up: documents it, sends the letters and notices, completes the diary, sets the next ones, builds and queues the FROI/SROI state-report transactions — all of it logged and auditable</li>
         <li>What's left for the human is exactly what should be: the impactful decisions, and taking care of the people on the claim</li>
       </ul>
-      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, calendars deadlines, and keys state reports by hand. Here the contract is simple — work the queue and the timelines are met, the penalties avoided, the state reporting built, queued, and reconciled.</span></div>
+      <div class="delta"><b>vs. the usual claims system</b><span>Legacy systems are passive ledgers: the adjuster reads raw PDFs, recalls the code section, drafts each notice, calendars deadlines, and keys state reports by hand. Here the contract is simple — work the queue and the deadlines are computed, the notices drafted, the state-reporting transactions built, queued, and reconciled.</span></div>
     </div>
     <div class="story">
       <span class="role" style="color:var(--blue)">The decision surface</span>
@@ -327,16 +338,16 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
   <h2>Built by Akash Dixit — claims professional, AI-native builder</h2>
   <div class="about" style="margin-top:40px">
     <div>
-      <p>I'm a California workers' compensation claims professional with a decade in the field. I designed, architected, and built ClaimLayer by directing Claude Code, Anthropic's AI coding agent. The hard part was never the keystrokes; it was knowing what to build, where the model must not be trusted, and how to make a regulated workflow safe.</p>
-      <p><b style="color:var(--text)">My role.</b> I defined the workflow, product requirements, agent boundaries, safety rules, statutory logic, demo dataset, acceptance criteria, and test expectations — including the eval gate that replays golden documents through the live model in CI. I directed Claude Code as the implementation partner — reviewing outputs, correcting architecture, hardening edge cases, and iterating from code-review feedback. Domain architect, product lead, and QA reviewer on one head count.</p>
+      <p>I'm a California workers' compensation claims professional with a decade in the field. I designed and architected ClaimLayer and own every consequential call in it — the domain model, the agent boundaries, the deterministic guardrails, the eval design, and the acceptance criteria. Claude Code, Anthropic's AI coding agent, accelerated the implementation; deciding what to build and where the model must not be trusted is the work, and it's what this project demonstrates.</p>
+      <p><b style="color:var(--text)">My role.</b> I defined the workflow, product requirements, agent boundaries, safety rules, statutory logic, demo dataset, acceptance criteria, and test expectations — including the eval gate that replays golden documents through the live model in CI — then reviewed the implementation, corrected architecture, hardened edge cases, and iterated from code-review feedback. Domain architect, product lead, and QA reviewer on one head count.</p>
       <p class="mono" style="font-size:12px;color:var(--muted)">Domain workflow design · AI agent boundary design · Human-in-the-loop decision architecture · Model evals &amp; CI gating · Test &amp; acceptance criteria · Demo data &amp; product narrative · Review-driven hardening</p>
       <p>ClaimLayer is both an active project and a public worked example of a question I think matters: <b style="color:var(--text)">how do you get real leverage from AI agents in an environment where a wrong automated decision has legal consequences?</b> The answer it takes: agents execute, humans decide, code enforces the boundary, and everything is logged.</p>
-      <p>The result is a concrete, reviewable artifact — prompts, guardrails, statutory math, and the full automated test suite (1,300+ tests), open for inspection on GitHub — showing how regulated AI deployment can be designed, tested, explained, and safely bounded.</p>
+      <p>The result is a concrete, reviewable artifact — prompts, guardrails, statutory math, and the full automated test suite (1,300+ tests), open for inspection on GitHub — showing how regulated AI deployment can be designed, tested, explained, and bounded in code.</p>
     </div>
     <div>
       <div class="fact"><span>Builder</span><b>Akash Dixit</b></div>
       <div class="fact"><span>Background</span><b>10 yrs · CA workers' compensation</b></div>
-      <div class="fact"><span>AI</span><b>Anthropic Claude (6 agents)</b></div>
+      <div class="fact"><span>AI</span><b>Anthropic Claude · 5 agents + 1 deterministic gate</b></div>
       <div class="fact"><span>Stack</span><b>Node / Express · React · PostgreSQL</b></div>
       <div class="fact"><span>Tests</span><b>1,300+ · backend, frontend, schema contract</b></div>
       <div class="fact"><span>Evals</span><b>13 golden documents · live-model CI gate</b></div>
@@ -350,9 +361,10 @@ footer{border-top:1px solid var(--border);padding:46px 0 60px;color:var(--muted)
 <section id="contact"><div class="wrap reveal">
   <div class="kicker">The ask</div>
   <h2>Review ClaimLayer as an AI deployment artifact</h2>
-  <p class="sub">ClaimLayer is not a production claims administrator. It is a public, synthetic-data reference implementation showing how AI agents can be safely designed around regulated insurance workflows. Watch it run, read how it's built, and judge the work directly.</p>
+  <p class="sub">ClaimLayer is not a production claims administrator. It is a public, synthetic-data reference implementation showing how AI agents can be designed around regulated insurance workflows with the model bounded in code. Watch it run, read how it's built, and judge the work directly.</p>
   <div class="hero-cta" style="justify-content:flex-start;margin-top:34px">
     <a class="btn" href="https://github.com/aksiomatixx/ClaimLayer" target="_blank" rel="noopener">View GitHub ↗</a>
+    <a class="btn ghost" href="readme.html">Read the README</a>
     <a class="btn ghost" href="https://github.com/aksiomatixx/ClaimLayer/blob/main/docs/architecture.md" target="_blank" rel="noopener">Read architecture ↗</a>
     <a class="btn ghost" href="#video">▶ &nbsp;Watch the demo</a>
   </div>

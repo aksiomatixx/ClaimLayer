@@ -69,7 +69,7 @@ FILEHANDLER_API_KEY=mock-fh-key
 
 ---
 
-## Key Behavioral Notes for Matt
+## Key Behavioral Notes for Integrators
 
 **Reserve totals cascade to the claim record.** When reserves are set, `currentMedicalReserve`, `currentIndemnityReserve`, `currentExpenseReserve`, `totalReserve`, and `totalIncurred` on the claim all update immediately. Our backend can read the claim record to get current reserve state without a separate reserves query.
 
