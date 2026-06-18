@@ -313,8 +313,8 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
       <p style="margin-top:14px">Bring the current path for RFAs or work-status reports. We'll compare where documents enter, who touches them, what deadlines matter, and whether a shadow pilot is worth running. No obligation.</p>
       <p style="margin-top:14px;font-size:13.5px">Prefer email? <a href="mailto:akashdixit@gmail.com?subject=ClaimLayer%2030-day%20shadow%20pilot">akashdixit@gmail.com</a></p>
     </div>
-    <!-- HOSTED FORM: replace the form-id below with your Formspree (or equivalent) endpoint, then verify _next matches this page's URL. -->
-    <form class="form" action="https://formspree.io/f/REPLACE_WITH_FORM_ID" method="POST">
+    <!-- Hosted form → Formspree (xkoalyor). Plain-HTML POST: _subject sets the email subject, _next redirects back here to trigger the thanks banner, _gotcha is the spam honeypot. -->
+    <form class="form" action="https://formspree.io/f/xkoalyor" method="POST">
       <input type="hidden" name="_subject" value="ClaimLayer 30-day shadow pilot — new request"/>
       <input type="hidden" name="_next" value="https://claimlayer.org/pilot/?submitted=1"/>
       <div class="hp" aria-hidden="true"><label>Leave this empty<input type="text" name="_gotcha" tabindex="-1" autocomplete="off"/></label></div>
