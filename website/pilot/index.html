@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>ClaimLayer Pilot — 30-day California workers' comp shadow pilot</title>
-<meta name="description" content="Run a 30-day ClaimLayer shadow pilot for California workers' comp. We turn inbound RFAs and work-status reports into an audit-ready adjuster action queue — with the §4650/§5402 clocks, MTUS no-deny guardrail, PDRS-aware math, and DWC notices. AI prepares the work; licensed humans make consequential decisions."/>
-<meta property="og:title" content="ClaimLayer — 30-day California workers' comp shadow pilot"/>
-<meta property="og:description" content="A California workers' comp document-to-action pilot for RFAs and work-status reports, built around the statute. Fixed fee, shadow mode, audit-ready results."/>
+<title>ClaimLayer Pilot — California workers' comp medical-document shadow pilot</title>
+<meta name="description" content="A limited-time founding pilot: ClaimLayer turns your incoming medical documents (PR-2, PR-4, QME/AME reports) into an audit-ready adjuster action queue, computing the statutory deadline each one triggers. Shadow mode. Standard fee $7,500–$15,000, waived for California teams that start a pilot through August. AI prepares the work; licensed humans make consequential decisions."/>
+<meta property="og:title" content="ClaimLayer — California workers' comp medical-document pilot"/>
+<meta property="og:description" content="Turn incoming medical documents into an audit-ready adjuster action queue, built around California workers' comp statute. Limited-time founding pilot, shadow mode."/>
 <meta property="og:image" content="https://claimlayer.org/assets/dashboard.jpg"/>
 <meta property="og:url" content="https://claimlayer.org/pilot/"/>
 <meta property="og:type" content="website"/>
 <meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="ClaimLayer — 30-day California workers' comp shadow pilot"/>
-<meta name="twitter:description" content="Turn inbound RFAs and work-status reports into an audit-ready adjuster action queue, built around California workers' comp statute."/>
+<meta name="twitter:title" content="ClaimLayer — California workers' comp medical-document pilot"/>
+<meta name="twitter:description" content="Turn incoming medical documents into an audit-ready adjuster action queue, built around California workers' comp statute. Limited-time founding pilot."/>
 <meta name="twitter:image" content="https://claimlayer.org/assets/dashboard.jpg"/>
 <link rel="canonical" href="https://claimlayer.org/pilot/"/>
 <link rel="icon" href="../assets/mark.png"/>
@@ -20,12 +20,12 @@
 {
   "@context": "https://schema.org",
   "@type": "Service",
-  "name": "ClaimLayer 30-day California workers' comp shadow pilot",
+  "name": "ClaimLayer California workers' comp medical-document shadow pilot",
   "serviceType": "AI document-to-action workflow pilot for California workers' compensation claims",
   "areaServed": { "@type": "AdministrativeArea", "name": "California, USA" },
   "audience": { "@type": "BusinessAudience", "audienceType": "Workers' comp third-party administrators and self-insured employers" },
   "provider": { "@type": "Organization", "name": "ClaimLayer", "url": "https://claimlayer.org/" },
-  "offers": { "@type": "Offer", "priceCurrency": "USD", "priceSpecification": { "@type": "PriceSpecification", "minPrice": "7500", "maxPrice": "15000", "priceCurrency": "USD" }, "description": "Fixed-fee 30-day shadow pilot on synthetic or redacted documents." }
+  "offers": { "@type": "Offer", "priceCurrency": "USD", "priceSpecification": { "@type": "PriceSpecification", "minPrice": "7500", "maxPrice": "15000", "priceCurrency": "USD" }, "description": "Standard 30-day shadow pilot fee, waived for California teams that begin a pilot through August 2026." }
 }
 </script>
 <style>
@@ -59,11 +59,11 @@ nav{position:sticky;top:0;z-index:50;background:rgba(7,16,26,.86);backdrop-filte
 .nav-i{display:flex;align-items:center;gap:24px;height:62px}
 .brand{display:flex;align-items:center;gap:11px;font-weight:800;font-size:16px;color:var(--text)}
 .brand img{width:30px;height:30px;border-radius:7px}
-.nav-l{display:flex;gap:22px;margin-left:auto;font-size:13.5px;font-weight:600}
+.nav-l{display:flex;gap:20px;margin-left:auto;font-size:13.5px;font-weight:600;white-space:nowrap}
 .nav-l a{color:var(--dim)} .nav-l a:hover{color:var(--text)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,var(--amber),var(--amber-d));color:#000;font-weight:800;font-size:14px;padding:11px 22px;border-radius:9px;border:none;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:44px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,var(--amber),var(--amber-d));color:#000;font-weight:800;font-size:14px;padding:11px 22px;border-radius:9px;border:1px solid transparent;cursor:pointer;transition:transform .15s,box-shadow .15s;min-height:44px}
 .btn:hover{transform:translateY(-1px);box-shadow:0 6px 22px rgba(232,163,61,.35)}
-.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border-mid)}
+.btn.ghost{background:rgba(7,16,26,.42);color:var(--text);border-color:var(--border-mid)}
 .btn.ghost:hover{border-color:var(--amber);box-shadow:none}
 .btn.small{padding:8px 16px;font-size:12.5px;min-height:0}
 
@@ -73,7 +73,7 @@ nav{position:sticky;top:0;z-index:50;background:rgba(7,16,26,.86);backdrop-filte
 .hero::after{content:'';position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(180deg,rgba(7,16,26,0),var(--bg))}
 .hero .wrap{position:relative;z-index:1}
 .hero-copy{max-width:840px}
-.hero p{font-size:clamp(16px,1.8vw,20px);max-width:720px;margin-top:22px;color:#d4dde7}
+.hero p{font-size:clamp(16px,1.8vw,20px);max-width:730px;margin-top:22px;color:#d4dde7}
 .hero-cta{display:flex;gap:14px;flex-wrap:wrap;margin-top:34px}
 .proof{display:flex;gap:10px;flex-wrap:wrap;margin-top:38px}
 .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);background:rgba(11,24,38,.84);border:1px solid var(--border-mid);border-radius:999px;padding:7px 14px}
@@ -113,7 +113,9 @@ nav{position:sticky;top:0;z-index:50;background:rgba(7,16,26,.86);backdrop-filte
 
 /* pricing */
 .price{display:grid;grid-template-columns:.95fr 1.05fr;gap:18px;align-items:stretch}
-.amount{font-size:clamp(38px,5vw,56px);line-height:1;font-weight:800;color:var(--text);margin:12px 0}
+.amount{font-size:clamp(30px,4vw,42px);line-height:1.05;font-weight:800;color:var(--muted);margin:12px 0 6px}
+.amount s{text-decoration:line-through;text-decoration-thickness:2px}
+.waived{font-size:16px;font-weight:800;color:var(--green)}
 .price small{display:block;color:var(--muted);font-size:12px;margin-top:12px;line-height:1.6}
 
 /* data handling */
@@ -163,24 +165,24 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
 <nav><div class="wrap nav-i">
   <a class="brand" href="../"><img src="../assets/mark.png" alt=""/>ClaimLayer</a>
   <div class="nav-l">
-    <a href="#why">Why California</a><a href="#workflow">Workflow</a><a href="#pricing">Pricing</a><a href="../demo/" target="_blank" rel="noopener">Demo</a><a href="../">Case study</a>
+    <a href="#why">Why California</a><a href="#workflow">Workflow</a><a href="#pricing">The pilot</a><a href="../demo/" target="_blank" rel="noopener">Demo</a><a href="../">Case study</a>
   </div>
   <a class="btn small ghost" href="#start">Start a pilot</a>
 </div></nav>
 
 <header class="hero" id="top"><div class="wrap">
   <div class="hero-copy">
-    <div class="kicker">California workers' comp · 30-day shadow pilot</div>
+    <div class="kicker">California workers' comp · limited-time founding pilot</div>
     <h1>California workers' comp, <em>executed inside the statute.</em></h1>
-    <p>ClaimLayer reads your inbound RFAs and work-status reports, computes the statutory deadline, drafts the next action and the DWC notice, and shows the adjuster exactly what will happen before anything commits. AI prepares the work; licensed humans make the consequential decisions.</p>
+    <p>ClaimLayer reads your incoming medical documents — PR-2 and PR-4 progress reports, QME and AME med-legal evaluations — computes the statutory deadline each one triggers, drafts the next action, and shows the adjuster exactly what will happen before anything commits. AI prepares the work; licensed humans make the consequential decisions.</p>
     <div class="hero-cta">
-      <a class="btn" href="#start">Run a 30-day shadow pilot</a>
+      <a class="btn" href="#start">Start a founding pilot</a>
       <a class="btn ghost" href="../demo/" target="_blank" rel="noopener">Open the live demo ↗</a>
     </div>
     <div class="proof">
-      <span class="chip"><b>$7.5k–$15k</b> fixed pilot</span>
+      <span class="chip"><b>Free through August</b> · founding pilot</span>
       <span class="chip"><b>30 days</b> · shadow mode</span>
-      <span class="chip"><b>0</b> auto-deny pathways</span>
+      <span class="chip"><b>Licensed human</b> at every decision</span>
       <span class="chip"><b>100%</b> model-call audit trail</span>
     </div>
   </div>
@@ -192,13 +194,13 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
       <div class="kicker">Why it's different</div>
       <h2>Generic claims AI doesn't know California. This is built around the statute.</h2>
     </div>
-    <p>Most claims AI scores risk or summarizes documents and stops. ClaimLayer carries out the California-specific regulatory work — the math, the notices, the deadlines — inside guardrails enforced in code, with the model boxed in.</p>
+    <p>Most claims AI scores risk or summarizes documents and stops. ClaimLayer carries out the California-specific regulatory work each medical document triggers — the math, the notices, the deadlines — inside guardrails enforced in code, with the model boxed in.</p>
   </div>
   <div class="stat-grid">
-    <div class="stat"><span class="code">§4650 · §4061</span><div><b>The statutory clocks, computed</b><span>First indemnity payment due within 14 days; §4650 adds an automatic 10% on late payments. ClaimLayer starts the right clock from receipt and tracks it on the correct calendar- vs business-day basis.</span></div></div>
-    <div class="stat"><span class="code">§5402</span><div><b>The 90-day compensability decision</b><span>Compensability runs on the §5402 clock — miss it and the claim is presumed accepted. The deadline is surfaced, not buried in a generic configurable diary.</span></div></div>
-    <div class="stat"><span class="code">§4610 · MTUS</span><div><b>Treatment authorization with no auto-deny</b><span>Every RFA is evaluated against MTUS. The AI path is constrained to approval or physician-review routing — denial is a physician-only action by law, and the model cannot reach it.</span></div></div>
-    <div class="stat"><span class="code">PDRS · AMA</span><div><b>Permanent-disability math the model can read but never invent</b><span>PD reasoning is grounded in the 2005 PDRS and AMA Guides — apportionment and combined-values math from version-pinned DWC sources, not a number the model makes up.</span></div></div>
+    <div class="stat"><span class="code">§4650 · §4653</span><div><b>The temporary-disability clock, computed</b><span>A PR-2 that continues or changes work status moves the TD clock. First indemnity payment is due within 14 days, and §4650 adds an automatic 10% on late payments — ClaimLayer starts the right clock from receipt on the correct calendar- vs business-day basis.</span></div></div>
+    <div class="stat"><span class="code">§5402</span><div><b>The 90-day compensability decision</b><span>Compensability runs on the §5402 clock, driven by the medical evidence as it arrives — miss it and the claim is presumed accepted. The deadline is surfaced, not buried in a generic configurable diary.</span></div></div>
+    <div class="stat"><span class="code">§4061 · P&amp;S</span><div><b>Permanent &amp; stationary, caught and queued</b><span>When a report finds the worker P&amp;S (a PR-4 or med-legal evaluation), it triggers the §4061 notice and the permanent-disability process. ClaimLayer flags P&amp;S, computes the timeline, and prepares the notice for adjuster review.</span></div></div>
+    <div class="stat"><span class="code">PDRS · AMA</span><div><b>PD math the model can read but never invent</b><span>Permanent-disability reasoning is grounded in the 2005 PDRS and the AMA Guides — apportionment and combined-values math from version-pinned DWC sources, never a number the model makes up.</span></div></div>
   </div>
 </div></section>
 
@@ -206,12 +208,12 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
   <div class="section-head">
     <div>
       <div class="kicker">The offer</div>
-      <h2>A paid pilot that proves workflow value before production risk.</h2>
+      <h2>A founding pilot that proves workflow value before production risk.</h2>
     </div>
-    <p>The first engagement is intentionally narrow: synthetic or redacted documents, shadow-mode outputs, and measured accuracy across classification, routing, deadline calculation, and adjuster review time.</p>
+    <p>The first engagement is intentionally narrow: synthetic or redacted medical documents, shadow-mode outputs, and measured accuracy across classification, routing, deadline calculation, and adjuster review time.</p>
   </div>
   <div class="grid3">
-    <div class="card"><span class="tag amber">Scope</span><h3>RFA + work-status queue</h3><p>Start with RFAs, PR-2/PR-4 reports, and work-status updates — the inbound documents that create time-sensitive, statute-bound adjuster actions.</p></div>
+    <div class="card"><span class="tag amber">Scope</span><h3>Incoming medical reports</h3><p>Start with the medical documents that drive adjuster action: PR-2 progress reports, PR-4 / permanent-and-stationary reports, and QME/AME med-legal evaluations.</p></div>
     <div class="card"><span class="tag">Mode</span><h3>Shadow pilot only</h3><p>No production claims handling. ClaimLayer runs against synthetic or redacted historical examples and produces reviewable outputs alongside your existing process.</p></div>
     <div class="card"><span class="tag blue">Deliverable</span><h3>Audit-ready results</h3><p>Classification and routing results, action-queue examples, error analysis, audit packets, and an ROI estimate for production use.</p></div>
   </div>
@@ -221,16 +223,16 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
   <div class="visual-row">
     <div>
       <div class="kicker">Workflow</div>
-      <h2>From raw document to prepared decision.</h2>
-      <p style="font-size:16px;margin-bottom:26px">ClaimLayer is not a core-system replacement. It is the execution layer between inbound paperwork and the adjuster's decision surface.</p>
+      <h2>From raw medical document to prepared decision.</h2>
+      <p style="font-size:16px;margin-bottom:26px">ClaimLayer is not a core-system replacement. It is the execution layer between inbound medical paperwork and the adjuster's decision surface.</p>
       <div class="list">
-        <div class="list-item"><b>01</b><span>Classify incoming RFAs, work-status reports, medical reports, and legal documents against controlled categories.</span></div>
+        <div class="list-item"><b>01</b><span>Classify incoming medical documents — PR-2 and PR-4 reports, QME/AME evaluations, and related correspondence — against controlled categories.</span></div>
         <div class="list-item"><b>02</b><span>Match the document to its claim, or route low-confidence items to human triage — never silently filed.</span></div>
-        <div class="list-item"><b>03</b><span>Draft the next action, compute the statutory deadline, and show the source document one click away.</span></div>
+        <div class="list-item"><b>03</b><span>Draft the next action, compute the statutory deadline the report triggers, and show the source document one click away.</span></div>
         <div class="list-item"><b>04</b><span>After human approval, document the decision, queue the notice, complete the diary, and set the successor deadline.</span></div>
       </div>
     </div>
-    <div class="frame"><img src="../assets/drawer.jpg" alt="ClaimLayer decision drawer showing a prepared claim action with its source document and computed deadline"/></div>
+    <div class="frame"><img src="../assets/drawer.jpg" alt="ClaimLayer decision drawer showing a prepared claim action with its source medical document and computed deadline"/></div>
   </div>
 </div></section>
 
@@ -243,7 +245,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
     <p>The pilot runs on the same operating contract as the product: AI can prepare, summarize, classify, and route. Licensed humans remain responsible for every consequential claim decision.</p>
   </div>
   <div class="grid3">
-    <div class="card"><span class="tag amber">RFA safety</span><h3>No auto-deny pathway</h3><p>For treatment authorization, the AI path is constrained to approval or physician-review routing. Denial does not exist as an automated action — by construction, in code.</p></div>
+    <div class="card"><span class="tag amber">Decision safety</span><h3>No automated adverse decision</h3><p>ClaimLayer prepares, summarizes, classifies, and routes. It cannot deny a claim, stop or reduce benefits, or finalize a determination — compensability, temporary disability, and permanent disability stay licensed-human decisions, by construction.</p></div>
     <div class="card"><span class="tag blue">Audit trail</span><h3>Every model call is reviewable</h3><p>Inputs, outputs, confidence, guardrails triggered, and human overrides are captured, so a reviewer can reconstruct exactly why an action was prepared.</p></div>
     <div class="card"><span class="tag">System fit</span><h3>Layer, not replacement</h3><p>The pilot demonstrates the document-to-action layer first. System-of-record integration is scoped only after the workflow value is proven.</p></div>
   </div>
@@ -258,7 +260,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
     <p>These are the pilot's <b style="color:var(--text)">success thresholds to be measured on your documents</b> — targets the engagement is designed to test, not guarantees of product performance.</p>
   </div>
   <div class="metrics">
-    <div class="metric"><b>≥90%</b><span>target document-classification accuracy on agreed pilot categories</span></div>
+    <div class="metric"><b>≥90%</b><span>target medical-document classification accuracy on agreed pilot categories</span></div>
     <div class="metric"><b>≥90%</b><span>target claim/action routing accuracy on the supplied example set</span></div>
     <div class="metric"><b>30–50%<sup style="font-size:11px;color:var(--amber)">*</sup></b><span>target reduction in adjuster review time for pilot document types</span></div>
     <div class="metric"><b>0</b><span>production claim decisions during shadow mode</span></div>
@@ -271,17 +273,18 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
 <section id="pricing" class="band"><div class="wrap">
   <div class="price">
     <div class="card">
-      <span class="tag amber">30-day pilot</span>
-      <h2 style="margin:0">Fixed-fee shadow pilot</h2>
-      <div class="amount">$7,500–$15,000</div>
-      <p>Final price depends on document volume, workflow breadth, and whether the pilot uses synthetic, redacted, or customer-supplied historical examples.</p>
-      <small>No production PHI handling or system-of-record writeback is included in the first pilot unless separately reviewed, scoped, and covered by a signed data agreement. See <a href="#data">data handling</a>.</small>
+      <span class="tag amber">Limited-time founding pilot</span>
+      <h2 style="margin:0">Free for founding California teams</h2>
+      <div class="amount"><s>$7,500–$15,000</s></div>
+      <div class="waived">Waived through August.</div>
+      <p>The standard 30-day shadow pilot fee is $7,500–$15,000. It's waived for California TPAs and self-insured employers that begin a pilot through August — so you can judge the workflow value before any commitment.</p>
+      <small>No production PHI handling or system-of-record writeback is included in the founding pilot unless separately reviewed, scoped, and covered by a signed data agreement. See <a href="#data">data handling</a>.</small>
     </div>
     <div class="card">
       <span class="tag blue">Included</span>
       <h3>What you get</h3>
       <div class="list" style="margin-top:18px">
-        <div class="list-item"><b>01</b><span>50–200 document shadow run across agreed pilot categories.</span></div>
+        <div class="list-item"><b>01</b><span>50–200 medical-document shadow run across agreed pilot categories.</span></div>
         <div class="list-item"><b>02</b><span>Action-queue and audit-packet walkthrough for the sample set.</span></div>
         <div class="list-item"><b>03</b><span>Error analysis, override review, and workflow-fit findings.</span></div>
         <div class="list-item"><b>04</b><span>ROI estimate and a production-integration recommendation.</span></div>
@@ -298,7 +301,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
     </div>
   </div>
   <div class="note">
-    <b>The default pilot uses synthetic or fully redacted documents.</b> Real, unredacted claim documents are scoped only after a signed mutual NDA and data-processing agreement — and even then, the first pilot runs in shadow mode with no system-of-record writeback. ClaimLayer is a reference implementation and active project, not a live system processing real claims; production use of any customer data is a separate, reviewed step.
+    <b>The default pilot uses synthetic or fully redacted medical documents.</b> Real, unredacted documents are scoped only after a signed mutual NDA and data-processing agreement — and even then, the founding pilot runs in shadow mode with no system-of-record writeback. ClaimLayer is a reference implementation and active project, not a live system processing real claims; production use of any customer data is a separate, reviewed step.
   </div>
 </div></section>
 
@@ -310,12 +313,12 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
     <div>
       <div class="kicker">Next step</div>
       <h2>Start with a 20-minute workflow review.</h2>
-      <p style="margin-top:14px">Bring the current path for RFAs or work-status reports. We'll compare where documents enter, who touches them, what deadlines matter, and whether a shadow pilot is worth running. No obligation.</p>
-      <p style="margin-top:14px;font-size:13.5px">Prefer email? <a href="mailto:akashdixit@gmail.com?subject=ClaimLayer%2030-day%20shadow%20pilot">akashdixit@gmail.com</a></p>
+      <p style="margin-top:14px">Bring the current path for incoming medical reports. We'll compare where documents enter, who touches them, what deadlines matter, and whether a founding shadow pilot is worth running. No obligation.</p>
+      <p style="margin-top:14px;font-size:13.5px">Prefer email? <a href="mailto:akashdixit@gmail.com?subject=ClaimLayer%20founding%20pilot">akashdixit@gmail.com</a></p>
     </div>
     <!-- Hosted form → Formspree (xkoalyor). Plain-HTML POST: _subject sets the email subject, _next redirects back here to trigger the thanks banner, _gotcha is the spam honeypot. -->
     <form class="form" action="https://formspree.io/f/xkoalyor" method="POST">
-      <input type="hidden" name="_subject" value="ClaimLayer 30-day shadow pilot — new request"/>
+      <input type="hidden" name="_subject" value="ClaimLayer founding pilot — new request"/>
       <input type="hidden" name="_next" value="https://claimlayer.org/pilot/?submitted=1"/>
       <div class="hp" aria-hidden="true"><label>Leave this empty<input type="text" name="_gotcha" tabindex="-1" autocomplete="off"/></label></div>
       <div class="form-row">
@@ -327,7 +330,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
         <div class="field"><label for="role">Your role</label><input id="role" name="role" type="text" placeholder="Claims manager, adjuster, ops…"/></div>
       </div>
       <div class="form-row">
-        <div class="field"><label for="vol">Approx. monthly RFA / work-status volume</label>
+        <div class="field"><label for="vol">Approx. monthly inbound medical-document volume</label>
           <select id="vol" name="monthly_volume">
             <option value="">Select…</option>
             <option>Under 100</option>
@@ -339,7 +342,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
         </div>
         <div class="field"><label for="sor">Current claims system of record</label><input id="sor" name="system_of_record" type="text" placeholder="Origami, Guidewire, in-house…"/></div>
       </div>
-      <div class="field"><label for="msg">What would you want the pilot to prove?</label><textarea id="msg" name="message" placeholder="The documents and deadlines that hurt most today…"></textarea></div>
+      <div class="field"><label for="msg">What would you want the pilot to prove?</label><textarea id="msg" name="message" placeholder="The medical documents and deadlines that hurt most today…"></textarea></div>
       <button class="btn" type="submit">Request a workflow review</button>
       <p class="form-foot">Submitting shares only what you enter here. No claim data is sent through this form. We reply within two business days.</p>
     </form>
@@ -349,7 +352,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
 <footer><div class="wrap f-i">
   <div>
     <a class="brand" href="../"><img src="../assets/mark.png" alt="" style="width:26px;height:26px;border-radius:6px"/>ClaimLayer</a>
-    <p>ClaimLayer is a reference implementation and active project, not a live system processing real claims. Pilot work starts in shadow mode on synthetic or redacted documents unless production use is separately reviewed, scoped, and covered by a signed data agreement. Not legal or claims-handling advice.</p>
+    <p>ClaimLayer is a reference implementation and active project, not a live system processing real claims. Founding-pilot work starts in shadow mode on synthetic or redacted documents unless production use is separately reviewed, scoped, and covered by a signed data agreement. Not legal or claims-handling advice.</p>
   </div>
   <div style="text-align:right">
     <div class="mono" style="font-size:11px;letter-spacing:.1em">BOUNDED · AUDITABLE · REVERSIBLE</div>
@@ -358,7 +361,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--muted)
 </div></footer>
 
 <script>
-// Show a thank-you and clear the form-area heading state when the hosted form redirects back with ?submitted=1
+// Show a thank-you when the hosted form redirects back with ?submitted=1
 if (new URLSearchParams(location.search).get('submitted') === '1') {
   var t = document.getElementById('thanks');
   if (t) { t.classList.add('show'); t.scrollIntoView({behavior:'smooth', block:'center'}); }
