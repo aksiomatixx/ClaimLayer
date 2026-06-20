@@ -46,6 +46,14 @@ const config = {
     anonKey:        process.env.SUPABASE_ANON_KEY,
   },
 
+  tenancy: {
+    // The well-known default tenant created by the multi-tenancy foundation
+    // migration. Sessions that aren't yet tied to a provisioned tenant (dev
+    // logins, single-tenant demo) fall back to this so req.user.tenantId is
+    // always present.
+    defaultTenantId: process.env.DEFAULT_TENANT_ID || '00000000-0000-0000-0000-000000000001',
+  },
+
   lob: {
     apiKey:  process.env.LOB_API_KEY,
     baseUrl: 'https://api.lob.com/v1',
