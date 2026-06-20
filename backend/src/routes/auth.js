@@ -23,8 +23,11 @@ const config         = require('../config');
 const {
   requireAuth,
   requireRole,
+  requireMFA,
   generateMagicToken,
   generateEmployerToken,
+  generateStaffToken,
+  STAFF_ROLES,
 } = require('../middleware/auth');
 
 const router = express.Router();
@@ -145,6 +148,7 @@ router.post(
   '/magic-link/generate',
   requireAuth,
   requireRole(['admin']),
+  requireMFA,
   [
     body('claim_id').notEmpty().withMessage('claim_id is required'),
     body('adp_employee_id').notEmpty().withMessage('adp_employee_id is required'),
@@ -206,6 +210,7 @@ router.post(
       email:        supaUser.email,
       employerId:   meta.employer_id,
       employerName: meta.employer_name,
+      tenantId:     meta.tenant_id || config.tenancy.defaultTenantId,
     });
 
     res.cookie('token', token, {
@@ -216,6 +221,85 @@ router.post(
 
     logger.info({ msg: 'employer/login: success', email, employerId: meta.employer_id });
     res.json({ ok: true, employer_id: meta.employer_id, employer_name: meta.employer_name, email: supaUser.email });
+  }
+);
+
+// ── POST /api/v1/auth/login — staff (admin/adjuster/supervisor) login ─────────
+// Supabase Auth authenticates the credentials; the session is a backend JWT
+// carrying role + tenantId. If the user has a verified MFA factor, the password
+// alone is NOT sufficient — the client completes the TOTP challenge against
+// Supabase and then calls POST /auth/login/mfa with the resulting AAL2 token.
+router.post(
+  '/login',
+  [
+    body('email').isEmail().withMessage('email must be a valid email address'),
+    body('password').notEmpty().withMessage('password is required'),
+  ],
+  validate,
+  async (req, res) => {
+    const { email, password } = req.body;
+
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({ email, password });
+    if (error || !data?.user) {
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
+
+    const supaUser = data.user;
+    const meta     = supaUser.user_metadata || {};
+    if (!STAFF_ROLES.includes(meta.role)) {
+      return res.status(403).json({ error: 'not_staff' });
+    }
+
+    // MFA enforcement: a verified factor means password-only is not enough.
+    const verifiedFactor = (supaUser.factors || []).find(f => f.status === 'verified');
+    if (verifiedFactor) {
+      return res.status(401).json({ error: 'mfa_required', factor_id: verifiedFactor.id });
+    }
+
+    const tenantId = meta.tenant_id || config.tenancy.defaultTenantId;
+    const token = generateStaffToken({
+      role: meta.role, sub: supaUser.id, email: supaUser.email, tenantId, mfa: false,
+    });
+    res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+    logger.info({ msg: 'staff/login: success', email, role: meta.role, mfa: false });
+    res.json({ ok: true, role: meta.role, tenant_id: tenantId, email: supaUser.email, mfa: false });
+  }
+);
+
+// ── POST /api/v1/auth/login/mfa — complete staff login with an AAL2 token ─────
+// After the client completes the Supabase TOTP challenge (client-side), it
+// posts the resulting MFA-verified (AAL2) access token here. The backend
+// validates the token, confirms it is AAL2, and mints an mfa:true session.
+router.post(
+  '/login/mfa',
+  [body('access_token').notEmpty().withMessage('access_token is required')],
+  validate,
+  async (req, res) => {
+    const { access_token } = req.body;
+
+    const { data, error } = await supabaseAuth.auth.getUser(access_token);
+    if (error || !data?.user) {
+      return res.status(401).json({ error: 'invalid_token' });
+    }
+    // AAL2 is what proves MFA was completed; it lives in the token claims.
+    const claims = jwt.decode(access_token) || {};
+    if (claims.aal !== 'aal2') {
+      return res.status(401).json({ error: 'mfa_incomplete' });
+    }
+
+    const supaUser = data.user;
+    const meta     = supaUser.user_metadata || {};
+    if (!STAFF_ROLES.includes(meta.role)) {
+      return res.status(403).json({ error: 'not_staff' });
+    }
+
+    const tenantId = meta.tenant_id || config.tenancy.defaultTenantId;
+    const token = generateStaffToken({
+      role: meta.role, sub: supaUser.id, email: supaUser.email, tenantId, mfa: true,
+    });
+    res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+    logger.info({ msg: 'staff/login: success', email: supaUser.email, role: meta.role, mfa: true });
+    res.json({ ok: true, role: meta.role, tenant_id: tenantId, email: supaUser.email, mfa: true });
   }
 );
 
@@ -273,16 +357,24 @@ router.get('/dev-supervisor-session', (req, res) => {
   res.json({ ok: true, role: 'supervisor', expiresIn: '8h' });
 });
 
-// ── POST /api/v1/auth/mfa/enroll — Supabase MFA enroll stub (M5) ─────────────
+// ── MFA enrollment is client-side (Supabase Auth, session-based) ─────────────
+// TOTP enroll/verify run in the browser against Supabase Auth
+// (supabase.auth.mfa.enroll / challengeAndVerify). The backend's job is
+// ENFORCEMENT: POST /auth/login returns `mfa_required` when a verified factor
+// exists, and POST /auth/login/mfa completes the session from the resulting
+// AAL2 access token. These endpoints document that contract.
 router.post('/mfa/enroll', requireAuth, (req, res) => {
-  // Placeholder — wire to Supabase Auth MFA API in M5
-  res.status(501).json({ error: 'MFA enrollment not yet implemented — coming in M5' });
+  res.status(400).json({
+    error: 'enroll_client_side',
+    message: 'Enroll TOTP in the app via supabase.auth.mfa.enroll, verify with supabase.auth.mfa.challengeAndVerify, then complete login at POST /auth/login/mfa with the AAL2 access token.',
+  });
 });
 
-// ── POST /api/v1/auth/mfa/verify — Supabase MFA verify stub (M5) ─────────────
 router.post('/mfa/verify', requireAuth, (req, res) => {
-  // Placeholder — wire to Supabase Auth MFA API in M5
-  res.status(501).json({ error: 'MFA verification not yet implemented — coming in M5' });
+  res.status(400).json({
+    error: 'verify_client_side',
+    message: 'Complete the TOTP challenge in the app via Supabase Auth, then POST the AAL2 access token to /auth/login/mfa.',
+  });
 });
 
 module.exports = router;

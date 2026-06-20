@@ -26,6 +26,8 @@
 const tables = {};
 let _claimSeq = 42;
 
+const MOCK_DEFAULT_TENANT = '00000000-0000-0000-0000-000000000001';
+
 const MOCK_AUTH_USERS = [
   {
     email:        'hr@brightcarehh.com',
@@ -34,6 +36,7 @@ const MOCK_AUTH_USERS = [
     role:         'employer',
     employer_id:  'employer-brightcare-001',
     employer_name:'BrightCare Home Health',
+    tenant_id:    MOCK_DEFAULT_TENANT,
   },
   {
     email:        'hr@carewellservices.com',
@@ -42,8 +45,47 @@ const MOCK_AUTH_USERS = [
     role:         'employer',
     employer_id:  'employer-carewell-001',
     employer_name:'CareWell Services',
+    tenant_id:    MOCK_DEFAULT_TENANT,
+  },
+  // Staff (Supabase-Auth) accounts for /auth/login tests.
+  {
+    email:     'adjuster@homecaretpa.com',
+    password:  'test1234',
+    id:        'user-staff-admin',
+    role:      'admin',
+    tenant_id: MOCK_DEFAULT_TENANT,
+  },
+  {
+    email:     'super@homecaretpa.com',
+    password:  'test1234',
+    id:        'user-staff-super',
+    role:      'supervisor',
+    tenant_id: MOCK_DEFAULT_TENANT,
+  },
+  // Staff account WITH a verified TOTP factor — exercises the mfa_required gate.
+  {
+    email:     'mfa-admin@homecaretpa.com',
+    password:  'test1234',
+    id:        'user-staff-mfa',
+    role:      'admin',
+    tenant_id: MOCK_DEFAULT_TENANT,
+    factors:   [{ id: 'factor-totp-1', status: 'verified', factor_type: 'totp' }],
   },
 ];
+
+function _mockUserView(u) {
+  return {
+    id:    u.id,
+    email: u.email,
+    factors: u.factors || [],
+    user_metadata: {
+      role:          u.role,
+      employer_id:   u.employer_id,
+      employer_name: u.employer_name,
+      tenant_id:     u.tenant_id,
+    },
+  };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function uid() {
@@ -338,20 +380,24 @@ const supabaseAuth = {
         return { data: null, error: { message: 'Invalid login credentials' } };
       }
       return {
-        data: {
-          user: {
-            id:    user.id,
-            email: user.email,
-            user_metadata: {
-              role:          user.role,
-              employer_id:   user.employer_id,
-              employer_name: user.employer_name,
-            },
-          },
-          session: { access_token: `mock-access-token-${user.id}` },
-        },
+        data: { user: _mockUserView(user), session: { access_token: `mock-access-token-${user.id}` } },
         error: null,
       };
+    },
+
+    // Resolve a user from an access token. Accepts the mock opaque token
+    // (`mock-access-token-<id>`) or any JWT whose `sub` is a known user id
+    // (the staff MFA-completion test signs such a token to carry aal2).
+    async getUser(accessToken) {
+      let id = null;
+      if (typeof accessToken === 'string' && accessToken.startsWith('mock-access-token-')) {
+        id = accessToken.slice('mock-access-token-'.length);
+      } else if (accessToken) {
+        try { id = (require('jsonwebtoken').decode(accessToken) || {}).sub || null; } catch { id = null; }
+      }
+      const user = MOCK_AUTH_USERS.find(u => u.id === id);
+      if (!user) return { data: { user: null }, error: { message: 'invalid token' } };
+      return { data: { user: _mockUserView(user) }, error: null };
     },
   },
 
