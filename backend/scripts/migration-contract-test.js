@@ -309,6 +309,70 @@ async function main() {
        VALUES ('claim_ct_1', 'prov_001', 'confirmed', 'CONF-CT-1')`);
   });
 
+  console.log('── Multi-tenancy: tenant-isolation RLS proof');
+
+  await check('default tenant + tenant_id columns exist', async () => {
+    const t = await client.query(`SELECT 1 FROM tenants WHERE slug = 'default'`);
+    if (!t.rowCount) throw new Error('default tenant row missing');
+    const c = await client.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'claims' AND column_name = 'tenant_id'`);
+    if (!c.rowCount) throw new Error('claims.tenant_id missing');
+  });
+
+  await check('RLS confines each tenant to its own claims (cross-tenant rows are invisible)', async () => {
+    // Resolve auth.uid() from a session GUC so this proof can simulate two
+    // authenticated users; production gets a real auth.uid() from Supabase Auth.
+    await client.query(
+      `CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
+       AS $$ SELECT NULLIF(current_setting('app.test_uid', true), '')::uuid $$`);
+
+    // A second tenant, an admin in each tenant, and a claim in tenant B
+    // (claim_ct_1 already lives in the default tenant — "tenant A").
+    await client.query(
+      `INSERT INTO tenants (id, name, slug)
+       VALUES ('00000000-0000-0000-0000-0000000000b2', 'Tenant B', 'tenant-b')
+       ON CONFLICT (id) DO NOTHING`);
+    await client.query(
+      `INSERT INTO users (id, email, role, tenant_id) VALUES
+         ('00000000-0000-0000-0000-00000000a001', 'admin-a@ct.test', 'admin', '00000000-0000-0000-0000-000000000001'),
+         ('00000000-0000-0000-0000-0000000000b1', 'admin-b@ct.test', 'admin', '00000000-0000-0000-0000-0000000000b2')
+       ON CONFLICT (id) DO NOTHING`);
+    await client.query(
+      `INSERT INTO claims (id, claim_number, status, date_of_injury, tenant_id)
+       VALUES ('claim_tb_1', 'HHW-2026-TB1', 'new_claim', '2026-05-02', '00000000-0000-0000-0000-0000000000b2')`);
+
+    // Wide-open permissive SELECT policy so the ONLY filter under test is the
+    // tenant RESTRICTIVE policy (decoupled from the role policies). The
+    // authenticated role needs read grants the vanilla shim doesn't ship.
+    await client.query(`DROP POLICY IF EXISTS tmp_ct_allow_all ON claims`);
+    await client.query(
+      `CREATE POLICY tmp_ct_allow_all ON claims AS PERMISSIVE FOR SELECT TO authenticated USING (true)`);
+    await client.query(`GRANT USAGE ON SCHEMA public TO authenticated`);
+    await client.query(`GRANT SELECT ON claims TO authenticated`);
+
+    try {
+      await client.query(`SET ROLE authenticated`);
+
+      await client.query(`SELECT set_config('app.test_uid', '00000000-0000-0000-0000-00000000a001', false)`);
+      const aIds = (await client.query(
+        `SELECT id FROM claims WHERE id IN ('claim_ct_1', 'claim_tb_1')`)).rows.map(r => r.id);
+      if (!aIds.includes('claim_ct_1') || aIds.includes('claim_tb_1')) {
+        throw new Error('tenant A should see only claim_ct_1: ' + JSON.stringify(aIds));
+      }
+
+      await client.query(`SELECT set_config('app.test_uid', '00000000-0000-0000-0000-0000000000b1', false)`);
+      const bIds = (await client.query(
+        `SELECT id FROM claims WHERE id IN ('claim_ct_1', 'claim_tb_1')`)).rows.map(r => r.id);
+      if (!bIds.includes('claim_tb_1') || bIds.includes('claim_ct_1')) {
+        throw new Error('tenant B should see only claim_tb_1: ' + JSON.stringify(bIds));
+      }
+    } finally {
+      await client.query(`RESET ROLE`);
+      await client.query(`DROP POLICY IF EXISTS tmp_ct_allow_all ON claims`);
+    }
+  });
+
   await client.end();
 
   console.log(`\n${passed} passed, ${failed} failed`);
