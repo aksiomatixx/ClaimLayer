@@ -12,6 +12,11 @@
  * Decision routing (_resolveDecision):
  *   - Surgical CPT codes (10000–69999 or Category III /^\d{4}T$/) → route_to_uro
  *   - AI recommends auto_approve                                  → auto_approve
+ *       which no longer approves anything by itself: treatment authorization
+ *       is a benefit decision, so the recommendation becomes an agent-proposed
+ *       action request ('medical.rfa.approve', actionRegistry) that a human
+ *       approves (finding S-5, ADR-0004). The RFA stays in the adjuster queue
+ *       with its response clock running.
  *   - AI MTUS-inconsistent                                        → route_to_uro
  *   - Otherwise (AI says physician_review, MTUS-consistent)       → adjuster_review
  *
@@ -174,24 +179,28 @@ async function _completeRFADiary(claimId, rfaId) {
 
 // ── Outcome writers ───────────────────────────────────────────────────────────
 
-async function _autoApproveRFA(rfaId, claimId, deadline) {
-  const now = new Date().toISOString();
-  await supabase.from('rfas').update({
-    decision:         'auto_approved',
-    decision_made_at: now,
-    decision_made_by: 'ai_system',
-    updated_at:       now,
-  }).eq('id', rfaId);
-
-  await supabase.from('claim_events').insert({
-    claim_id:  claimId,
-    type:      'rfa_approved',
-    timestamp: now,
-    data:      { rfaId, decision: 'auto_approved', decidedBy: 'ai_system', deadline },
-  });
-
-  await _completeRFADiary(claimId, rfaId);
-  logger.info({ msg: 'rfaService: auto-approved', rfaId, claimId });
+/**
+ * The agent's approval recommendation, as a prepared decision in the human
+ * approval queue. Idempotent per RFA. A failure here leaves the RFA in
+ * pending_adjuster_review — still a human decision, never an approval.
+ */
+async function _proposeApprovalForHuman(rfa, claim, aiResult) {
+  try {
+    const approvals = require('./approvalService');
+    const { agentPrincipal } = require('../policy/principal');
+    await approvals.propose({
+      actionType:     'medical.rfa.approve',
+      claimId:        rfa.claim_id,
+      proposer:       agentPrincipal('rfa_mtus_evaluation', claim.tenantId),
+      payload:        { rfa_id: rfa.id },
+      rationale:      aiResult.rationale || 'Model assessed the request as MTUS-consistent and recommends approval.',
+      evidence:       [{ type: 'rfa', id: rfa.id }],
+      aiDecisionId:   aiResult.aiDecisionId || null,
+      idempotencyKey: `medical.rfa.approve:${rfa.id}`,
+    });
+  } catch (err) {
+    logger.error({ msg: 'rfaService: agent approval proposal failed — RFA remains in adjuster review', rfaId: rfa.id, err: err.message });
+  }
 }
 
 async function _queueForAdjusterReview(rfaId, claimId, aiResult) {
@@ -398,8 +407,11 @@ async function evaluateRFA(rfaId) {
   const decision = _resolveDecision(aiResult, rfa, claim);
 
   if (decision === 'auto_approve') {
-    await _autoApproveRFA(rfaId, rfa.claim_id, rfa.response_due_at);
-    _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+    // No autonomous approval (S-5): queue for the adjuster and attach the
+    // agent's recommendation as a prepared, evidence-linked action request.
+    // The approval letter issues only when a human approves.
+    await _queueForAdjusterReview(rfaId, rfa.claim_id, aiResult);
+    await _proposeApprovalForHuman(rfa, claim, aiResult);
   } else if (decision === 'adjuster_review') {
     await _queueForAdjusterReview(rfaId, rfa.claim_id, aiResult);
     // No notice yet — pending human decision
@@ -439,6 +451,15 @@ async function adjusterApproveRFA(rfaId, adjusterEmail) {
 
   await _completeRFADiary(rfa.claim_id, rfaId);
   _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+
+  // A direct approval makes any queued agent proposal for this RFA moot.
+  await require('./approvalService').supersedePending({
+    actionType: 'medical.rfa.approve',
+    matches:    (proposal) => proposal.rfa_id === rfaId,
+    actor:      { type: 'human', id: adjusterEmail || 'unattributed', role: null },
+    reason:     'rfa_decided_directly',
+  });
+
   // Link the adjuster's action back to the most recent ai_decisions
   // row so the audit trail shows model rec → human override pairing.
   try {
@@ -472,6 +493,12 @@ async function adjusterRouteToURO(rfaId, adjusterEmail, reason) {
 
   _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
   _fireNotice(_getNoticeService().generateImrRightsNotice, rfaId);
+  await require('./approvalService').supersedePending({
+    actionType: 'medical.rfa.approve',
+    matches:    (proposal) => proposal.rfa_id === rfaId,
+    actor:      { type: 'human', id: adjusterEmail || 'unattributed', role: null },
+    reason:     'rfa_routed_to_uro',
+  });
   try {
     await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
       human_reviewer_id: null, human_decision: `routed_to_uro by ${adjusterEmail}`,

@@ -198,7 +198,7 @@ async function evaluateRFA(rfa, claim) {
   // Regulated decision: audit persistence is required — a failure fails
   // the evaluation rather than continuing unaudited.
   const aid = require('./aiDecisionsService');
-  await aid.logDecision({
+  const logged = await aid.logDecision({
     claim_id:       claim.id || null,
     decision_type:  'rfa_mtus',
     prompt_name:    'rfa_mtus_evaluation',
@@ -211,6 +211,9 @@ async function evaluateRFA(rfa, claim) {
     guardrail_actions: guardrails,
   }, { required: true });
 
+  // Non-enumerable: lets the caller cite the exact recommendation as
+  // evidence (ADR-0004) without changing the result's serialized shape.
+  Object.defineProperty(result, 'aiDecisionId', { value: logged?.id || null, enumerable: false });
   return result;
 }
 
