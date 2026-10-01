@@ -444,6 +444,7 @@ async function adjusterApproveRFA(rfaId, adjusterEmail) {
   try {
     await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
       human_reviewer_id: null, human_decision: `adjuster_approved by ${adjusterEmail}`,
+      human_decision_by: adjusterEmail,
     });
   } catch { /* non-fatal */ }
   logger.info({ msg: 'rfaService.adjusterApproveRFA: approved', rfaId, adjusterEmail });
@@ -474,6 +475,7 @@ async function adjusterRouteToURO(rfaId, adjusterEmail, reason) {
   try {
     await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
       human_reviewer_id: null, human_decision: `routed_to_uro by ${adjusterEmail}`,
+      human_decision_by: adjusterEmail,
     });
   } catch { /* non-fatal */ }
   logger.info({ msg: 'rfaService.adjusterRouteToURO', rfaId, adjusterEmail });

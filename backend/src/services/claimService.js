@@ -26,7 +26,9 @@ const adp                  = require('./adp');
 const aiService            = require('./aiService');
 const noticeService        = require('./noticeService');
 const logger               = require('../logger');
+const auditLedger          = require('./auditLedgerService');
 const { addBusinessDays }  = require('../utils/businessDays');
+const { toCents }          = require('../utils/money');
 
 // ── Sequence counter (fallback when RPC is unavailable in tests) ──────────────
 let _claimSeq = 42;
@@ -45,6 +47,14 @@ async function _nextClaimNumber() {
 // tests that seed data synchronously bypass the Supabase mock.
 const _testStore = new Map();
 
+// Ledger actor for callers that only pass an email string (legacy call
+// sites). Callers holding a verified session pass opts.actor — a principal
+// from policy/principal.js — instead.
+function _ledgerActorFor(changedBy, opts) {
+  if (opts && opts.actor) return opts.actor;
+  return { type: 'human', id: changedBy || 'unknown', role: null };
+}
+
 // ── DB ↔ JS mapping helpers ──────────────────────────────────────────────────
 
 /**
@@ -56,6 +66,7 @@ function _toClaim(row) {
   return {
     id:               row.id,
     claimNumber:      row.claim_number,
+    tenantId:         row.tenant_id || null,
     employerId:       row.employer_id,
     status:           row.status,
     employee:         row.employee || {},   // JSONB snapshot
@@ -78,6 +89,8 @@ function _toClaim(row) {
     motorVehicleFields:  row.motor_vehicle_fields || null,
     employerContests:    row.employer_contests    ?? false,
     subrogationStatus:   row.subrogation_status   || null,
+    attorney_represented: row.attorney_represented ?? false,
+    attorneyName:        row.attorney_name || null,
     createdAt:           row.created_at,
     updatedAt:           row.updated_at,
     events: ((row.claim_events || [])
@@ -548,7 +561,7 @@ async function getDiaries(claimId) {
 }
 
 // ── Reserve approval ──────────────────────────────────────────────────────────
-async function approveReserves(claimId, reserves, adjusterEmail) {
+async function approveReserves(claimId, reserves, adjusterEmail, opts = {}) {
   const claim = await getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
   if (!claim.filehandlerId) throw new Error('Claim is not yet synced to FileHandler');
@@ -577,10 +590,33 @@ async function approveReserves(claimId, reserves, adjusterEmail) {
     claim_id:  claimId,
     type:      'reserves_approved',
     timestamp: now,
-    data:      { approvedBy: adjusterEmail, ...reserves },
+    data:      { approvedBy: adjusterEmail, ...reserves, actionRequestId: opts.actionRequestId || null },
   });
 
   await supabase.from('claims').update({ updated_at: now }).eq('id', claimId);
+
+  // Interim best-effort dual-write (ADR-0003): the FileHandler and local
+  // writes above are not yet one transaction, so the ledger records the
+  // approval after they succeed rather than gating them.
+  const medicalCents   = toCents(reserves.medical   || 0);
+  const indemnityCents = toCents(reserves.indemnity || 0);
+  const expenseCents   = toCents(reserves.expense   || 0);
+  await auditLedger.append({
+    actor:    _ledgerActorFor(adjusterEmail, opts),
+    action:   'reserve.approved',
+    entity:   { type: 'claim', id: claimId },
+    claimId,
+    tenantId: claim.tenantId,
+    payload:  {
+      medical_cents:   medicalCents,
+      indemnity_cents: indemnityCents,
+      expense_cents:   expenseCents,
+      total_cents:     medicalCents + indemnityCents + expenseCents,
+      reason:          reserves.reason || null,
+      path:            opts.actionRequestId ? 'action_request' : 'direct',
+    },
+    evidence: opts.actionRequestId ? [{ type: 'action_request', id: opts.actionRequestId }] : [],
+  });
 
   // For test-seeded claims, update the in-memory object too
   if (_testStore.has(claimId)) {
@@ -632,6 +668,16 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
     data:      { from: prev, to: newStatus, changedBy },
   });
 
+  await auditLedger.append({
+    actor:    _ledgerActorFor(changedBy, opts),
+    action:   'claim.status_changed',
+    entity:   { type: 'claim', id: claimId },
+    claimId,
+    tenantId: claim.tenantId,
+    payload:  { from: prev, to: newStatus },
+    evidence: opts.evidence || [],
+  });
+
   // Compensability accept/deny is the human counterpart to the
   // AI compensability decision — link them so the audit trail
   // shows model rec → adjuster decision pairing.
@@ -639,6 +685,7 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
     try {
       await require('./aiDecisionsService').linkHumanDecision(claimId, 'compensability', {
         human_reviewer_id: null, human_decision: `${newStatus} by ${changedBy}`,
+        actor: _ledgerActorFor(changedBy, opts),
       });
     } catch { /* non-fatal */ }
   }
@@ -805,7 +852,7 @@ function _resetClaims() {
  * SROI 02 (representation change) when the represented state actually
  * changes — a same-state update (e.g. correcting the firm name) does not.
  */
-async function setAttorneyRepresentation(claimId, { represented, attorney }, changedBy) {
+async function setAttorneyRepresentation(claimId, { represented, attorney }, changedBy, opts = {}) {
   const claim = await getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
@@ -830,6 +877,20 @@ async function setAttorneyRepresentation(claimId, { represented, attorney }, cha
     type: 'representation_changed',
     timestamp: now,
     data: { represented: nowRepresented, attorney_name: update.attorney_name, changed_by: changedBy },
+  });
+
+  await auditLedger.append({
+    actor:    _ledgerActorFor(changedBy, opts),
+    action:   'claim.representation_changed',
+    entity:   { type: 'claim', id: claimId },
+    claimId,
+    tenantId: claim.tenantId,
+    payload:  {
+      was_represented: wasRepresented,
+      represented:     nowRepresented,
+      attorney_name:   update.attorney_name,
+      attorney_firm:   update.attorney_firm,
+    },
   });
 
   if (wasRepresented !== nowRepresented) {
@@ -859,7 +920,7 @@ async function setAttorneyRepresentation(claimId, { represented, attorney }, cha
  * (data change) per the M17B reopen pathway. TD reinstatement, if any,
  * follows separately through tdPeriodsService (SROI RB).
  */
-async function reopenClaim(claimId, reason, changedBy) {
+async function reopenClaim(claimId, reason, changedBy, opts = {}) {
   const claim = await getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
   if (!['closed', 'future_medical_only'].includes(claim.status)) {
@@ -883,6 +944,15 @@ async function reopenClaim(claimId, reason, changedBy) {
     action: 'claim_reopened', resource_type: 'claim', resource_id: claimId,
     description: `Claim reopened from ${claim.status}: ${reason}`,
     actor: changedBy || null, created_at: now,
+  });
+
+  await auditLedger.append({
+    actor:    _ledgerActorFor(changedBy, opts),
+    action:   'claim.reopened',
+    entity:   { type: 'claim', id: claimId },
+    claimId,
+    tenantId: claim.tenantId,
+    payload:  { from_status: claim.status, to_status: 'active_medical', reason },
   });
 
   try {

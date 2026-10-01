@@ -71,7 +71,63 @@ const MOCK_AUTH_USERS = [
     tenant_id: MOCK_DEFAULT_TENANT,
     factors:   [{ id: 'factor-totp-1', status: 'verified', factor_type: 'totp' }],
   },
+
+  // ── Identity-hardening fixtures (finding S-1) ──────────────────────────────
+  // `role` / `employer_id` / `tenant_id` below are what the user ASSERTED in
+  // their own user_metadata; `provision` is the server-controlled public.users
+  // row (null = never provisioned). Login must trust only `provision`.
+  {
+    // Self-registered through the public anon key with role=admin in metadata.
+    email:     'self-promoted@attacker.test',
+    password:  'test1234',
+    id:        'user-self-promoted',
+    role:      'admin',
+    tenant_id: '00000000-0000-0000-0000-0000000000b2',
+    provision: null,
+  },
+  {
+    // A real employer user who edited their metadata to claim admin and a
+    // different employer.
+    email:       'escalated@brightcarehh.com',
+    password:    'test1234',
+    id:          'user-employer-escalated',
+    role:        'admin',
+    employer_id: 'employer-carewell-001',
+    tenant_id:   '00000000-0000-0000-0000-0000000000b2',
+    provision:   { role: 'employer', employer_id: 'employer-brightcare-001', tenant_id: MOCK_DEFAULT_TENANT },
+  },
+  {
+    // Deactivated staff member — still has valid Supabase credentials.
+    email:     'former-adjuster@homecaretpa.com',
+    password:  'test1234',
+    id:        'user-staff-inactive',
+    role:      'adjuster',
+    tenant_id: MOCK_DEFAULT_TENANT,
+    provision: { role: 'adjuster', tenant_id: MOCK_DEFAULT_TENANT, active: false },
+  },
 ];
+
+/**
+ * The public.users rows an operator would have provisioned for the mock
+ * auth users. Not seeded automatically — suites that exercise login call
+ * provisionAuthUsers() so other suites' users tables stay untouched.
+ */
+function provisionAuthUsers() {
+  const tbl = getTable('users');
+  for (const u of MOCK_AUTH_USERS) {
+    if (u.provision === null) continue;
+    const p = u.provision || {};
+    tbl.set(u.id, {
+      id:          u.id,
+      email:       u.email,
+      role:        p.role ?? u.role,
+      employer_id: p.employer_id ?? u.employer_id ?? null,
+      tenant_id:   p.tenant_id ?? u.tenant_id ?? MOCK_DEFAULT_TENANT,
+      active:      p.active ?? true,
+      created_at:  new Date().toISOString(),
+    });
+  }
+}
 
 function _mockUserView(u) {
   return {
@@ -90,6 +146,34 @@ function _mockUserView(u) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function uid() {
   return `mock-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// Mirrors app.audit_ledger_before_insert(): per-tenant seq + hash chain.
+// The real hash canonicalization lives in the database; the mock only needs
+// a chain-shaped, deterministic value.
+function _appendLedgerRow(tbl, item) {
+  const tenant = item.tenant_id;
+  let last = null;
+  for (const r of tbl.values()) {
+    if (r.tenant_id === tenant && (!last || r.seq > last.seq)) last = r;
+  }
+  const { seq: _s, hash: _h, prev_hash: _p, recorded_at: _r, ...fields } = item;
+  const now = new Date().toISOString();
+  const row = {
+    id:          fields.id || uid(),
+    payload:     {},
+    evidence:    [],
+    occurred_at: now,
+    ...fields,
+    seq:         last ? last.seq + 1 : 1,
+    prev_hash:   last ? last.hash : 'GENESIS',
+    recorded_at: now,
+  };
+  row.hash = require('crypto').createHash('sha256')
+    .update(JSON.stringify([row.prev_hash, row.tenant_id, row.seq, row.action, row.payload]))
+    .digest('hex');
+  tbl.set(row.id, row);
+  return row;
 }
 
 function getTable(name) {
@@ -227,6 +311,13 @@ class QueryBuilder {
   _execute() {
     const tbl = getTable(this._table);
 
+    // audit_ledger is append-only in the database (triggers + revoked
+    // privileges); the mock refuses the same operations.
+    if (this._table === 'audit_ledger' && ['update', 'upsert', 'delete'].includes(this._op)) {
+      const op = this._op === 'upsert' ? 'UPDATE' : this._op.toUpperCase();
+      return { data: null, error: { code: '42501', message: `audit_ledger is append-only: ${op} is not permitted` } };
+    }
+
     switch (this._op) {
 
       case 'select': {
@@ -262,16 +353,30 @@ class QueryBuilder {
         const UNIQUES = {
           claim_links:       ['claim_id_a', 'claim_id_b'],
           supervisor_alerts: ['alert_date', 'recipient_user_id'],
+          // Partial unique index (WHERE idempotency_key IS NOT NULL).
+          action_requests:   ['idempotency_key'],
         };
         const uq = UNIQUES[this._table];
         if (uq) {
           for (const item of items) {
+            if (uq.some(col => item[col] == null)) continue; // NULLs never collide
             for (const r of tbl.values()) {
               if (uq.every(col => r[col] === item[col])) {
                 return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint "${this._table}_uq"` } };
               }
             }
           }
+        }
+
+        // audit_ledger: the database assigns the per-tenant chain in a
+        // BEFORE INSERT trigger (supabase/migrations/20261001000002). The
+        // mock mirrors the shape — caller values for seq/hash are ignored —
+        // so code under test can never rely on supplying them.
+        if (this._table === 'audit_ledger') {
+          const created = items.map(item => _appendLedgerRow(tbl, item));
+          const payload = Array.isArray(this._data) ? created : created[0];
+          if (this._single) return { data: created[0] || null, error: null };
+          return { data: this._wantData ? payload : created, error: null };
         }
 
         const created = items.map(item => {
@@ -365,6 +470,11 @@ const supabase = {
   _resetStore(tableNames) {
     resetStore(tableNames);
   },
+
+  /** Insert the provisioned public.users rows for the mock auth users. */
+  _provisionAuthUsers() {
+    provisionAuthUsers();
+  },
 };
 
 // ── Mock Supabase anon-key auth client ────────────────────────────────────────
@@ -412,4 +522,8 @@ async function verifyConnection() {
   return true;
 }
 
-module.exports = { supabase, supabaseAuth, verifyConnection, _resetStore: resetStore };
+module.exports = {
+  supabase, supabaseAuth, verifyConnection,
+  _resetStore: resetStore,
+  _provisionAuthUsers: provisionAuthUsers,
+};

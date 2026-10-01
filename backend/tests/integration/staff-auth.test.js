@@ -23,6 +23,9 @@ const { requireMFA } = require('../../src/middleware/auth');
 
 const DEFAULT_TENANT = '00000000-0000-0000-0000-000000000001';
 
+// Login resolves role/tenant from provisioned public.users rows (S-1).
+beforeEach(() => require('../__mocks__/supabaseClient')._provisionAuthUsers());
+
 // Pull the session JWT out of the Set-Cookie header.
 function cookieToken(res) {
   const setCookie = res.headers['set-cookie'] || [];

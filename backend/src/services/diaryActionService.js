@@ -44,6 +44,8 @@ const crypto       = require('crypto');
 const { supabase } = require('./supabase');
 const config       = require('../config');
 const logger       = require('../logger');
+const auditLedger  = require('./auditLedgerService');
+const { systemPrincipal } = require('../policy/principal');
 
 const STALE_COMPLETING_MS = 10 * 60 * 1000;
 
@@ -328,6 +330,16 @@ async function _rollback(diary, created, failure) {
       // Direct restore of the prior claim status — honest compensation,
       // documented in the failure event below.
       await supabase.from('claims').update({ status: created.prevStatus, updated_at: now }).eq('id', diary.claim_id);
+      // The ledger is append-only: the status change it already recorded
+      // inside this unit is reversed by a compensating entry, never deleted.
+      await auditLedger.append({
+        actor:    systemPrincipal('diary_aftermath'),
+        action:   'claim.status_change_reverted',
+        entity:   { type: 'claim', id: diary.claim_id },
+        claimId:  diary.claim_id,
+        payload:  { restored_to: created.prevStatus, diary_id: diary.id, diary_type: diary.diary_type, error: failure.message },
+        evidence: [{ type: 'diary', id: diary.id }],
+      });
     }
     await supabase.from('claim_events').insert({
       claim_id: diary.claim_id, type: 'action_completion_failed', timestamp: now,
@@ -558,6 +570,25 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
   }
 
   // ── The local unit is durable. Best-effort extras follow. ──────────────────
+
+  // Interim best-effort ledger record of the committed decision (ADR-0003);
+  // becomes part of the same transaction once the data layer moves to pg.
+  await auditLedger.append({
+    actor:    { type: 'human', id: actorEmail || 'unattributed', role: null },
+    action:   'diary.action_completed',
+    entity:   { type: 'diary', id: diaryId },
+    claimId,
+    payload:  {
+      diary_type:          diary.diary_type,
+      action:              action || 'complete',
+      rationale:           note || null,
+      status_transition:   statusTransition,
+      notices_generated:   noticesGenerated.length,
+      successor_diaries:   successors.map(sd => sd.diary_type),
+    },
+    evidence: [{ type: 'diary', id: diaryId },
+               ...(diary.source_document_id ? [{ type: 'document', id: diary.source_document_id }] : [])],
+  });
 
   // Link the human decision to the AI recommendation it accepted/overrode.
   if (outcome.ai_link) {

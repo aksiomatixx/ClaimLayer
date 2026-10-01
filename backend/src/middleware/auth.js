@@ -98,12 +98,20 @@ function generateStaffToken({ role, ...payload }) {
   return _sign(payload, role);
 }
 
+// ── MFA enforcement rule ──────────────────────────────────────────────────────
+// Single source of truth for whether step-up MFA is enforced: on whenever a
+// real Supabase project is configured, off in the no-database dev/demo mode.
+// requireMFA and the approval gate (approvalService) both read this.
+function mfaEnforced() {
+  return !!process.env.SUPABASE_URL;
+}
+
 // ── requireMFA ────────────────────────────────────────────────────────────────
 // Requires that the session was elevated through MFA. The staff login flow sets
 // `mfa: true` only after a Supabase AAL2 (MFA-verified) token is presented.
 // When SUPABASE_URL is absent (dev/test/demo), this is a no-op pass-through.
 function requireMFA(req, res, next) {
-  if (!process.env.SUPABASE_URL) {
+  if (!mfaEnforced()) {
     // Dev/test/demo: MFA enforcement disabled — pass through
     return next();
   }
@@ -113,8 +121,20 @@ function requireMFA(req, res, next) {
   return res.status(403).json({ error: 'MFA verification required' });
 }
 
+// ── Session cookie options ────────────────────────────────────────────────────
+// Every session cookie is set through here (finding S-8): httpOnly, SameSite
+// Lax, and Secure in production so the session never travels over plain HTTP.
+function sessionCookieOptions(maxAgeMs = 8 * 60 * 60 * 1000) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure:   config.nodeEnv === 'production',
+    maxAge:   maxAgeMs,
+  };
+}
+
 module.exports = {
-  requireAuth, requireRole, requireMFA,
+  requireAuth, requireRole, requireMFA, mfaEnforced, sessionCookieOptions,
   generateMagicToken, generateAdminToken, generateEmployerToken,
   generateSupervisorToken, generateStaffToken, STAFF_ROLES,
 };

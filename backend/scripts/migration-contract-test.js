@@ -75,6 +75,18 @@ async function expectViolation(client, name, sql, params) {
   });
 }
 
+async function expectError(client, name, sql, pattern, params) {
+  await check(name, async () => {
+    try {
+      await client.query(sql, params);
+    } catch (e) {
+      if (pattern.test(e.message)) return;
+      throw new Error(`unexpected error: ${e.message}`);
+    }
+    throw new Error('statement succeeded but an error was expected');
+  });
+}
+
 async function main() {
   const client = new Client({ connectionString: DATABASE_URL });
   await client.connect();
@@ -96,8 +108,8 @@ async function main() {
     }
   }
 
-  console.log('── Re-applying the hardening-era migrations (idempotency)');
-  const hardening = files.filter(f => f.startsWith('20260611'));
+  console.log('── Re-applying the hardening-era + trust-foundation migrations (idempotency)');
+  const hardening = files.filter(f => f.startsWith('20260611') || f.startsWith('20261001'));
   for (const f of hardening) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8');
     await client.query(sql);
@@ -371,6 +383,242 @@ async function main() {
       await client.query(`RESET ROLE`);
       await client.query(`DROP POLICY IF EXISTS tmp_ct_allow_all ON claims`);
     }
+  });
+
+  // ── Trust Foundation (Sprint 1) ────────────────────────────────────────────
+  console.log('── Trust foundation: schema truth');
+
+  const TENANT_A = '00000000-0000-0000-0000-000000000001';
+  const TENANT_B = '00000000-0000-0000-0000-0000000000b2';
+
+  await check('ai_decisions accepts the aiDecisionsService (regulated audit) write shape', () =>
+    client.query(
+      `INSERT INTO ai_decisions (claim_id, decision_type, prompt_name, model, input_snapshot,
+                                 output_parsed, output_raw, input_tokens, output_tokens,
+                                 latency_ms, confidence, guardrail_actions, created_at)
+       VALUES ('claim_ct_1', 'doc_classification', 'document_classification', 'claude-x',
+               '{"mode":"text"}', '{"category":"medical"}', NULL, 10, 20, 300, 87.5,
+               '[{"rule":"controlled_category_list","triggered":false}]', now())`));
+
+  await check('ai_decisions accepts the M5-shape writers (award extraction / approvals)', () =>
+    client.query(
+      `INSERT INTO ai_decisions (claim_id, decision_type, model_used, system_prompt_hash,
+                                 input_snapshot, output_raw, output_parsed, confidence,
+                                 review_action, review_notes, reviewed_at)
+       VALUES ('claim_ct_1', 'award_extraction', 'claude-x', repeat('a', 64),
+               '{"pdfBytes":1}', '{}', '{}', 90, 'approved', 'ok', now())`));
+
+  await check('ai_decisions links a human decision (linkHumanDecision columns)', () =>
+    client.query(
+      `UPDATE ai_decisions SET human_decision = 'accepted by adj@ct.test', human_decision_at = now()
+        WHERE decision_type = 'doc_classification'`));
+
+  await check('every public table has row-level security enabled (deny by default)', async () => {
+    const { rows } = await client.query(
+      `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity
+        ORDER BY 1`);
+    if (rows.length) throw new Error('RLS disabled on: ' + rows.map(r => r.relname).join(', '));
+  });
+
+  await check('users.active exists and defaults to TRUE', async () => {
+    const { rows } = await client.query(
+      `SELECT active FROM users WHERE id = '00000000-0000-0000-0000-00000000a001'`);
+    if (!rows.length || rows[0].active !== true) throw new Error('users.active missing or not defaulted');
+  });
+
+  console.log('── Trust foundation: immutable audit ledger');
+
+  const insertLedger = (tenant, action, extra = {}) => client.query(
+    `INSERT INTO audit_ledger (tenant_id, actor_type, actor_id, actor_role, action,
+                               entity_type, entity_id, claim_id, payload, evidence, seq, hash, prev_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 999, 'forged', 'forged')
+     RETURNING id, seq, prev_hash, hash`,
+    [tenant, extra.actor_type || 'human', extra.actor_id || 'adj@ct.test', extra.actor_role || 'adjuster',
+     action, extra.entity_type || 'claim', extra.entity_id || 'claim_ct_1', extra.claim_id || 'claim_ct_1',
+     JSON.stringify(extra.payload || {}), JSON.stringify(extra.evidence || [])]);
+
+  let firstA;
+  await check('the database assigns seq / prev_hash / hash (caller-supplied values are ignored)', async () => {
+    firstA = (await insertLedger(TENANT_A, 'claim.status_changed', { payload: { from: 'new_claim', to: 'accepted' } })).rows[0];
+    if (firstA.seq !== '1') throw new Error(`expected seq 1, got ${firstA.seq}`);
+    if (firstA.prev_hash !== 'GENESIS') throw new Error(`expected GENESIS, got ${firstA.prev_hash}`);
+    if (!/^[0-9a-f]{64}$/.test(firstA.hash)) throw new Error(`hash is not sha256 hex: ${firstA.hash}`);
+  });
+
+  await check('consecutive appends link into one chain', async () => {
+    const second = (await insertLedger(TENANT_A, 'reserve.approved', {
+      actor_type: 'human', payload: { medical_cents: 500000 },
+      evidence: [{ type: 'action_request', id: 'ar_ct_1' }],
+    })).rows[0];
+    if (second.seq !== '2') throw new Error(`expected seq 2, got ${second.seq}`);
+    if (second.prev_hash !== firstA.hash) throw new Error('prev_hash does not equal the predecessor hash');
+  });
+
+  await check('a multi-row insert chains every row in order', async () => {
+    const { rows } = await client.query(
+      `INSERT INTO audit_ledger (tenant_id, actor_type, action)
+       VALUES ($1, 'agent', 'agent.recommendation_recorded'), ($1, 'system', 'notice.queued')
+       RETURNING seq, prev_hash, hash`, [TENANT_A]);
+    if (rows[0].seq !== '3' || rows[1].seq !== '4' || rows[1].prev_hash !== rows[0].hash) {
+      throw new Error('multi-row chain broken: ' + JSON.stringify(rows));
+    }
+  });
+
+  await expectError(client, 'UPDATE of a ledger row is rejected',
+    `UPDATE audit_ledger SET payload = '{"tampered":true}' WHERE seq = 1`, /append-only/);
+  await expectError(client, 'DELETE of a ledger row is rejected',
+    `DELETE FROM audit_ledger WHERE seq = 1`, /append-only/);
+  await expectError(client, 'TRUNCATE of the ledger is rejected',
+    `TRUNCATE audit_ledger`, /append-only/);
+  await expectError(client, 'unknown actor types are rejected',
+    `INSERT INTO audit_ledger (tenant_id, actor_type, action) VALUES ('${TENANT_A}', 'robot', 'claim.viewed')`,
+    /violates check constraint/);
+  await expectError(client, 'malformed action names are rejected',
+    `INSERT INTO audit_ledger (tenant_id, actor_type, action) VALUES ('${TENANT_A}', 'human', 'Delete Everything')`,
+    /violates check constraint/);
+
+  await check('verify() confirms an intact chain', async () => {
+    const { rows } = await client.query(`SELECT * FROM app.audit_ledger_verify($1)`, [TENANT_A]);
+    if (!rows[0].ok || rows[0].checked !== '4') throw new Error(JSON.stringify(rows[0]));
+  });
+
+  await check('the hash is independent of the session time zone', async () => {
+    await client.query(`SET TIME ZONE 'America/Los_Angeles'`);
+    try {
+      const { rows } = await client.query(`SELECT * FROM app.audit_ledger_verify($1)`, [TENANT_A]);
+      if (!rows[0].ok) throw new Error(JSON.stringify(rows[0]));
+    } finally {
+      await client.query(`SET TIME ZONE 'UTC'`);
+    }
+  });
+
+  await check('each tenant has its own chain starting at GENESIS', async () => {
+    const r = (await insertLedger(TENANT_B, 'claim.status_changed', { claim_id: 'claim_tb_1', entity_id: 'claim_tb_1' })).rows[0];
+    if (r.seq !== '1' || r.prev_hash !== 'GENESIS') throw new Error(JSON.stringify(r));
+  });
+
+  await check('verify() detects an altered row (superuser bypass of the triggers)', async () => {
+    await insertLedger(TENANT_B, 'payment.issued', { payload: { amount_cents: 100000 } });
+    await insertLedger(TENANT_B, 'claim.closed');
+    await client.query(`ALTER TABLE audit_ledger DISABLE TRIGGER audit_ledger_no_mutation`);
+    try {
+      await client.query(
+        `UPDATE audit_ledger SET payload = '{"amount_cents": 1}' WHERE tenant_id = $1 AND seq = 2`, [TENANT_B]);
+    } finally {
+      await client.query(`ALTER TABLE audit_ledger ENABLE TRIGGER audit_ledger_no_mutation`);
+    }
+    const { rows } = await client.query(`SELECT * FROM app.audit_ledger_verify($1)`, [TENANT_B]);
+    if (rows[0].ok || rows[0].first_bad_seq !== '2' || !/hash mismatch/.test(rows[0].reason)) {
+      throw new Error('tampering not detected: ' + JSON.stringify(rows[0]));
+    }
+  });
+
+  await check('verify() detects a removed row (sequence gap)', async () => {
+    const C = '00000000-0000-0000-0000-0000000000c3';
+    await client.query(`INSERT INTO tenants (id, name, slug) VALUES ($1, 'Tenant C', 'tenant-c') ON CONFLICT DO NOTHING`, [C]);
+    for (const a of ['claim.created', 'claim.status_changed', 'claim.closed']) await insertLedger(C, a);
+    await client.query(`ALTER TABLE audit_ledger DISABLE TRIGGER audit_ledger_no_mutation`);
+    try {
+      await client.query(`DELETE FROM audit_ledger WHERE tenant_id = $1 AND seq = 2`, [C]);
+    } finally {
+      await client.query(`ALTER TABLE audit_ledger ENABLE TRIGGER audit_ledger_no_mutation`);
+    }
+    const { rows } = await client.query(`SELECT * FROM app.audit_ledger_verify($1)`, [C]);
+    if (rows[0].ok || !/sequence gap/.test(rows[0].reason)) {
+      throw new Error('removal not detected: ' + JSON.stringify(rows[0]));
+    }
+  });
+
+  await check('head() returns the chain head for external anchoring', async () => {
+    const { rows } = await client.query(`SELECT * FROM app.audit_ledger_head($1)`, [TENANT_A]);
+    if (rows[0].seq !== '4' || !/^[0-9a-f]{64}$/.test(rows[0].hash)) throw new Error(JSON.stringify(rows[0]));
+  });
+
+  await check('ledger history is not tied to claim rows (no FK, no cascade)', async () => {
+    const { rows } = await client.query(
+      `SELECT 1 FROM pg_constraint WHERE conrelid = 'audit_ledger'::regclass
+         AND contype = 'f' AND confrelid = 'claims'::regclass`);
+    if (rows.length) throw new Error('audit_ledger must not reference claims');
+  });
+
+  await check('API roles cannot mutate the ledger (service_role: SELECT + INSERT only)', async () => {
+    const { rows } = await client.query(
+      `SELECT has_table_privilege('service_role', 'audit_ledger', 'INSERT') AS sr_insert,
+              has_table_privilege('service_role', 'audit_ledger', 'UPDATE') AS sr_update,
+              has_table_privilege('service_role', 'audit_ledger', 'DELETE') AS sr_delete,
+              has_table_privilege('service_role', 'audit_ledger', 'TRUNCATE') AS sr_truncate,
+              has_table_privilege('authenticated', 'audit_ledger', 'SELECT') AS auth_select,
+              has_table_privilege('anon', 'audit_ledger', 'SELECT') AS anon_select`);
+    const p = rows[0];
+    if (!p.sr_insert || p.sr_update || p.sr_delete || p.sr_truncate || p.auth_select || p.anon_select) {
+      throw new Error('unexpected privileges: ' + JSON.stringify(p));
+    }
+  });
+
+  console.log('── Trust foundation: action requests');
+
+  const arInsert = (id, extra = '') => `INSERT INTO action_requests
+      (id, tenant_id, claim_id, action_type, proposed_by_type, proposed_by, proposal, policy_version ${extra ? ',' + extra.split('|')[0] : ''})
+      VALUES ('${id}', '${TENANT_A}', 'claim_ct_1', 'reserve.change', 'agent', 'agent:reserve_analysis',
+              '{"medical_cents":500000}', 'authority-default@1' ${extra ? ',' + extra.split('|')[1] : ''})`;
+
+  await check('a pending agent proposal is accepted', () => client.query(arInsert('ar_ct_1')));
+
+  await expectError(client, 'self-approval is rejected by the database',
+    `UPDATE action_requests SET status = 'approved', decision = 'approve', decided_by = 'agent:reserve_analysis',
+            decided_at = now(), decision_rationale = 'x' WHERE id = 'ar_ct_1'`,
+    /action_requests_no_self_approval_chk/);
+
+  await expectError(client, 'approval without a decision record is rejected',
+    `UPDATE action_requests SET status = 'approved' WHERE id = 'ar_ct_1'`,
+    /action_requests_execution_requires_approval_chk/);
+
+  await expectError(client, 'rejection without a reject decision is rejected',
+    `UPDATE action_requests SET status = 'rejected' WHERE id = 'ar_ct_1'`,
+    /action_requests_rejected_requires_reject_chk/);
+
+  await expectError(client, 'a decision without a rationale is rejected',
+    `UPDATE action_requests SET status = 'approved', decision = 'approve', decided_by = 'sup@ct.test',
+            decided_at = now() WHERE id = 'ar_ct_1'`,
+    /action_requests_decided_fields_chk/);
+
+  await expectError(client, 'a modify decision without the approved payload is rejected',
+    `UPDATE action_requests SET status = 'approved', decision = 'modify', decided_by = 'sup@ct.test',
+            decided_at = now(), decision_rationale = 'lowered' WHERE id = 'ar_ct_1'`,
+    /action_requests_modify_payload_chk/);
+
+  await check('a properly decided approval is accepted', () =>
+    client.query(
+      `UPDATE action_requests SET status = 'approved', decision = 'approve', decided_by = 'sup@ct.test',
+              decided_by_role = 'supervisor', decided_at = now(), decision_rationale = 'Supported by worksheet'
+        WHERE id = 'ar_ct_1'`));
+
+  await check('idempotency keys are unique when present', async () => {
+    await client.query(arInsert('ar_ct_2', `idempotency_key|'idem-ct-1'`));
+    await client.query(arInsert('ar_ct_3'));   // NULL keys never collide
+    try {
+      await client.query(arInsert('ar_ct_4', `idempotency_key|'idem-ct-1'`));
+    } catch (e) {
+      if (/action_requests_idempotency_key_uq/.test(e.message)) return;
+      throw e;
+    }
+    throw new Error('duplicate idempotency key accepted');
+  });
+
+  await check('a claim with approval history cannot be deleted out from under it', async () => {
+    await client.query(
+      `INSERT INTO claims (id, claim_number, status, date_of_injury) VALUES ('claim_ct_ar', 'HHW-2026-CAR', 'new_claim', '2026-05-03')`);
+    await client.query(
+      `INSERT INTO action_requests (id, tenant_id, claim_id, action_type, proposed_by_type, proposed_by, proposal, policy_version)
+       VALUES ('ar_ct_fk', '${TENANT_A}', 'claim_ct_ar', 'reserve.change', 'human', 'adj@ct.test', '{}', 'authority-default@1')`);
+    try {
+      await client.query(`DELETE FROM claims WHERE id = 'claim_ct_ar'`);
+    } catch (e) {
+      if (/action_requests_claim_id_fkey/.test(e.message)) return;
+      throw e;
+    }
+    throw new Error('claim with approval history was deleted');
   });
 
   await client.end();
