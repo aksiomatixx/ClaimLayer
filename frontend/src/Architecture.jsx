@@ -111,6 +111,7 @@ const AGENTS = [
 const GUARDRAILS = [
   { rule: 'No auto-deny path anywhere in the system',                                 where: 'Architecturally absent — there is no code path from AI output to a denied status',  why: 'CA Labor Code §5402 + §4062 due-process protections require licensed human decision' },
   { rule: 'AI may only return auto_approve or physician_review on RFAs',              where: 'aiService.evaluateRFA + rfaService._resolveDecision',                              why: 'MTUS authority (LC §4610, DWC FAQ) requires licensed physician for adverse determinations' },
+  { rule: 'An AI auto_approve is a recommendation — a human approves the RFA',          where: 'rfaService.evaluateRFA → approvalService (action registry: medical.rfa.approve)',  why: 'Treatment authorization is a benefit decision; the agent prepares it, an adjuster decides it' },
   { rule: 'Surgical CPT 10000-69999 + Cat-III codes always route to URO',             where: 'rfaService._isSurgical (overrides AI rec)',                                        why: 'Surgical authorization requires physician review regardless of guideline consistency' },
   { rule: 'C&R AI offers capped at 1.15× stipulated value',                            where: 'pdPricingService — guardrail emitted on every cnr_pricing decision',              why: 'Prevents AI-driven over-settlement; flags for adjuster scrutiny' },
   { rule: 'C&R AI offers above 5.0× stip value rejected',                              where: 'pdPricingService — cnr_premium_cap_5x guardrail',                                  why: 'Catches model errors before the offer ever reaches the worker' },
@@ -120,7 +121,9 @@ const GUARDRAILS = [
   { rule: 'DWC I&A block hardcoded in unrepresented worker notices',                   where: 'pdfService._drawIABlock (called from every notice generator)',                     why: '8 CCR §10212 — every unrepresented worker notice must contain this block verbatim' },
   { rule: 'EAMS filing always manual',                                                 where: 'cnrService.recordEAMSFiled + stipService — filed_at set by adjuster, never auto', why: 'No EAMS API exists; manual filing is a procedural rule, not a tooling gap' },
   { rule: 'A1 / FileHandler sync failures queued, never block operations',             where: 'claimService — FH sync wrapped in try/catch with claim_events retry log',          why: 'CMS = financial system of record; operational state must continue when CMS is degraded' },
-  { rule: 'Audit trail on every Claude call + every gate decision',                    where: 'aiDecisionsService.logDecision (best-effort, never throws)',                       why: '7-year CA WC audit retention; observability for DWC PAR audits' },
+  { rule: 'Audit trail on every Claude call + every gate decision',                    where: 'aiDecisionsService.logDecision (required for regulated decisions — a failed audit write fails the call)', why: '7-year CA WC audit retention; observability for DWC PAR audits' },
+  { rule: 'Consequential actions recorded in an append-only, hash-chained ledger',     where: 'audit_ledger (database triggers block UPDATE/DELETE) via auditLedgerService',      why: 'Reconstruct who or what acted, on what evidence, and who approved — tamper-evident' },
+  { rule: 'Agents propose; authorized humans approve; the system executes',            where: 'policy/actionRegistry + policy/authorityPolicy + approvalService',                why: 'No self-approval, monetary authority limits, MFA step-up for financial actions' },
 ];
 
 // Integration architecture — system-of-engagement / system-of-record split.

@@ -31,7 +31,7 @@ const config       = require('../config');
 const logger       = require('../logger');
 const auditLedger  = require('./auditLedgerService');
 const { getAction, AUTONOMY } = require('../policy/actionRegistry');
-const { evaluateAuthority, claimContext, normalizeRole } = require('../policy/authorityPolicy');
+const { evaluateAuthority, claimContext, normalizeRole, ROLE_LEVELS } = require('../policy/authorityPolicy');
 const { getExecutor } = require('./actionExecutors');
 const { mfaEnforced } = require('../middleware/auth');
 
@@ -105,6 +105,21 @@ async function getRequest(requestId, principal) {
   return data;
 }
 
+// An idempotency key replays a request only for the same tenant, claim and
+// action. Anything else is a conflict that reveals nothing about the
+// existing request (keys are client-supplied and must not become a
+// cross-tenant lookup).
+async function _replayByIdempotencyKey(idempotencyKey, { tenantId, claimId, actionType }) {
+  const { data: existing } = await supabase
+    .from('action_requests').select('*').eq('idempotency_key', idempotencyKey);
+  if (!existing || !existing.length) return null;
+  const req = existing[0];
+  if (req.tenant_id !== tenantId || req.claim_id !== claimId || req.action_type !== actionType) {
+    throw new ApprovalError('IDEMPOTENCY_KEY_CONFLICT', 'This idempotency key is already in use', 409);
+  }
+  return { request: req, idempotent: true };
+}
+
 // ── propose ──────────────────────────────────────────────────────────────────
 
 /**
@@ -136,13 +151,12 @@ async function propose({ actionType, claimId, proposer, payload, rationale, evid
   if (!Array.isArray(evidence)) throw new ApprovalError('INVALID_EVIDENCE', 'evidence must be an array');
   const why = _requireRationale(rationale, 'The proposer');
 
-  if (idempotencyKey) {
-    const { data: existing } = await supabase
-      .from('action_requests').select('*').eq('idempotency_key', idempotencyKey);
-    if (existing && existing.length) return { request: existing[0], idempotent: true };
-  }
-
   const claim = await _loadClaimForPrincipal(claimId, proposer);
+  const tenantId = claim.tenantId || config.tenancy.defaultTenantId;
+  if (idempotencyKey) {
+    const replay = await _replayByIdempotencyKey(idempotencyKey, { tenantId, claimId, actionType });
+    if (replay) return replay;
+  }
   const normalized = _validatePayload(action, payload);
   await _precheck(executor, { claimId, payload: normalized });
 
@@ -155,7 +169,7 @@ async function propose({ actionType, claimId, proposer, payload, rationale, evid
   const now = new Date().toISOString();
   const row = {
     id:                     _id(),
-    tenant_id:              claim.tenantId || config.tenancy.defaultTenantId,
+    tenant_id:              tenantId,
     client_id:              clientId,
     claim_id:               claimId,
     action_type:            actionType,
@@ -179,9 +193,8 @@ async function propose({ actionType, claimId, proposer, payload, rationale, evid
   const { data: inserted, error } = await supabase.from('action_requests').insert(row).select().single();
   if (error) {
     if (error.code === '23505' && idempotencyKey) {
-      const { data: existing } = await supabase
-        .from('action_requests').select('*').eq('idempotency_key', idempotencyKey);
-      if (existing && existing.length) return { request: existing[0], idempotent: true };
+      const replay = await _replayByIdempotencyKey(idempotencyKey, { tenantId, claimId, actionType });
+      if (replay) return replay;
     }
     throw new Error(`approvalService.propose: ${error.message}`);
   }
@@ -247,7 +260,19 @@ async function decide(requestId, { decision, decider, rationale, modifiedPayload
   let modifications = null;
   let authority = null;
 
-  if (decision !== 'reject') {
+  if (decision === 'reject') {
+    // Rejecting needs the same seniority as approving, so a peer cannot block
+    // a colleague's escalation. An out-of-policy request (no role covers it)
+    // can be rejected by the most senior role.
+    const required = request.required_approver_role;
+    const deciderLevel = ROLE_LEVELS[normalizeRole(decider.role)];
+    const requiredLevel = required ? ROLE_LEVELS[required] : Math.max(...Object.values(ROLE_LEVELS));
+    if (deciderLevel < requiredLevel) {
+      throw new ApprovalError('INSUFFICIENT_AUTHORITY',
+        `Rejecting this request requires ${required || 'the most senior'} authority`, 403,
+        { required_role: required });
+    }
+  } else {
     if (decision === 'modify') {
       finalPayload = _validatePayload(action, modifiedPayload);
       modifications = _diff(request.proposal, finalPayload);
@@ -384,6 +409,7 @@ async function execute(requestId, actor) {
       status: 'executed', executed_by: actor.id, executed_at: new Date().toISOString(),
       execution_result: result || {}, execution_error: null, updated_at: new Date().toISOString(),
     }).eq('id', requestId).eq('status', 'executing').select().single();
+    const executed = done || await getRequest(requestId);
 
     // The action already happened: this ledger write cannot gate it, so it is
     // best-effort with a loud log (the executor's own records also exist).
@@ -395,19 +421,20 @@ async function execute(requestId, actor) {
       evidence: [{ type: 'action_request', id: requestId }],
     });
     logger.info({ msg: 'approval: executed', requestId, actionType: request.action_type });
-    return { request: done };
+    return { request: executed };
   } catch (e) {
     logger.error({ msg: 'approval: execution failed', requestId, actionType: request.action_type, err: e.message });
     const { data: failed } = await supabase.from('action_requests').update({
       status: 'execution_failed', execution_error: e.message, updated_at: new Date().toISOString(),
     }).eq('id', requestId).eq('status', 'executing').select().single();
+    const failedRow = failed || await getRequest(requestId);
     await auditLedger.append({
       actor, action: 'action.execution_failed',
       entity: { type: 'action_request', id: requestId },
       claimId: request.claim_id, tenantId: request.tenant_id,
       payload: { action_type: request.action_type, error: e.message },
     });
-    return { request: failed };
+    return { request: failedRow };
   }
 }
 

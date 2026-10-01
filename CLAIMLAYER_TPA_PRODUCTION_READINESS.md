@@ -893,7 +893,7 @@ or by execution in this review.
 | **S-2** | P0 | **No application-layer tenant isolation.** The backend uses the service-role key (bypasses RLS) and no query filters by tenant. `tenantId` in the JWT is never read. Document claim-matching by `claim_number` is global | `services/supabase.js`, `claimService.listClaims`, `documentIngestionService._matchClaimByNumber` | Sprint 2: `pg` with per-request `SET LOCAL app.tenant_id` + non-owner role; tenant_id on all tables; channel→tenant binding |
 | **S-3** | P0 | **11 of 50 tables have RLS disabled** (verified): `claim_documents` (medical text, base64 PDFs), `benefit_notices` (recipient name/address JSON), `benefit_notice_channels`, `integration_outbox` (payloads), `webhook_events` (payloads), `claim_links`, `reserve_line_items`, `supervisor_alerts`, `insurers`, `policies`, `tenants`. Supabase's default privileges on `public` grant the `anon`/`authenticated` roles table access, so with RLS off these are readable via PostgREST with the publishable anon key | Catalog query on migrated schema | **Fixed in Sprint 1:** RLS enabled deny-by-default on all 11, plus a contract assertion that *every* public table has RLS. Verify grants in the hosted project with `\dp` |
 | **S-4** | P0 | **Authorization is effectively one omnipotent role.** About 120 routes require `admin`; `adjuster` works on 3 routes; supervisors pass every claim-scoped GET; MFA is enforced on a single route; no monetary authority; admin (IT) = claims authority | `grep requireRole`, `middleware/claimAccess.js:73–76`, `routes/auth.js:151` | Sprint 1 adds authority policy + approval gate for consequential actions; Sprint 3 adds a permission catalog + step-up MFA |
-| **S-5** | P0 | **AI autonomously authorizes medical treatment.** `aiResult.recommendedAction === 'auto_approve'` → `_autoApproveRFA` sets `decision='auto_approved'`, `decision_made_by='ai_system'`, completes the diary, generates the approval letter. No confidence floor, cost cap, or human | `rfaService.js:101–103`, `177–195`, `400–402` | Route AI approvals to the human approval queue. Any future auto-authorization must be a validated deterministic rule with client consent, not model output |
+| **S-5** | P0 | **AI autonomously authorizes medical treatment.** `aiResult.recommendedAction === 'auto_approve'` → `_autoApproveRFA` sets `decision='auto_approved'`, `decision_made_by='ai_system'`, completes the diary, generates the approval letter. No confidence floor, cost cap, or human | `rfaService.js:101–103`, `177–195`, `400–402` (pre-Sprint-1 line numbers) | **Fixed in Sprint 1:** AI approvals route to the human approval queue as agent-proposed action requests. Any future auto-authorization must be a validated deterministic rule with client consent, not model output |
 | **S-6** | P1 | **Employer receives the worker's magic-link credential.** `/employer/froi` returns `magic_link_url`; the employer can open the worker's session (claim-scoped intake, medical providers, uploads). The token is also carried in the URL query string | `routes/employer.js` (response body `magic_link_url`) | Deliver links only to the worker (email/SMS) or via the adjuster; never return the token to the employer; move the token to a fragment and exchange it for a cookie |
 | **S-7** | P1 | **Cross-client worker lookup.** `/employer/employee-preview/:adpEmployeeId` and `/employer/froi` pull ADP data for any id with no check that the worker belongs to the caller's company. `POST /claims` takes `employerName` from the body | `routes/employer.js`, `routes/claims.js:28–55` | Scope payroll lookups to the client's integration credentials / company code |
 | **S-8** | P1 | **Session weaknesses:** cookies lack `secure`; one JWT secret for magic links, employee, and staff sessions; no revocation or logout; dev auto-login gated only by `NODE_ENV ∈ {development,test}`, and the root scripts set `NODE_ENV=development` | `routes/auth.js:216,263,300,321,340,356`, `middleware/auth.js`, `package.json` | **`secure` fixed in Sprint 1.** Separate signing keys per token type; server-side session store with revocation; dev endpoints behind an explicit `ENABLE_DEV_AUTH` flag that production config cannot set |
@@ -903,7 +903,7 @@ or by execution in this review.
 | **S-12** | P1 | **Prompt-injection exposure.** Document text is embedded as JSON in the user turn with no untrusted-content boundary. The model-extracted `claim_number` alone selects the claim a document is filed to. A crafted document can name another claim's number and be filed there, with its action diary | `aiService.classifyDocument`, `documentIngestionService.js:223–231` | Untrusted envelope + instruction; require corroboration (worker name/DOB/DOI match) for auto-filing; never let model-chosen identifiers cross tenant boundaries |
 | **S-13** | P1 | **PHI sent to two AI vendors** (Anthropic; OpenAI Whisper for voice) with no documented data-processing terms, retention settings, or redaction policy | `aiService.js`, `voiceService.js:56–65` | Model gateway with per-vendor policy; contractual zero retention / no training; counsel to confirm the applicable privacy regime |
 | **S-14** | P1 | **Webhook fail-open outside production.** HMAC validation is skipped whenever a secret is unset and `NODE_ENV !== 'production'`; a misconfigured environment is open. The email webhook takes its token in the query string | `routes/webhooks.js validateHMAC` | Fail closed unless an explicit dev flag is set; token in a header |
-| **S-15** | P1 | **Audit records are mutable or deletable.** `audit_log` RLS is `FOR ALL` for admin; `claim_events` cascade-deletes and is deleted by compensation code; `ai_decisions` is updated in place | Migrations 03/04; `documentIngestionService.js:518`; `aiDecisionsService.linkHumanDecision` | **Sprint 1:** immutable `audit_ledger` (DB-enforced); Sprint 2: remove cascades and deletes |
+| **S-15** | P1 | **Audit records are mutable or deletable.** `audit_log` RLS is `FOR ALL` for admin; `claim_events` cascade-deletes and is deleted by compensation code; `ai_decisions` is updated in place | Migrations 03/04; `documentIngestionService.js:518`; `aiDecisionsService.linkHumanDecision` | **Partly fixed in Sprint 1:** immutable `audit_ledger` (DB-enforced) now records these actions, and human reviews are appended rather than only mutated. Sprint 2: remove the cascades and compensating deletes |
 | **S-16** | P2 | **Dependency vulnerabilities:** 11 production packages flagged (1 critical: `tar` via `canvas`; high: `axios`, `form-data`, `ws`, `pdfjs-dist`, `ip-address`, `brace-expansion`) | `npm audit --omit=dev` | Renovate + CI SCA gate |
 | **S-17** | P2 | **In-memory, per-process rate limiting**; 10 MB JSON body limit on all routes | `index.js` | Gateway / Redis-backed limits; per-route body limits |
 | **S-18** | P2 | **Reference tables readable by any authenticated user** across tenants (`employers` incl. FEINs, `providers`) | Migration 03 policies `USING (true)` | Tenant-scope employer data |
@@ -1146,4 +1146,38 @@ ledger, payments, rules engine, agents) plugs into them.
 - Persisting authority grants per user (`authority_grants` table). Sprint 1 uses role defaults
   with client overrides in code.
 
-The implementation status of each item is recorded in the PR for this change and in the ADRs.
+### Sprint 1 outcome (implemented in this change)
+
+| # | Deliverable | Status | Verification |
+|---|---|---|---|
+| 1 | Server-authoritative identity | Done | `tests/security/identity-hardening.test.js`: 10 tests. 6 of them fail against the pre-sprint code, proving they detect S-1 |
+| 2 | Schema truth (`ai_decisions`, RLS on all tables, `users.active`) | Done | Contract test: both `ai_decisions` writer shapes insert; **every** public table has RLS |
+| 3 | Immutable audit ledger + dual-writes | Done (interim write semantics per ADR-0003) | Contract test: DB-assigned chain, append-only, tamper and gap detection, timezone independence, privileges. `tests/unit/auditLedgerService.test.js`: 17 tests (+ 15 in `money.test.js`) |
+| 4 | Action registry + authority policy | Done | `tests/unit/policy.test.js`: 43 tests (tiers pinned, every authority rule) |
+| 5 | Approval lifecycle + reserve executor | Done | `tests/integration/action-requests.test.js`: 28 tests over HTTP |
+| 6 | RFA approvals require a human (S-5) | Done | `tests/integration/rfa-engine.test.js`: auto-approve path rewritten to assert the human path, plus approval and supersession |
+| 7 | ADRs + environment / developer docs | Done | `docs/adr/0001`–`0005`, `docs/ENVIRONMENT.md`, `docs/DEVELOPMENT.md` |
+
+Totals after the sprint:
+
+- backend: **86 suites, 1,396 tests** (from 81 / 1,278);
+- schema contract on PostgreSQL 16: **63 assertions** (from 33);
+- frontend: 84 tests;
+- all passing.
+
+The contract test also caught a real defect during the sprint. A `CHECK` constraint accepted
+`NULL` through three-valued logic, so an `approved` status without a decision would have been
+allowed. It was fixed before merge.
+
+### Recommended Sprint 2 — transactional core
+
+1. Replace supabase-js with a `pg` unit of work on the consequential paths
+   (`claimService`, `diaryActionService`, `documentIngestionService`, `approvalService`).
+   Ledger writes then become part of the same transaction, and the compensation code and
+   `_testStore` are deleted.
+2. Remove `ON DELETE CASCADE` from history tables, and stop deleting `claim_events`.
+3. Propagate `tenant_id` and `client_id` to every table. Scope every query, and set
+   `app.tenant_id` per request so RLS is real defense in depth.
+4. Replace the 15 `setImmediate` side effects with a durable Postgres-backed job queue.
+5. Start the integration-test migration off the in-memory mock, using a real Postgres per CI
+   run.

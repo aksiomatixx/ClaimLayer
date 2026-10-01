@@ -110,6 +110,19 @@ describe('proposal', () => {
     expect(b.body).toMatchObject({ idempotent: true, request: { id: a.body.request.id } });
   });
 
+  test('an idempotency key cannot be replayed against another claim (no cross-record lookup)', async () => {
+    await propose(ADJ, RESERVES_60K, { idempotency_key: 'shared-key-0000001' });
+    claimService._seedClaim({
+      id: 'claim_ar_2', claimNumber: 'CL-2026-AR2', status: 'accepted', employerId: 'emp-2',
+      dateOfInjury: '2026-05-02', filehandlerId: 'fh_ar_2', employee: {}, events: [], diaries: [],
+    });
+    const res = await request(app).post('/api/v1/claims/claim_ar_2/action-requests').set('Authorization', ADJ2)
+      .send({ action_type: 'reserve.change', payload: RESERVES_60K,
+              rationale: 'Different claim, same key.', idempotency_key: 'shared-key-0000001' });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'IDEMPOTENCY_KEY_CONFLICT', message: 'This idempotency key is already in use' });
+  });
+
   test('a litigated claim escalates even a small reserve change', async () => {
     claimService._resetClaims();
     seedClaim({ status: 'litigated' });
@@ -218,6 +231,15 @@ describe('decision', () => {
     expect(res.body.request).toMatchObject({ status: 'rejected', approved_payload: null });
     expect(filehandler.setReserves).not.toHaveBeenCalled();
     expect((await ledger()).map(e => e.action)).toEqual(['action.proposed', 'action.rejected']);
+  });
+
+  test('a peer cannot block an escalation by rejecting it', async () => {
+    const { body } = await propose();
+    const res = await decide(body.request.id, ADJ2, { decision: 'reject', rationale: 'I would not increase this.' });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: 'INSUFFICIENT_AUTHORITY', details: { required_role: 'supervisor' } });
+    const still = await request(app).get(`/api/v1/action-requests/${body.request.id}`).set('Authorization', SUP);
+    expect(still.body.request.status).toBe('pending_approval');
   });
 
   test('a request can be decided only once', async () => {
