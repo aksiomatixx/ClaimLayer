@@ -4,6 +4,7 @@ const express                    = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const rfaService                 = require('../services/rfaService');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { humanPrincipal }           = require('../policy/principal');
 
 const router = express.Router();
 
@@ -99,7 +100,8 @@ router.post(
   async (req, res) => {
     try {
       const adjusterEmail = req.user.email || req.user.sub;
-      const rfa = await rfaService.adjusterApproveRFA(req.params.id, adjusterEmail);
+      const rfa = await rfaService.adjusterApproveRFA(req.params.id, adjusterEmail,
+        { actor: humanPrincipal(req.user) });
       if (!rfa) return res.status(404).json({ error: 'RFA not found' });
       res.json(rfa);
     } catch (err) {

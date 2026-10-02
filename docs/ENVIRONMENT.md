@@ -41,6 +41,28 @@ Production data must never be copied into a non-production environment.
 | `SUPABASE_URL` | yes | **Also switches MFA enforcement on**: `requireMFA` and the approval gate for MFA-flagged actions (reserve changes, payments) require an MFA-verified session whenever this is set |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Server only. Bypasses RLS — never expose to a browser |
 | `SUPABASE_ANON_KEY` | yes | Used only for Supabase Auth calls |
+| `DATABASE_URL` | **yes in production** | Direct Postgres connection for transactional writes (ADR-0006). Supabase: the direct connection or the session pooler (port 5432). The backend **refuses to boot** in production without it. Unset in development, the unit of work runs in a non-atomic compatibility mode |
+| `DATABASE_SSL` | no | `disable` \| `require` \| `verify`. Default: `disable` for localhost, `require` otherwise. Use `verify` with `DATABASE_SSL_CA` (PEM) to check the server certificate |
+| `DATABASE_POOL_MAX` | no | Default `10` connections per process (API and each worker) |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | no | Default `15000` |
+
+### Background work (durable job queue, ADR-0006)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `JOBS_IN_PROCESS_POLLER` | `true` | The API process polls for due jobs (retries, expired leases). Set `false` when dedicated workers run (`npm run worker`). Running both is safe, just redundant |
+| `JOBS_KICK` | `true` | After commit, the API tries a new job immediately |
+| `JOBS_LEASE_SECONDS` | `300` | A claimed job's lease. A handler running longer must be safe to run twice |
+| `JOBS_POLL_INTERVAL_MS` | `2000` | Idle poll interval |
+
+Processes:
+
+- **API:** `npm start`.
+- **Worker:** `npm run worker` (optional for one instance, recommended at scale). It drains
+  jobs and dispatches the integration outbox.
+- **Scheduler alternative:** `POST /api/v1/admin/workers/jobs/run`.
+- **Dead-lettered jobs:** inspected with `GET /api/v1/admin/jobs?status=dead`; each also raises
+  a `BACKGROUND_JOB_FAILED` diary on its claim.
 
 Supabase project settings required outside local development:
 
@@ -80,7 +102,10 @@ Required before any live data:
 
 - [ ] `NODE_ENV=production`, served over HTTPS only (session cookies are `Secure`).
 - [ ] Migrations applied in order, *before* the matching backend (`migrate → deploy`),
-  including `20261001000001`–`20261001000004`.
+  including `20261001000001`–`20261001000004` and `20261002000001`.
+- [ ] `DATABASE_URL` set (the backend will not boot in production without it), with TLS.
+- [ ] A job poller running: the in-process poller (default), or `npm run worker`
+  processes; dead jobs monitored (`GET /admin/jobs?status=dead`).
 - [ ] Public sign-ups disabled; every user provisioned in `public.users`; staff enrolled in MFA.
 - [ ] Webhook secrets and `EMAIL_INBOUND_TOKEN` set.
 - [ ] Secrets in a secrets manager; per-environment credentials; key rotation documented.

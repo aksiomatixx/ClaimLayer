@@ -14,7 +14,13 @@
  *                  the RFA was decided through another path).
  *   execute(ctx)   performs the action; returns a JSON-serializable result.
  *
- * ctx = { request, claimId, payload, approver }
+ * ctx = { tx, request, claimId, payload, approver }
+ *
+ * execute runs INSIDE the approval's unit of work (ADR-0006): every write
+ * goes through ctx.tx, so the action's effects, its ledger entries and the
+ * request's 'executed' state commit together — a failure leaves none of
+ * them. External systems are reached only through the outbox or a job
+ * enqueued on ctx.tx, never called directly from here.
  */
 
 const { fromCents } = require('../utils/money');
@@ -28,14 +34,14 @@ class PreconditionError extends Error {
 
 const EXECUTORS = {
   'reserve.change': {
-    async execute({ request, payload, approver }) {
+    async execute({ tx, request, payload, approver }) {
       const claimService = require('./claimService');
       await claimService.approveReserves(request.claim_id, {
         medical:   fromCents(payload.medical_cents),
         indemnity: fromCents(payload.indemnity_cents),
         expense:   fromCents(payload.expense_cents),
         reason:    payload.reason,
-      }, approver.id, { actor: approver, actionRequestId: request.id });
+      }, approver.id, { tx, actor: approver, actionRequestId: request.id });
       return {
         medical_cents:   payload.medical_cents,
         indemnity_cents: payload.indemnity_cents,
@@ -55,9 +61,13 @@ const EXECUTORS = {
         throw new PreconditionError(`RFA is already decided (${rfa.decision})`);
       }
     },
-    async execute({ payload, approver }) {
+    async execute({ tx, request, payload, approver }) {
       const rfaService = require('./rfaService');
-      const updated = await rfaService.adjusterApproveRFA(payload.rfa_id, approver.id);
+      // requireUndecided re-checks the precondition under the RFA row lock,
+      // so a direct decision racing this approval cannot be overwritten.
+      const updated = await rfaService.adjusterApproveRFA(payload.rfa_id, approver.id, {
+        tx, actor: approver, requireUndecided: true, actionRequestId: request.id,
+      });
       if (!updated) throw new Error('RFA approval did not persist');
       return { rfa_id: payload.rfa_id, decision: updated.decision };
     },

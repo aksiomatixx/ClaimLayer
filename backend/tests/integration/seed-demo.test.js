@@ -316,6 +316,45 @@ describe('wipeDemo', () => {
   it('does not error when no demo data exists', async () => {
     await expect(wipeDemo()).resolves.toBeDefined();
   });
+
+  it('removes approval history, outbox rows, jobs and migrated-claim events (claims no longer cascade)', async () => {
+    await seedDemo();
+    await supabase.from('action_requests').insert({ id: 'ar_demo_wipe', claim_id: 'claim_demo_001', status: 'pending_approval' });
+    await supabase.from('integration_outbox').insert({ id: 'obx_demo_wipe', claim_id: 'claim_demo_002', status: 'pending' });
+    await supabase.from('jobs').insert({ id: 'job_demo_wipe', claim_id: 'claim_demo_003', status: 'pending' });
+    const { data: legacy } = await supabase.from('claims').select('id').eq('external_claim_id', 'LEG-000');
+    expect(legacy).toHaveLength(1);
+
+    await wipeDemo();
+
+    for (const tbl of ['claims', 'action_requests', 'integration_outbox', 'jobs']) {
+      const { data } = await supabase.from(tbl).select('*');
+      expect({ tbl, rows: data }).toEqual({ tbl, rows: [] });
+    }
+    const { data: events } = await supabase.from('claim_events').select('*').eq('claim_id', legacy[0].id);
+    expect(events).toHaveLength(0);
+  });
+
+  it('fails loudly when a demo claim cannot be deleted (instead of a silent half-wipe)', async () => {
+    await seedDemo();
+    const realFrom = supabase.from.bind(supabase);
+    const spy = jest.spyOn(supabase, 'from').mockImplementation((table) => {
+      const qb = realFrom(table);
+      if (table !== 'claims') return qb;
+      const realDelete = qb.delete.bind(qb);
+      qb.delete = () => {
+        realDelete();
+        qb.eq = () => Promise.resolve({ data: null, error: { code: '23503', message: 'violates foreign key constraint' } });
+        return qb;
+      };
+      return qb;
+    });
+    try {
+      await expect(wipeDemo()).rejects.toThrow(/demo wipe incomplete: claims/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

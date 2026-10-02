@@ -31,6 +31,7 @@
 const { supabase } = require('./supabase');
 const config = require('../config');
 const logger       = require('../logger');
+const jobQueue     = require('./jobQueue');
 const { isRepresented } = require('../utils/representation');
 
 // ── Lazy requires (avoid cycles) ─────────────────────────────────────────────
@@ -448,44 +449,45 @@ async function recordPayment(offerId, { paidDate }) {
   // Note: _transitionClaimStatus above directly updates claims.status
   // without going through claimService.updateStatus, so no
   // suppressWcisClose flag is needed — there's no competing enqueue.
-  setImmediate(async () => {
-    try {
-      const wcis = require('./wcisTriggerService');
-      await wcis.enqueueIfReportable({
-        claim_id:         offer.claim_id,
-        trigger_event:    'cnr_settlement_paid',
-        source_service:   'cnrService',
-        source_record_id: offerId,
-        event_date:       paidDate,
-        payload_context: {
-          source:     'cnr_settlement',
-          offer_id:   offerId,
-          paid_date:  paidDate,
-        },
-      });
-      await wcis.enqueueIfReportable({
-        claim_id:         offer.claim_id,
-        trigger_event:    'claim_closed',
-        source_service:   'cnrService',
-        source_record_id: offerId,
-        event_date:       paidDate,
-        payload_context: {
-          source:             'cnr_settlement',
-          offer_id:           offerId,
-          closed_date:        paidDate,
-          claim_status_code:  'C',
-        },
-      });
-    } catch (err) {
-      logger.error({
-        msg: 'cnrService.recordPayment: WCIS hooks failed',
-        offerId, err: err.message,
-      });
-    }
+  await jobQueue.enqueue({
+    queue: 'wcis.cnr_paid', claimId: offer.claim_id,
+    payload: { offerId, claimId: offer.claim_id, paidDate },
+    idempotencyKey: `wcis.cnr_paid:${offerId}`,
   });
 
   logger.info({ msg: 'cnrService.recordPayment: complete', offerId, paidDate });
   return updated;
+}
+
+// Job handler (wcis.cnr_paid): SROI PY with the C&R breakdown, then SROI FN.
+// wcisTriggerService dedupes, so a retry after a partial run is safe.
+async function _wcisOnPayment({ offerId, claimId, paidDate }) {
+  const wcis = require('./wcisTriggerService');
+  await wcis.enqueueIfReportable({
+    claim_id:         claimId,
+    trigger_event:    'cnr_settlement_paid',
+    source_service:   'cnrService',
+    source_record_id: offerId,
+    event_date:       paidDate,
+    payload_context: {
+      source:     'cnr_settlement',
+      offer_id:   offerId,
+      paid_date:  paidDate,
+    },
+  });
+  await wcis.enqueueIfReportable({
+    claim_id:         claimId,
+    trigger_event:    'claim_closed',
+    source_service:   'cnrService',
+    source_record_id: offerId,
+    event_date:       paidDate,
+    payload_context: {
+      source:             'cnr_settlement',
+      offer_id:           offerId,
+      closed_date:        paidDate,
+      claim_status_code:  'C',
+    },
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -596,4 +598,6 @@ module.exports = {
   // Exported for tests
   VALID_TRANSITIONS,
   _addCalendarDays,
+  // Job handler (src/jobs/registry.js)
+  _wcisOnPayment,
 };

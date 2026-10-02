@@ -27,6 +27,9 @@ const aiService            = require('./aiService');
 const noticeService        = require('./noticeService');
 const logger               = require('../logger');
 const auditLedger          = require('./auditLedgerService');
+const jobQueue             = require('./jobQueue');
+const outbox               = require('./outboxService');
+const { runInTransaction } = require('../db/unitOfWork');
 const { addBusinessDays }  = require('../utils/businessDays');
 const { toCents }          = require('../utils/money');
 
@@ -313,38 +316,35 @@ async function createClaim(froiData, employerId) {
       .eq('id', claimId);
   }
 
-  // ── Step 7: Trigger async AI analysis ──────────────────────────────────────
-  setImmediate(() => _runAnalysis(claimId));
-
-  // ── Step 8: DWC-7 notice — fire-and-forget ────────────────────────────────
-  // Runs after HTTP response returns. Errors are logged, never rethrown.
-  setImmediate(() => {
-    noticeService.generateDwc7(claimId).catch(err =>
-      logger.error({ msg: 'createClaim: DWC-7 notice failed', claimId, err: err.message }),
-    );
-  });
-
-  // ── Step 9: WCIS FROI 00 enqueue — fire-and-forget ────────────────────────
-  // M22A: claim-creation hook. Enqueues FROI 00 in wcis_trigger_queue.
-  // wcisTriggerService handles all gating (wcis_enabled, DOI cutoff,
-  // duplicate detection). Errors are logged, never rethrown.
-  setImmediate(() => {
-    const wcis = require('./wcisTriggerService');
-    wcis.enqueueIfReportable({
-      claim_id:         claimId,
-      trigger_event:    'claim_created',
-      source_service:   'claimService',
-      source_record_id: null,
-      event_date:       froiData.dateOfInjury,
-      payload_context: {
-        doi:         froiData.dateOfInjury,
-        employer_id: employerId,
-        employee_id: froiData.employeeId || null,
-        source:      'intake',
+  // ── Steps 7–9: background work — durable jobs (ADR-0006) ────────────────
+  // Run after the HTTP response returns; retried with backoff and
+  // dead-lettered to a diary if they keep failing.
+  //   7. AI compensability analysis
+  //   8. DWC-7 notice
+  //   9. WCIS FROI 00 (M22A claim-creation hook). wcisTriggerService handles
+  //      all gating (wcis_enabled, DOI cutoff, duplicate detection).
+  await jobQueue.enqueue({ queue: 'claim.analysis', payload: { claimId }, claimId,
+                           idempotencyKey: `claim.analysis:${claimId}:created` });
+  await jobQueue.enqueue({ queue: 'notice.dwc7', payload: { claimId }, claimId,
+                           idempotencyKey: `notice.dwc7:${claimId}` });
+  await jobQueue.enqueue({
+    queue: 'wcis.trigger', claimId,
+    idempotencyKey: `wcis.trigger:${claimId}:claim_created`,
+    payload: {
+      trigger: {
+        claim_id:         claimId,
+        trigger_event:    'claim_created',
+        source_service:   'claimService',
+        source_record_id: null,
+        event_date:       froiData.dateOfInjury,
+        payload_context: {
+          doi:         froiData.dateOfInjury,
+          employer_id: employerId,
+          employee_id: froiData.employeeId || null,
+          source:      'intake',
+        },
       },
-    }).catch((err) =>
-      logger.error({ msg: 'createClaim: WCIS FROI 00 enqueue failed', claimId, err: err.message }),
-    );
+    },
   });
 
   logger.info({ msg: 'createClaim: complete', claimNumber, claimId });
@@ -566,16 +566,34 @@ async function approveReserves(claimId, reserves, adjusterEmail, opts = {}) {
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
   if (!claim.filehandlerId) throw new Error('Claim is not yet synced to FileHandler');
 
-  await filehandler.setReserves(
-    claim.filehandlerId,
-    { ...reserves, reason: reserves.reason || 'Adjuster reserve approval' },
-    'ADJUSTER',
-    adjusterEmail
-  );
+  // One unit of work (ADR-0006): the reserves row, its event, the ledger
+  // entry and the FileHandler outbox row commit together — or not at all.
+  // Inside an approval execution (opts.tx) it joins that transaction.
+  const work = (tx) => _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts);
+  const now = opts.tx
+    ? await work(opts.tx)
+    : await runInTransaction({
+      tenantId: claim.tenantId, actorId: _ledgerActorFor(adjusterEmail, opts).id, label: 'reserve.approve',
+    }, work);
 
+  // For test-seeded claims, update the in-memory object too
+  if (_testStore.has(claimId)) {
+    const c = _testStore.get(claimId);
+    c.events = c.events || [];
+    c.events.push({ type: 'reserves_approved', timestamp: now, data: { approvedBy: adjusterEmail, ...reserves } });
+    c.updatedAt = now;
+    return c;
+  }
+
+  return opts.tx ? claim : getClaim(claimId);
+}
+
+async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) {
+  const claimId = claim.id;
   const now = new Date().toISOString();
+  const reason = reserves.reason || 'Adjuster reserve approval';
 
-  await supabase.from('reserves').insert({
+  await tx.insert('reserves', {
     claim_id:    claimId,
     medical:     reserves.medical   || 0,
     indemnity:   reserves.indemnity || 0,
@@ -586,18 +604,15 @@ async function approveReserves(claimId, reserves, adjusterEmail, opts = {}) {
     created_at:  now,
   });
 
-  await supabase.from('claim_events').insert({
+  await tx.insert('claim_events', {
     claim_id:  claimId,
     type:      'reserves_approved',
     timestamp: now,
     data:      { approvedBy: adjusterEmail, ...reserves, actionRequestId: opts.actionRequestId || null },
   });
 
-  await supabase.from('claims').update({ updated_at: now }).eq('id', claimId);
+  await tx.update('claims', { updated_at: now }, { id: claimId });
 
-  // Interim best-effort dual-write (ADR-0003): the FileHandler and local
-  // writes above are not yet one transaction, so the ledger records the
-  // approval after they succeed rather than gating them.
   const medicalCents   = toCents(reserves.medical   || 0);
   const indemnityCents = toCents(reserves.indemnity || 0);
   const expenseCents   = toCents(reserves.expense   || 0);
@@ -616,18 +631,29 @@ async function approveReserves(claimId, reserves, adjusterEmail, opts = {}) {
       path:            opts.actionRequestId ? 'action_request' : 'direct',
     },
     evidence: opts.actionRequestId ? [{ type: 'action_request', id: opts.actionRequestId }] : [],
-  });
+  }, { tx });
 
-  // For test-seeded claims, update the in-memory object too
-  if (_testStore.has(claimId)) {
-    const c = _testStore.get(claimId);
-    c.events = c.events || [];
-    c.events.push({ type: 'reserves_approved', timestamp: now, data: { approvedBy: adjusterEmail, ...reserves } });
-    c.updatedAt = now;
-    return c;
-  }
+  // The system of record (FileHandler) is updated through the outbox: the
+  // row commits with the approval and is dispatched right after commit;
+  // a failure is retried by the outbox worker and, if it persists,
+  // surfaced as a CRITICAL INTEGRATION_SYNC_FAILED diary.
+  const [row] = await outbox.enqueue([{
+    target:    'filehandler',
+    operation: 'set_reserves',
+    claim_id:  claimId,
+    payload:   {
+      fh_claim_id: claim.filehandlerId,
+      medical:     reserves.medical   || 0,
+      indemnity:   reserves.indemnity || 0,
+      expense:     reserves.expense   || 0,
+      reason,
+      set_by:      'ADJUSTER',
+      approved_by: adjusterEmail,
+    },
+  }], { tx });
+  tx.afterCommit(() => outbox.dispatchOne(row.id, 'inline-reserves'));
 
-  return getClaim(claimId);
+  return now;
 }
 
 // ── Status update ─────────────────────────────────────────────────────────────
@@ -707,41 +733,46 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
   // opts.suppressWcisClose=true is passed by cnrService.recordPayment
   // and disbursementService.recordDisbursementPayment to avoid
   // duplicate enqueue on settlement-driven closures.
-  setImmediate(() => {
-    const wcis = require('./wcisTriggerService');
+  {
     const doi = claim.dateOfInjury;
 
     if (newStatus === 'denied') {
       // wcisTriggerService handles FROI 04 vs SROI 04 routing by
       // inspecting wcis_claim_state.first_froi_accepted_at.
-      wcis.enqueueIfReportable({
-        claim_id:       claimId,
-        trigger_event:  'claim_denied_no_payment',
-        source_service: 'claimService',
-        event_date:     now.slice(0, 10),
-        payload_context: { doi, changedBy, from_status: prev },
-      }).catch((err) => logger.error({
-        msg: 'updateStatus WCIS denial enqueue failed', claimId, err: err.message,
-      }));
+      await jobQueue.enqueue({
+        queue: 'wcis.trigger', claimId,
+        payload: {
+          trigger: {
+            claim_id:       claimId,
+            trigger_event:  'claim_denied_no_payment',
+            source_service: 'claimService',
+            event_date:     now.slice(0, 10),
+            payload_context: { doi, changedBy, from_status: prev },
+          },
+        },
+      });
     }
 
     if (newStatus === 'closed' && !opts.suppressWcisClose) {
-      wcis.enqueueIfReportable({
-        claim_id:       claimId,
-        trigger_event:  'claim_closed',
-        source_service: 'claimService',
-        event_date:     now.slice(0, 10),
-        payload_context: {
-          doi,
-          closed_date: now.slice(0, 10),
-          source: 'updateStatus',
-          claim_status_code: opts.futureMedicalOnly ? 'X' : 'C',
+      await jobQueue.enqueue({
+        queue: 'wcis.trigger', claimId,
+        payload: {
+          trigger: {
+            claim_id:       claimId,
+            trigger_event:  'claim_closed',
+            source_service: 'claimService',
+            event_date:     now.slice(0, 10),
+            payload_context: {
+              doi,
+              closed_date: now.slice(0, 10),
+              source: 'updateStatus',
+              claim_status_code: opts.futureMedicalOnly ? 'X' : 'C',
+            },
+          },
         },
-      }).catch((err) => logger.error({
-        msg: 'updateStatus WCIS close enqueue failed', claimId, err: err.message,
-      }));
+      });
     }
-  });
+  }
 
   // ── Legacy adapter write-back (M_legacy_integration) ──────────────────────
   // For claims migrated from a legacy system-of-record, push the field
@@ -751,12 +782,9 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
   //
   // QUEUE-NEVER-BLOCK: any failure is logged as a claim_event and toggles
   // sync_status='sync_failed'. Never throws into updateStatus.
-  setImmediate(() => {
-    _legacyWriteBackUpdate(claimId, {
-      field: 'status', oldValue: prev, newValue: newStatus,
-    }).catch((err) => logger.error({
-      msg: 'updateStatus: legacy write-back unexpected throw', claimId, err: err.message,
-    }));
+  await jobQueue.enqueue({
+    queue: 'claim.legacy_writeback', claimId,
+    payload: { claimId, change: { field: 'status', oldValue: prev, newValue: newStatus } },
   });
 
   if (_testStore.has(claimId)) {

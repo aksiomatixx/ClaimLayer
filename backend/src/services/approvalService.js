@@ -23,6 +23,14 @@
  *     tenant check — a mismatch is a 404, never a disclosure);
  *   - every transition is written to the immutable audit ledger; proposal and
  *     decision entries are REQUIRED (no unaudited decision stands).
+ *
+ * Transactions (ADR-0006): propose, decide and execute are each one unit of
+ * work — the state change and its ledger entry commit together. Execution
+ * runs the executor inside the same transaction as the 'executed' state and
+ * the 'action.executed' entry, so an approved action either happened, with
+ * its full record, or did not happen at all (and is retryable). In the
+ * non-transactional compatibility mode (dev / tests without DATABASE_URL)
+ * the former compensating writes still run.
  */
 
 const crypto       = require('crypto');
@@ -34,6 +42,7 @@ const { getAction, AUTONOMY } = require('../policy/actionRegistry');
 const { evaluateAuthority, claimContext, normalizeRole, ROLE_LEVELS } = require('../policy/authorityPolicy');
 const { getExecutor } = require('./actionExecutors');
 const { mfaEnforced } = require('../middleware/auth');
+const { runInTransaction, isTransactional } = require('../db/unitOfWork');
 
 const MIN_RATIONALE = 10;
 
@@ -84,6 +93,18 @@ function _diff(before, after) {
     }
   }
   return changes;
+}
+
+// A ledger failure inside a unit of work aborts it as AUDIT_UNAVAILABLE.
+async function _appendOrAbort(tx, requestId, message, entry) {
+  try {
+    await auditLedger.append(entry, { tx });
+  } catch (err) {
+    const e = new ApprovalError('AUDIT_UNAVAILABLE', message, 503);
+    e.requestId = requestId;
+    e.cause = err;
+    throw e;
+  }
 }
 
 async function _loadClaimForPrincipal(claimId, principal) {
@@ -190,35 +211,39 @@ async function propose({ actionType, claimId, proposer, payload, rationale, evid
     updated_at:             now,
   };
 
-  const { data: inserted, error } = await supabase.from('action_requests').insert(row).select().single();
-  if (error) {
-    if (error.code === '23505' && idempotencyKey) {
+  let inserted;
+  try {
+    inserted = await runInTransaction({ tenantId, actorId: proposer.id, label: 'action.propose' }, async (tx) => {
+      const created = await tx.insert('action_requests', row);
+      await _appendOrAbort(tx, created.id, 'The proposal could not be audited and was not queued', {
+        actor:    proposer,
+        action:   'action.proposed',
+        entity:   { type: 'action_request', id: created.id },
+        claimId,
+        tenantId: created.tenant_id,
+        payload:  {
+          action_type: actionType, proposal: normalized, amount_cents: amountCents,
+          rationale: why, required_approver_role: authority.requiredRole,
+          policy_version: authority.policyVersion,
+        },
+        evidence: [...evidence, ...(aiDecisionId ? [{ type: 'ai_decision', id: aiDecisionId }] : [])],
+      });
+      return created;
+    });
+  } catch (e) {
+    if (e.code === '23505' && idempotencyKey) {
       const replay = await _replayByIdempotencyKey(idempotencyKey, { tenantId, claimId, actionType });
       if (replay) return replay;
     }
-    throw new Error(`approvalService.propose: ${error.message}`);
-  }
-
-  try {
-    await auditLedger.append({
-      actor:    proposer,
-      action:   'action.proposed',
-      entity:   { type: 'action_request', id: inserted.id },
-      claimId,
-      tenantId: inserted.tenant_id,
-      payload:  {
-        action_type: actionType, proposal: normalized, amount_cents: amountCents,
-        rationale: why, required_approver_role: authority.requiredRole,
-        policy_version: authority.policyVersion,
-      },
-      evidence: [...evidence, ...(aiDecisionId ? [{ type: 'ai_decision', id: aiDecisionId }] : [])],
-    }, { required: true });
-  } catch (e) {
-    // An unaudited proposal must not sit in the queue.
-    await supabase.from('action_requests')
-      .update({ status: 'cancelled', cancelled_reason: 'audit_ledger_unavailable', updated_at: new Date().toISOString() })
-      .eq('id', inserted.id).eq('status', 'pending_approval');
-    throw new ApprovalError('AUDIT_UNAVAILABLE', 'The proposal could not be audited and was not queued', 503);
+    if (e.code === 'AUDIT_UNAVAILABLE' && !isTransactional()) {
+      // Compatibility mode only (nothing rolled back): an unaudited
+      // proposal must not sit in the queue.
+      await supabase.from('action_requests')
+        .update({ status: 'cancelled', cancelled_reason: 'audit_ledger_unavailable', updated_at: new Date().toISOString() })
+        .eq('id', e.requestId).eq('status', 'pending_approval');
+    }
+    if (e instanceof ApprovalError) throw e;
+    throw new Error(`approvalService.propose: ${e.message}`);
   }
 
   logger.info({ msg: 'approval: proposed', requestId: inserted.id, actionType, proposerType: proposer.type });
@@ -299,53 +324,55 @@ async function decide(requestId, { decision, decider, rationale, modifiedPayload
 
   const now = new Date().toISOString();
   const newStatus = decision === 'reject' ? 'rejected' : 'approved';
-  const { data: claimed, error } = await supabase.from('action_requests')
-    .update({
-      status:             newStatus,
-      decision,
-      decided_by:         decider.id,
-      decided_by_role:    decider.role,
-      decision_rationale: why,
-      decision_authority: authority,
-      approved_payload:   decision === 'reject' ? null : finalPayload,
-      modifications,
-      decided_at:         now,
-      updated_at:         now,
-    })
-    .eq('id', requestId).eq('status', 'pending_approval')
-    .select();
-  if (error) throw new Error(`approvalService.decide: ${error.message}`);
-  if (!claimed || !claimed.length) {
-    throw new ApprovalError('NOT_PENDING', 'Action request was decided by someone else', 409);
-  }
-
   const ledgerAction = { approve: 'action.approved', modify: 'action.modified', reject: 'action.rejected' }[decision];
+  let decided;
   try {
-    await auditLedger.append({
-      actor:    decider,
-      action:   ledgerAction,
-      entity:   { type: 'action_request', id: requestId },
-      claimId:  request.claim_id,
-      tenantId: request.tenant_id,
-      payload:  {
-        action_type: request.action_type, decision, rationale: why,
-        approved_payload: decision === 'reject' ? null : finalPayload,
-        modifications, authority,
-      },
-      evidence: [{ type: 'action_request', id: requestId }],
-    }, { required: true });
+    decided = await runInTransaction({ tenantId: request.tenant_id, actorId: decider.id, label: 'action.decide' }, async (tx) => {
+      const [row] = await tx.update('action_requests', {
+        status:             newStatus,
+        decision,
+        decided_by:         decider.id,
+        decided_by_role:    decider.role,
+        decision_rationale: why,
+        decision_authority: authority,
+        approved_payload:   decision === 'reject' ? null : finalPayload,
+        modifications,
+        decided_at:         now,
+        updated_at:         now,
+      }, { id: requestId, status: 'pending_approval' });
+      if (!row) throw new ApprovalError('NOT_PENDING', 'Action request was decided by someone else', 409);
+
+      await _appendOrAbort(tx, requestId, 'The decision could not be audited and was not recorded', {
+        actor:    decider,
+        action:   ledgerAction,
+        entity:   { type: 'action_request', id: requestId },
+        claimId:  request.claim_id,
+        tenantId: request.tenant_id,
+        payload:  {
+          action_type: request.action_type, decision, rationale: why,
+          approved_payload: decision === 'reject' ? null : finalPayload,
+          modifications, authority,
+        },
+        evidence: [{ type: 'action_request', id: requestId }],
+      });
+      return row;
+    });
   } catch (e) {
-    // No unaudited decision stands: put the request back in the queue.
-    await supabase.from('action_requests').update({
-      status: 'pending_approval', decision: null, decided_by: null, decided_by_role: null,
-      decision_rationale: null, decision_authority: null, approved_payload: null,
-      modifications: null, decided_at: null, updated_at: new Date().toISOString(),
-    }).eq('id', requestId).eq('status', newStatus);
-    throw new ApprovalError('AUDIT_UNAVAILABLE', 'The decision could not be audited and was not recorded', 503);
+    if (e.code === 'AUDIT_UNAVAILABLE' && !isTransactional()) {
+      // Compatibility mode only: no unaudited decision stands — put the
+      // request back in the queue.
+      await supabase.from('action_requests').update({
+        status: 'pending_approval', decision: null, decided_by: null, decided_by_role: null,
+        decision_rationale: null, decision_authority: null, approved_payload: null,
+        modifications: null, decided_at: null, updated_at: new Date().toISOString(),
+      }).eq('id', requestId).eq('status', newStatus);
+    }
+    if (e instanceof ApprovalError) throw e;
+    throw new Error(`approvalService.decide: ${e.message}`);
   }
 
   logger.info({ msg: 'approval: decided', requestId, decision, deciderRole: decider.role });
-  if (decision === 'reject') return { request: claimed[0] };
+  if (decision === 'reject') return { request: decided };
   return execute(requestId, decider);
 }
 
@@ -382,17 +409,6 @@ async function execute(requestId, actor) {
     }
   }
 
-  const { data: claimed, error } = await supabase.from('action_requests')
-    .update({
-      status: 'executing',
-      execution_attempts: (request.execution_attempts || 0) + 1,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', requestId).eq('status', request.status)
-    .select();
-  if (error) throw new Error(`approvalService.execute: ${error.message}`);
-  if (!claimed || !claimed.length) throw new ApprovalError('NOT_EXECUTABLE', 'Action request is already executing', 409);
-
   // The approver is the authority behind the action, whoever clicked retry.
   // (MFA was verified at decision time when the action required it.)
   const approver = {
@@ -400,41 +416,65 @@ async function execute(requestId, actor) {
     tenantId: request.tenant_id,
   };
   const executor = getExecutor(request.action_type);
+  const priorStatus = request.status;
+  const attempts = (request.execution_attempts || 0) + 1;
 
   try {
-    const result = await executor.execute({
-      request, claimId: request.claim_id, payload: request.approved_payload, approver,
-    });
-    const { data: done } = await supabase.from('action_requests').update({
-      status: 'executed', executed_by: actor.id, executed_at: new Date().toISOString(),
-      execution_result: result || {}, execution_error: null, updated_at: new Date().toISOString(),
-    }).eq('id', requestId).eq('status', 'executing').select().single();
-    const executed = done || await getRequest(requestId);
+    const executed = await runInTransaction({
+      tenantId: request.tenant_id, actorId: actor.id, label: `action.execute:${request.action_type}`,
+    }, async (tx) => {
+      // Claim the request: concurrent executions serialize on this row and
+      // all but one find it no longer in priorStatus.
+      const [claimed] = await tx.update('action_requests', {
+        status: 'executing', execution_attempts: attempts, updated_at: new Date().toISOString(),
+      }, { id: requestId, status: priorStatus });
+      if (!claimed) throw new ApprovalError('NOT_EXECUTABLE', 'Action request is already executing', 409);
 
-    // The action already happened: this ledger write cannot gate it, so it is
-    // best-effort with a loud log (the executor's own records also exist).
-    await auditLedger.append({
-      actor, action: 'action.executed',
-      entity: { type: 'action_request', id: requestId },
-      claimId: request.claim_id, tenantId: request.tenant_id,
-      payload: { action_type: request.action_type, result: result || {}, authorized_by: request.decided_by },
-      evidence: [{ type: 'action_request', id: requestId }],
+      const result = await executor.execute({
+        tx, request, claimId: request.claim_id, payload: request.approved_payload, approver,
+      });
+
+      const [done] = await tx.update('action_requests', {
+        status: 'executed', executed_by: actor.id, executed_at: new Date().toISOString(),
+        execution_result: result || {}, execution_error: null, updated_at: new Date().toISOString(),
+      }, { id: requestId, status: 'executing' });
+
+      // Same transaction: no executed action without its ledger entry.
+      await auditLedger.append({
+        actor, action: 'action.executed',
+        entity: { type: 'action_request', id: requestId },
+        claimId: request.claim_id, tenantId: request.tenant_id,
+        payload: { action_type: request.action_type, result: result || {}, authorized_by: request.decided_by },
+        evidence: [{ type: 'action_request', id: requestId }],
+      }, { tx });
+      return done;
     });
     logger.info({ msg: 'approval: executed', requestId, actionType: request.action_type });
-    return { request: executed };
+    return { request: executed || await getRequest(requestId) };
   } catch (e) {
+    if (e instanceof ApprovalError) throw e;
     logger.error({ msg: 'approval: execution failed', requestId, actionType: request.action_type, err: e.message });
-    const { data: failed } = await supabase.from('action_requests').update({
-      status: 'execution_failed', execution_error: e.message, updated_at: new Date().toISOString(),
-    }).eq('id', requestId).eq('status', 'executing').select().single();
-    const failedRow = failed || await getRequest(requestId);
-    await auditLedger.append({
-      actor, action: 'action.execution_failed',
-      entity: { type: 'action_request', id: requestId },
-      claimId: request.claim_id, tenantId: request.tenant_id,
-      payload: { action_type: request.action_type, error: e.message },
+    // The execution rolled back (transactional mode) or stopped part-way
+    // (compatibility mode, status 'executing'). Record the failure — it is
+    // retryable by someone with the same authority.
+    const failedRow = await runInTransaction({
+      tenantId: request.tenant_id, actorId: actor.id, label: 'action.execution_failed',
+    }, async (tx) => {
+      const [failed] = await tx.update('action_requests', {
+        status: 'execution_failed', execution_error: e.message, execution_attempts: attempts,
+        updated_at: new Date().toISOString(),
+      }, { id: requestId, status: { in: ['executing', priorStatus] } });
+      if (failed) {
+        await auditLedger.append({
+          actor, action: 'action.execution_failed',
+          entity: { type: 'action_request', id: requestId },
+          claimId: request.claim_id, tenantId: request.tenant_id,
+          payload: { action_type: request.action_type, error: e.message, attempt: attempts },
+        }, { tx });
+      }
+      return failed || null;
     });
-    return { request: failedRow };
+    return { request: failedRow || await getRequest(requestId) };
   }
 }
 

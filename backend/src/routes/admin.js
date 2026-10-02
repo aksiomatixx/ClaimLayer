@@ -3,9 +3,9 @@
 /**
  * admin.js — admin-only ops endpoints.
  *
- * Currently exposes the demo-reset endpoint. Always blocked when
- * NODE_ENV === 'production' so a careless prod deploy can never wipe
- * customer claim data.
+ * Demo reset (always blocked when NODE_ENV === 'production' so a careless
+ * prod deploy can never wipe customer claim data), worker triggers, and
+ * job-queue operations.
  */
 
 const express = require('express');
@@ -73,6 +73,76 @@ router.post(
       res.json({ ok: true, ...result });
     } catch (err) {
       logger.error({ msg: 'admin/workers/outbox: run failed', err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── Durable job queue (ADR-0006) ─────────────────────────────────────────────
+// Available only in transactional mode (DATABASE_URL); in the DB-less
+// compatibility mode jobs run inline and there is no queue to inspect.
+function _requireJobQueue(res) {
+  if (require('../db/unitOfWork').isTransactional()) return true;
+  res.status(503).json({ error: 'The durable job queue requires DATABASE_URL (transactional mode)' });
+  return false;
+}
+
+// POST /api/v1/admin/workers/jobs/run — drain due jobs now (scheduler hook).
+router.post(
+  '/workers/jobs/run',
+  requireAuth,
+  requireRole(['admin']),
+  async (req, res) => {
+    if (!_requireJobQueue(res)) return;
+    try {
+      const result = await require('../cron/jobWorker').run();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      logger.error({ msg: 'admin/workers/jobs: run failed', err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// GET /api/v1/admin/jobs?status=dead&queue=&claim_id=&limit= — the tenant's jobs.
+router.get(
+  '/jobs',
+  requireAuth,
+  requireRole(['admin']),
+  async (req, res) => {
+    if (!_requireJobQueue(res)) return;
+    try {
+      const { humanPrincipal } = require('../policy/principal');
+      const jobs = await require('../services/jobQueue').list({
+        tenantId: humanPrincipal(req.user).tenantId,
+        status:   req.query.status || null,
+        queue:    req.query.queue || null,
+        claimId:  req.query.claim_id || null,
+        limit:    parseInt(req.query.limit || '100', 10),
+      });
+      res.json({ jobs });
+    } catch (err) {
+      logger.error({ msg: 'admin/jobs: list failed', err: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// POST /api/v1/admin/jobs/:id/requeue — re-run a dead-lettered job (ledgered).
+router.post(
+  '/jobs/:id/requeue',
+  requireAuth,
+  requireRole(['admin']),
+  async (req, res) => {
+    if (!_requireJobQueue(res)) return;
+    if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'invalid job id' });
+    try {
+      const { humanPrincipal } = require('../policy/principal');
+      const job = await require('../services/jobQueue').requeueDead(req.params.id, humanPrincipal(req.user));
+      if (!job) return res.status(409).json({ error: 'job not found or not dead' });
+      res.json({ ok: true, job: { id: job.id, queue: job.queue, status: job.status } });
+    } catch (err) {
+      logger.error({ msg: 'admin/jobs: requeue failed', err: err.message });
       res.status(500).json({ error: err.message });
     }
   }

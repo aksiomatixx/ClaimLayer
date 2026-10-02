@@ -5,7 +5,8 @@
 - Node.js 20+ (CI uses 24)
 - Python 3.11 with `fastapi uvicorn pydantic`, for the mock ADP and FileHandler servers used by
   some backend tests
-- PostgreSQL 16 (Docker or local binaries), for the schema-contract test
+- PostgreSQL 16 (Docker or local binaries), for the schema-contract test and the transactional
+  suite
 - Optional: the Supabase CLI plus Docker, for a full local stack (`supabase start`)
 
 ## Install
@@ -22,6 +23,8 @@ cp backend/.env.example backend/.env    # then fill in SUPABASE_* and JWT_SECRET
 |---|---|---|
 | Backend (Jest) | `cd backend && npm test` | In-memory Supabase mock. Fast, but it cannot catch schema, constraint, RLS, or transaction defects |
 | Schema contract (real PostgreSQL) | see below | Applies every migration to a clean database and asserts the code's write shapes, constraints, RLS coverage, and the audit-ledger guarantees |
+| Schema write audit | `DATABASE_URL=… node backend/scripts/schema-write-audit.js` | Every column the code writes (static scan) must exist in the migrated schema |
+| Transactional suite (real PostgreSQL) | `cd backend && PG_TEST_ADMIN_URL=postgres://postgres:postgres@localhost:5432/postgres npm run test:pg` | Unit of work, job queue, approval atomicity and races, the RFA flow on the real schema (ADR-0006). Creates and drops its own database |
 | Frontend (Vitest) | `cd frontend && npm test` | |
 | Live-model eval | `node backend/src/scripts/liveIngestionTest.js` | Needs `ANTHROPIC_API_KEY`; run after `npm run gen:test-docs` |
 
@@ -44,8 +47,12 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/contract \
 ```
 
 The in-memory mock (`backend/tests/__mocks__/supabaseClient.js`) accepts any column. A green
-Jest run does **not** prove that the database accepts a write. That is how finding D-1 shipped.
-New data paths need a contract assertion.
+Jest run does **not** prove that the database accepts a write. That is how finding D-1 shipped,
+and how five more phantom columns survived until Sprint 2 (ADR-0006). New data paths need a
+contract assertion, and transactional paths need a `tests/pg/` test.
+
+The in-memory suite always runs in the unit of work's compatibility mode: `tests/setup.js`
+clears `DATABASE_URL`, so a value in your `.env` never points it at a real database.
 
 ## Running the app
 
@@ -107,6 +114,30 @@ curl localhost:3001/api/v1/action-requests?status=pending_approval -b sup-cookie
 curl localhost:3001/api/v1/action-registry -b cookies
 curl localhost:3001/api/v1/claims/$CLAIM/ledger -b sup-cookies
 ```
+
+## Transactions and background work (ADR-0006)
+
+Consequential writes go through a unit of work:
+
+```js
+const { runInTransaction } = require('../db/unitOfWork');
+await runInTransaction({ tenantId, actorId, label: 'reserve.approve' }, async (tx) => {
+  await tx.insert('reserves', row);
+  await auditLedger.append(entry, { tx });                      // commits with the change
+  await jobQueue.enqueue({ queue: 'notice.dwc7', payload }, { tx });
+  await outbox.enqueue([{ target: 'filehandler', operation: 'set_reserves', ... }], { tx });
+});
+```
+
+Rules:
+
+- Never call an external system inside a unit (deadlocks retry the whole unit). Use the outbox,
+  a job, or `tx.afterCommit`.
+- Background work is a job, never `setImmediate`. Register the queue in
+  `backend/src/jobs/registry.js` with a retry budget. Handlers receive plain JSON, reload
+  records by id, and must be idempotent.
+- Run a worker locally with `DATABASE_URL=… npm run worker`, or rely on the API's in-process
+  poller.
 
 ## Verifying the audit ledger
 

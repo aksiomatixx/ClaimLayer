@@ -17,6 +17,7 @@
 const { supabase } = require('./supabase');
 const config = require('../config');
 const logger       = require('../logger');
+const jobQueue     = require('./jobQueue');
 
 // ── Audit log (same pattern as noticeService) ────────────────────────────────
 
@@ -394,16 +395,10 @@ async function recordReportReceived(panelId) {
 
   logger.info({ msg: 'qmeService.recordReportReceived: complete', panelId });
 
-  // Trigger supplemental report evaluation (fire-and-forget)
-  setImmediate(() => {
-    try {
-      const supplementalRequestService = require('./supplementalRequestService');
-      supplementalRequestService.evaluateQmeReport(panelId).catch(err =>
-        logger.error({ msg: 'qmeService: supplemental evaluation failed', panelId, err: err.message }),
-      );
-    } catch (err) {
-      logger.error({ msg: 'qmeService: supplementalRequestService not loaded', err: err.message });
-    }
+  // Supplemental report evaluation — durable background job (ADR-0006)
+  await jobQueue.enqueue({
+    queue: 'qme.supplemental_evaluation', claimId: panel.claim_id,
+    payload: { panelId },
   });
 
   return getPanel(panelId);

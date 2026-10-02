@@ -139,3 +139,20 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: node backend/scripts/migration-contract-test.js
+
+      # Every column the backend writes (static scan of insert/update
+      # shapes) must exist in the migrated schema — the in-memory test
+      # double accepts any column, the real database does not.
+      - name: Schema write audit (code-written columns exist)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: node backend/scripts/schema-write-audit.js
+
+      # Transactions, rollbacks, row locks, SKIP LOCKED job claims, deadlock
+      # retries and ledger atomicity, proven on real PostgreSQL (ADR-0006).
+      # Creates and drops its own database.
+      - name: Real-PostgreSQL transactional suite (npm run test:pg)
+        working-directory: backend
+        env:
+          PG_TEST_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: npm run test:pg

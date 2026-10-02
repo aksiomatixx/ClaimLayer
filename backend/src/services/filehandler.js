@@ -106,7 +106,7 @@ async function createClaim(data) {
  * setBy:      'AI_ENGINE' | 'ADJUSTER' | 'SYSTEM'
  * approvedBy: adjuster email, or null when set by AI_ENGINE pending approval
  */
-async function setReserves(fhClaimId, { medical, indemnity, expense, reason }, setBy, approvedBy) {
+async function setReserves(fhClaimId, { medical, indemnity, expense, reason }, setBy, approvedBy, { idempotencyKey } = {}) {
   return request('post', `/claims/${fhClaimId}/reserves`, {
     medicalReserve:   medical,
     indemnityReserve: indemnity,
@@ -114,6 +114,8 @@ async function setReserves(fhClaimId, { medical, indemnity, expense, reason }, s
     reason,
     setBy,
     approvedBy: approvedBy ?? null,
+    // Stable replay key (the outbox row id), as for addNote/completeDiary.
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   }, fhClaimId);
 }
 
