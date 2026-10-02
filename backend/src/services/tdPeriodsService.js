@@ -144,20 +144,15 @@ async function _writeClaimEvent(claimId, type, data, tx = null) {
  */
 async function _enqueueWcis(claimId, triggerEvent, sourceRecordId, eventDate, payloadContext, tx = null) {
   try {
-    await jobQueue.enqueue({
-      queue: 'wcis.trigger',
-      claimId,
-      payload: {
-        trigger: {
-          claim_id:         claimId,
-          trigger_event:    triggerEvent,
-          source_service:   'tdPeriodsService',
-          source_record_id: sourceRecordId,
-          event_date:       eventDate,
-          payload_context:  payloadContext || {},
-        },
-      },
-    }, { tx });
+    const wcis = require('./wcisTriggerService');
+    await wcis.enqueueIfReportable({
+      claim_id:         claimId,
+      trigger_event:    triggerEvent,
+      source_service:   'tdPeriodsService',
+      source_record_id: sourceRecordId,
+      event_date:       eventDate,
+      payload_context:  payloadContext || {},
+    });
   } catch (e) {
     logger.error({ msg: 'tdPeriodsService: WCIS enqueue failed (non-fatal)', triggerEvent, claimId, err: e.message });
   }

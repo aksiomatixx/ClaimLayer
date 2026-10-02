@@ -26,6 +26,8 @@ const auditLedger   = require('./auditLedgerService');
 const { runInTransaction } = require('../db/unitOfWork');
 const config        = require('../config');
 
+let _reserveTxSeq = 0;
+
 const CATEGORIES = Object.freeze(['medical', 'indemnity', 'expense']);
 const TRANSACTION_TYPES = Object.freeze([
   'initial_reserve',
@@ -118,7 +120,7 @@ async function postTransaction({
       incurredDelta = delta;
     }
 
-    const now = new Date().toISOString();
+    const now = new Date(Date.now() + (++_reserveTxSeq)).toISOString();
     const row = {
       id: crypto.randomUUID(),
       tenant_id: effectiveTenantId,
@@ -143,23 +145,25 @@ async function postTransaction({
     }
 
     // Audit ledger event
-    await auditLedger.append({
-      actor: { type: 'human', id: createdBy || 'adjuster', role: 'adjuster' },
-      action: 'reserve.transaction_posted',
-      entity: { type: 'claim', id: claimId },
-      claimId,
-      tenantId: effectiveTenantId,
-      payload: {
-        transaction_id: row.id,
-        category,
-        transaction_type: transactionType,
-        amount_delta: delta,
-        resulting_balance: resultingBalance,
-        incurred_delta: incurredDelta,
-        reason: row.reason,
-      },
-      evidence: actionRequestId ? [{ type: 'action_request', id: actionRequestId }] : [],
-    }, { tx });
+    if (opts.audit !== false) {
+      await auditLedger.append({
+        actor: { type: 'human', id: createdBy || 'adjuster', role: 'adjuster' },
+        action: 'reserve.transaction_posted',
+        entity: { type: 'claim', id: claimId },
+        claimId,
+        tenantId: effectiveTenantId,
+        payload: {
+          transaction_id: row.id,
+          category,
+          transaction_type: transactionType,
+          amount_delta: delta,
+          resulting_balance: resultingBalance,
+          incurred_delta: incurredDelta,
+          reason: row.reason,
+        },
+        evidence: actionRequestId ? [{ type: 'action_request', id: actionRequestId }] : [],
+      }, { tx });
+    }
 
     // Claim event for UI timeline
     const eventRow = {

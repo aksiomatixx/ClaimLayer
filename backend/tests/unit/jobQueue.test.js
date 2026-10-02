@@ -136,6 +136,8 @@ describe('registry', () => {
       'notice.rfa_letter':            ['noticeService', 'generateRfaLetter'],
       'documents.filehandler_push':   ['documentPushService', 'pushToFileHandler'],
       'filehandler.create_claim':     ['claimService', '_syncFileHandlerClaim'],
+      'qa.file_sweep':                ['fileQaSupervisor', 'runFileQASweep'],
+      'loss_fund.reconcile':          ['lossFundService', 'reconcileClearedPayments'],
     };
     expect(registry.names().sort()).toEqual(Object.keys(targets).sort());
     for (const [queue, [mod, fn]] of Object.entries(targets)) {

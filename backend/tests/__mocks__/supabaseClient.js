@@ -241,6 +241,9 @@ class QueryBuilder {
   neq(col, val) { this._filters.push({ col, val, op: 'neq' }); return this; }
   is(col, val) { this._filters.push({ col, val, op: 'is' }); return this; }
   lt(col, val) { this._filters.push({ col, val, op: 'lt' }); return this; }
+  lte(col, val) { this._filters.push({ col, val, op: 'lte' }); return this; }
+  gt(col, val) { this._filters.push({ col, val, op: 'gt' }); return this; }
+  gte(col, val) { this._filters.push({ col, val, op: 'gte' }); return this; }
   in(col, vals) { this._filters.push({ col, val: vals, op: 'in' }); return this; }
 
   // PostgREST .or('a.eq.x,b.is.true') — disjunction of simple predicates.
@@ -282,6 +285,9 @@ class QueryBuilder {
       // PostgREST semantics: NULL comparisons require .is()
       if (f.op === 'is')  return f.val === null ? row[f.col] == null : row[f.col] === f.val;
       if (f.op === 'lt')  return row[f.col] != null && row[f.col] < f.val;
+      if (f.op === 'lte') return row[f.col] != null && row[f.col] <= f.val;
+      if (f.op === 'gt')  return row[f.col] != null && row[f.col] > f.val;
+      if (f.op === 'gte') return row[f.col] != null && row[f.col] >= f.val;
       if (f.op === 'in')  return Array.isArray(f.val) && f.val.includes(row[f.col]);
       if (f.op === 'or') {
         return f.expr.split(',').some(term => {
@@ -383,7 +389,12 @@ class QueryBuilder {
         }
 
         const created = items.map(item => {
-          const row = { id: item.id || uid(), created_at: new Date().toISOString(), ...item };
+          const row = {
+            id: item.id || uid(),
+            tenant_id: item.tenant_id || MOCK_DEFAULT_TENANT,
+            created_at: new Date().toISOString(),
+            ...item,
+          };
           tbl.set(row.id, row);
           return row;
         });
@@ -426,7 +437,12 @@ class QueryBuilder {
             tbl.set(existing.id, updated);
             return updated;
           }
-          const row = { id: item.id || uid(), created_at: new Date().toISOString(), ...item };
+          const row = {
+            id: item.id || uid(),
+            tenant_id: item.tenant_id || MOCK_DEFAULT_TENANT,
+            created_at: new Date().toISOString(),
+            ...item,
+          };
           tbl.set(row.id, row);
           return row;
         });
@@ -518,6 +534,14 @@ const supabase = {
   _provisionAuthUsers() {
     provisionAuthUsers();
   },
+
+  /** Reset mock tables for test suites. */
+  _resetStore(tableNames) {
+    resetStore(tableNames);
+  },
+  _reset(tableNames) {
+    resetStore(tableNames);
+  },
 };
 
 // ── Mock Supabase anon-key auth client ────────────────────────────────────────
@@ -568,5 +592,6 @@ async function verifyConnection() {
 module.exports = {
   supabase, supabaseAuth, verifyConnection,
   _resetStore: resetStore,
+  _reset: resetStore,
   _provisionAuthUsers: provisionAuthUsers,
 };
