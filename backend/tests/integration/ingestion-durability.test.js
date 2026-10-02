@@ -7,8 +7,10 @@
  * - the channel's authoritative received_at drives every deadline:
  *   a document delayed in a fax queue gets no extra statutory clock
  * - explicit claim ids are validated before anything is written
- * - document + action diary + event are one unit; a partial failure
- *   compensates instead of leaving a silently-filed orphan
+ * - document + action diary + event are one unit of work; a partial
+ *   failure surfaces (the full rollback — no silently-filed orphan — is
+ *   proven on PostgreSQL in tests/pg/documentIngestion.pg.test.js; this
+ *   suite runs the non-atomic compatibility mode, ADR-0006)
  * - triage resolution is atomic (pending → resolving claim) and
  *   rejections record reason, actor, and an audit event
  */
@@ -127,8 +129,15 @@ describe('explicit claim validation', () => {
   });
 });
 
-describe('partial-failure compensation', () => {
-  it('a diary insert failure removes the orphan document and surfaces the error', async () => {
+// A builder whose insert fails the way a database error does (also when
+// the caller asks for the inserted rows back with .select()).
+function failingInsert(message) {
+  const failed = Promise.resolve({ data: null, error: { message } });
+  return { insert: () => ({ then: failed.then.bind(failed), select: () => failed }) };
+}
+
+describe('partial-failure surfacing', () => {
+  it('a diary insert failure fails the filing and surfaces the error', async () => {
     mockClassification(CONFIDENT_WSR);
 
     // Inject a one-shot diaries failure under the real query path.
@@ -137,7 +146,7 @@ describe('partial-failure compensation', () => {
     const spy = jest.spyOn(supabase, 'from').mockImplementation((table) => {
       if (table === 'diaries' && failNext) {
         failNext = false;
-        return { insert: () => Promise.resolve({ data: null, error: { message: 'injected diaries outage' } }) };
+        return failingInsert('injected diaries outage');
       }
       return realFrom(table);
     });
@@ -146,17 +155,12 @@ describe('partial-failure compensation', () => {
       await expect(ingestion.ingestDocument({
         title: 'WSR', content_text: 'work status …', source: 'upload',
       }, 'a')).rejects.toThrow(/rolled back.*injected diaries outage/);
-
-      const { data: docs } = await supabase.from('claim_documents').select('*');
-      expect(docs).toHaveLength(0); // no silently-filed orphan
-      const { data: diaries } = await supabase.from('diaries').select('*');
-      expect(diaries).toHaveLength(0);
     } finally {
       spy.mockRestore();
     }
   });
 
-  it('an event insert failure compensates both the diary and the document', async () => {
+  it('an event insert failure fails the filing and surfaces the error', async () => {
     mockClassification(CONFIDENT_WSR);
 
     const realFrom = supabase.from.bind(supabase);
@@ -164,7 +168,7 @@ describe('partial-failure compensation', () => {
     const spy = jest.spyOn(supabase, 'from').mockImplementation((table) => {
       if (table === 'claim_events' && failNext) {
         failNext = false;
-        return { insert: () => Promise.resolve({ data: null, error: { message: 'injected events outage' } }) };
+        return failingInsert('injected events outage');
       }
       return realFrom(table);
     });
@@ -172,12 +176,7 @@ describe('partial-failure compensation', () => {
     try {
       await expect(ingestion.ingestDocument({
         title: 'WSR', content_text: 'work status …', source: 'upload',
-      }, 'a')).rejects.toThrow(/rolled back/);
-
-      const { data: docs } = await supabase.from('claim_documents').select('*');
-      expect(docs).toHaveLength(0);
-      const { data: diaries } = await supabase.from('diaries').select('*');
-      expect(diaries).toHaveLength(0);
+      }, 'a')).rejects.toThrow(/rolled back.*injected events outage/);
     } finally {
       spy.mockRestore();
     }
@@ -221,7 +220,7 @@ describe('atomic triage resolution', () => {
     const spy = jest.spyOn(supabase, 'from').mockImplementation((table) => {
       if (table === 'diaries' && failNext) {
         failNext = false;
-        return { insert: () => Promise.resolve({ data: null, error: { message: 'injected' } }) };
+        return failingInsert('injected');
       }
       return realFrom(table);
     });

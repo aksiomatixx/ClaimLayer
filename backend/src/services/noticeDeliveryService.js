@@ -176,10 +176,16 @@ async function _updateChannel(id, patch) {
  * The per-channel tracking rows for a notice; created from the channel
  * plan on first touch so retries operate on a stable, independent set.
  */
-async function ensureChannels(notice, explicitMethod) {
-  const { data: existing, error } = await supabase
-    .from('benefit_notice_channels').select('*').eq('notice_id', notice.id);
-  if (error) throw new Error(`noticeDelivery: channel lookup failed — ${error.message}`);
+async function ensureChannels(notice, explicitMethod, { tx = null } = {}) {
+  let existing;
+  if (tx) {
+    existing = await tx.select('benefit_notice_channels', { notice_id: notice.id });
+  } else {
+    const { data, error } = await supabase
+      .from('benefit_notice_channels').select('*').eq('notice_id', notice.id);
+    if (error) throw new Error(`noticeDelivery: channel lookup failed — ${error.message}`);
+    existing = data;
+  }
   if (existing && existing.length > 0) return existing;
 
   const channels = await resolveChannels(notice, explicitMethod || notice.method);
@@ -198,6 +204,10 @@ async function ensureChannels(notice, explicitMethod) {
     created_at: now,
     updated_at: now,
   }));
+  if (tx) {
+    await tx.insert('benefit_notice_channels', rows);
+    return rows;
+  }
   const { error: insErr } = await supabase.from('benefit_notice_channels').insert(rows);
   if (insErr) throw new Error(`noticeDelivery: channel insert failed — ${insErr.message}`);
   return rows;
@@ -359,14 +369,23 @@ async function deliverNotice(noticeId, { method, workerId } = {}) {
   return updated;
 }
 
-/** Queue a generated notice for delivery (aftermath automation calls this). */
-async function queueNotice(noticeId) {
-  const { data: notice, error } = await supabase
-    .from('benefit_notices').select('*').eq('id', noticeId).single();
-  if (error || !notice) throw new Error(`Notice not found: ${noticeId}`);
+/**
+ * Queue a generated notice for delivery (aftermath automation calls this).
+ * The status change and the channel plan are one unit; inside a caller's
+ * unit (opts.tx) they join it — the notice may exist only in that unit.
+ */
+async function queueNotice(noticeId, { tx = null } = {}) {
+  if (!tx) {
+    const { runInTransaction } = require('../db/unitOfWork');
+    return runInTransaction({ label: 'notice.queue' }, (t) => queueNotice(noticeId, { tx: t }));
+  }
+  const notice = await tx.selectOne('benefit_notices', { id: noticeId });
+  if (!notice) throw new Error(`Notice not found: ${noticeId}`);
   if (notice.status === 'blocked_pending_translation') return notice; // stays blocked
-  const updated = await _updateNotice(noticeId, { status: 'queued', queued_at: new Date().toISOString() });
-  await ensureChannels(updated);
+  const now = new Date().toISOString();
+  const [updated] = await tx.update('benefit_notices',
+    { status: 'queued', queued_at: now, updated_at: now }, { id: noticeId });
+  await ensureChannels(updated, undefined, { tx });
   return updated;
 }
 

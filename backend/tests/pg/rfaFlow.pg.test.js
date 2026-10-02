@@ -58,7 +58,9 @@ test('create → AI routes to adjuster review → adjuster approves: every step 
     formularyStatus: 'n_a', recommendedAction: 'physician_review', rationale: 'Consistent; needs a human.',
   });
   const run = jest.spyOn(registry.QUEUES['rfa.evaluate'], 'run');
-  expect(await jobQueue.runOnce()).toMatchObject({ succeeded: 1 });
+  // Scope the worker to this test's job: other files share the database.
+  const [{ id: jobId }] = await db(`SELECT id FROM jobs WHERE claim_id = $1 AND queue = 'rfa.evaluate'`, [claimId]);
+  expect(await jobQueue.runOnce({ ids: [jobId] })).toMatchObject({ claimed: 1, succeeded: 1 });
   expect(run).toHaveBeenCalledWith({ rfaId: created.id }, expect.anything());
 
   expect(await db('SELECT decision, decision_made_by FROM rfas WHERE id = $1', [created.id]))

@@ -12,10 +12,12 @@
  * uncommitted writes is caught here, where the in-memory double would hide
  * it.
  *
- * Supports the subset the transactional paths use: select (flat columns —
- * nested relation selects throw, so an unsupported read is loud), insert,
- * update, upsert-free delete, filters eq / neq / is / in / lt, order,
- * limit, single. Results use the pool's PostgREST-shaped type parsers.
+ * Supports the subset the transactional paths use: select (flat columns,
+ * plus one-to-many embeds of claim_id children on claims, e.g.
+ * '*, claim_events(*), diaries(*)' — any other nested select throws, so an
+ * unsupported read is loud), insert, upsert, update, delete, filters eq / neq / is
+ * / in / lt, order, limit, single. Results use the pool's PostgREST-shaped
+ * type parsers.
  */
 
 const { getPool } = require('../../src/db/pool');
@@ -55,7 +57,15 @@ class Query {
   select(cols = '*') {
     if (this.op === 'select') {
       if (typeof cols === 'string' && cols.includes('(')) {
-        throw new Error(`pgSupabase: nested relation selects are not supported (${this.table}: ${cols})`);
+        const parts = cols.split(',').map(c => c.trim());
+        this.embeds = parts.filter(c => c.includes('(')).map((c) => {
+          const m = c.match(/^([a-z_]+)\(\*\)$/);
+          if (this.table !== 'claims' || !m) {
+            throw new Error(`pgSupabase: unsupported nested select (${this.table}: ${cols})`);
+          }
+          return m[1];
+        });
+        cols = parts.filter(c => !c.includes('(')).join(', ') || '*';
       }
       this.cols = cols;
     } else {
@@ -64,6 +74,10 @@ class Query {
     return this;
   }
   insert(data) { this.op = 'insert'; this.data = data; return this; }
+  upsert(data, { onConflict = 'id' } = {}) {
+    this.op = 'insert'; this.data = data; this.onConflict = String(onConflict).split(',').map(c => c.trim());
+    return this;
+  }
   update(data) { this.op = 'update'; this.data = data; return this; }
   delete()     { this.op = 'delete'; return this; }
   eq(c, v)  { this.filters.push(['=', c, v]); return this; }
@@ -107,7 +121,14 @@ class Query {
         params.push(_encode(types, k, r[k]));
         return `$${params.length}`;
       }).join(', ')})`).join(', ');
-      return [`INSERT INTO ${t} (${keys.map(ident).join(', ')}) VALUES ${values} RETURNING *`, params];
+      let conflict = '';
+      if (this.onConflict) {
+        const updates = keys.filter(k => !this.onConflict.includes(k));
+        conflict = ` ON CONFLICT (${this.onConflict.map(ident).join(', ')}) ` + (updates.length
+          ? `DO UPDATE SET ${updates.map(k => `${ident(k)} = EXCLUDED.${ident(k)}`).join(', ')}`
+          : 'DO NOTHING');
+      }
+      return [`INSERT INTO ${t} (${keys.map(ident).join(', ')}) VALUES ${values}${conflict} RETURNING *`, params];
     }
     if (this.op === 'update') {
       const sets = Object.entries(this.data).filter(([, v]) => v !== undefined).map(([k, v]) => {
@@ -123,6 +144,13 @@ class Query {
     try {
       const [sql, params] = await this._sql();
       const { rows } = await getPool().query(sql, params);
+      for (const rel of this.embeds || []) {
+        const ids = rows.map(r => r.id);
+        const children = ids.length
+          ? (await getPool().query(`SELECT * FROM ${ident(rel)} WHERE claim_id = ANY($1)`, [ids])).rows
+          : [];
+        for (const r of rows) r[rel] = children.filter(c => c.claim_id === r.id);
+      }
       if (this.isSingle) {
         return rows.length
           ? { data: rows[0], error: null }
@@ -130,10 +158,15 @@ class Query {
       }
       return { data: rows, error: null };
     } catch (e) {
+      // Recorded, because most supabase-js callers never check `error`:
+      // a test can assert that a flow produced no rejected statements.
+      errors.push({ table: this.table, op: this.op, code: e.code, message: e.message });
       return { data: null, error: { code: e.code, message: e.message } };
     }
   }
 }
+
+const errors = [];
 
 const supabase = {
   from: (table) => new Query(table),
@@ -141,6 +174,7 @@ const supabase = {
 };
 
 module.exports = {
+  errors,
   supabase,
   supabaseAuth: supabase,
   verifyConnection: async () => true,

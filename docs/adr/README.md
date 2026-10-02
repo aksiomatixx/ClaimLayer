@@ -11,6 +11,7 @@ ADRs are immutable once accepted. A changed decision gets a new ADR that superse
 | [0004](0004-action-registry-and-approvals.md) | Action registry, authority policy, and approval lifecycle | Accepted — implemented for reserve changes and RFA approvals |
 | [0005](0005-rules-engine.md) | Versioned, effective-dated rules engine | Proposed |
 | [0006](0006-transactional-core.md) | Transactional core — unit of work, durable job queue, outbox | Accepted — implemented for approvals, reserve and RFA approval, background work |
+| [0007](0007-claim-lifecycle-units-and-append-only-history.md) | Claim lifecycle as units of work; append-only claim history | Accepted — implemented |
 
 ## Template
 

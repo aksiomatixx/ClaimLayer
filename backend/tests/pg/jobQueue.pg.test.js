@@ -21,7 +21,7 @@ const job = async (id) => (await db('SELECT * FROM jobs WHERE id = $1', [id]))[0
 
 async function seedClaim() {
   const id = uid('claim_jq');
-  await db(`INSERT INTO claims (id, claim_number, status, date_of_injury) VALUES ($1, $2, 'new_claim', '2026-05-01')`, [id, `JQ-${id}`]);
+  await db(`INSERT INTO claims (id, claim_number, status, date_of_injury) VALUES ($1, $2, 'new_claim', '2026-05-01')`, [id, `JQ-${process.pid % 100000}-${n}`]);
   return id;
 }
 

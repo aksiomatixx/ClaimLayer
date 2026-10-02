@@ -621,7 +621,7 @@ Severity: **P0** = launch blocker · **P1** = required before the first meaningf
 | Gap | Sev | Existing state | Required state | Recommended solution | Dependencies |
 |---|---|---|---|---|---|
 | No immutable audit ledger | P0 | Four partial, mutable trails | One append-only, hash-chained ledger for consequential actions | `audit_ledger` with triggers + privileges + verify fn (**Sprint 1**) | — |
-| History deletable | P0 | `claim_events` CASCADE; compensation code deletes events | No deletes of history; corrections are new events | **CASCADE removed from every FK into `claims` (Sprint 2).** Compensating deletes remain in `diaryActionService` / `documentIngestionService` until they become transactions (increment 2) | Transactions |
+| History deletable | P0 | `claim_events` CASCADE; compensation code deletes events | No deletes of history; corrections are new events | **Fixed in Sprint 2.** CASCADE removed from every FK into `claims` (increment 1). Compensating deletes removed and `claim_events` made append-only by triggers and privileges; only synthetic demo history is purgeable (increment 2a, ADR-0007) | Transactions |
 | AI decision trail broken (D-1) | P0 | Insert fails on migrated schema | Working, contract-tested | Reconciling migration (**Sprint 1**) | — |
 | Recommendation ↔ decision linkage | P0 | "Most recent row within 7 days", mutated in place | Explicit ids: decision references the exact recommendation shown | `action_requests.ai_decision_id` (**Sprint 1**) | Approval framework |
 | No actor on events | P1 | `claim_events` has no actor | Actor type/id/role on every event | Ledger columns; event writer requires actor | AuthZ |
@@ -705,9 +705,9 @@ Severity: **P0** = launch blocker · **P1** = required before the first meaningf
 
 | Gap | Sev | Existing state | Required state | Recommended solution | Dependencies |
 |---|---|---|---|---|---|
-| No transactions | P0 | PostgREST client; compensation code | ACID transactions around every consequential unit | `pg` pool + unit of work (**Sprint 2:** approval lifecycle, reserve approval, RFA approval). Claim create/status, diary actions and document ingestion are next | — |
+| No transactions | P0 | PostgREST client; compensation code | ACID transactions around every consequential unit | `pg` pool + unit of work. **Sprint 2:** approvals, reserve and RFA approval (inc. 1); claim create/status/reopen/representation, diary decisions with notices, document ingestion and triage, legacy migration (inc. 2a). Remaining: TD periods, QME, PD, C&R, disbursements | — |
 | Fire-and-forget side effects | P0 | 15 `setImmediate` (AI, DWC-7, WCIS enqueue, write-backs) | Durable jobs created in the same transaction | **Durable Postgres job queue replaced all 15 (Sprint 2)** — retries, leases, dead-letter to diary + ledger. Enqueued in-transaction on converted paths; immediately after the write elsewhere | Transactions |
-| TOCTOU races | P1 | Read-check-write in `updateStatus`, `approveReserves` | Optimistic concurrency (`version` column) or row locks | `version` columns + conditional updates | Transactions |
+| TOCTOU races | P1 | Read-check-write in `updateStatus`, `approveReserves` | Optimistic concurrency (`version` column) or row locks | **Fixed for status changes and reopen in Sprint 2:** re-read under `SELECT … FOR UPDATE` inside the unit. `version` columns remain the general solution | Transactions |
 | No deployable runtime / scheduler | P0 | None in repo | Containerized API + worker + scheduler; health checks; graceful shutdown | Dockerfile + IaC | Infra |
 | Observability | P1 | stdout logs | Metrics, traces, SLOs, alerting, on-call | OpenTelemetry | Infra |
 | AI outage behavior | P1 | Silent | Claim administration continues; agent tasks degrade to manual tasks with alerts | Agent runner fallbacks | Job queue |
@@ -903,7 +903,7 @@ or by execution in this review.
 | **S-12** | P1 | **Prompt-injection exposure.** Document text is embedded as JSON in the user turn with no untrusted-content boundary. The model-extracted `claim_number` alone selects the claim a document is filed to. A crafted document can name another claim's number and be filed there, with its action diary | `aiService.classifyDocument`, `documentIngestionService.js:223–231` | Untrusted envelope + instruction; require corroboration (worker name/DOB/DOI match) for auto-filing; never let model-chosen identifiers cross tenant boundaries |
 | **S-13** | P1 | **PHI sent to two AI vendors** (Anthropic; OpenAI Whisper for voice) with no documented data-processing terms, retention settings, or redaction policy | `aiService.js`, `voiceService.js:56–65` | Model gateway with per-vendor policy; contractual zero retention / no training; counsel to confirm the applicable privacy regime |
 | **S-14** | P1 | **Webhook fail-open outside production.** HMAC validation is skipped whenever a secret is unset and `NODE_ENV !== 'production'`; a misconfigured environment is open. The email webhook takes its token in the query string | `routes/webhooks.js validateHMAC` | Fail closed unless an explicit dev flag is set; token in a header |
-| **S-15** | P1 | **Audit records are mutable or deletable.** `audit_log` RLS is `FOR ALL` for admin; `claim_events` cascade-deletes and is deleted by compensation code; `ai_decisions` is updated in place | Migrations 03/04; `documentIngestionService.js:518`; `aiDecisionsService.linkHumanDecision` | **Partly fixed in Sprint 1:** immutable `audit_ledger` (DB-enforced) now records these actions, and human reviews are appended rather than only mutated. Sprint 2: remove the cascades and compensating deletes |
+| **S-15** | P1 | **Audit records are mutable or deletable.** `audit_log` RLS is `FOR ALL` for admin; `claim_events` cascade-deletes and is deleted by compensation code; `ai_decisions` is updated in place | Migrations 03/04; `documentIngestionService.js:518`; `aiDecisionsService.linkHumanDecision` | **Mostly fixed.** Sprint 1: immutable `audit_ledger`, and human reviews are appended. Sprint 2: cascades and compensating deletes removed; `claim_events` append-only (ADR-0007). Open: `audit_log` RLS and in-place `ai_decisions` updates |
 | **S-16** | P2 | **Dependency vulnerabilities:** 11 production packages flagged (1 critical: `tar` via `canvas`; high: `axios`, `form-data`, `ws`, `pdfjs-dist`, `ip-address`, `brace-expansion`) | `npm audit --omit=dev` | Renovate + CI SCA gate |
 | **S-17** | P2 | **In-memory, per-process rate limiting**; 10 MB JSON body limit on all routes | `index.js` | Gateway / Redis-backed limits; per-route body limits |
 | **S-18** | P2 | **Reference tables readable by any authenticated user** across tenants (`employers` incl. FEINs, `providers`) | Migration 03 policies `USING (true)` | Tenant-scope employer data |
@@ -913,13 +913,14 @@ or by execution in this review.
 | # | Sev | Defect | Evidence |
 |---|---|---|---|
 | **D-1** | P0 | **`ai_decisions` schema drift (verified).** Migration 04 creates the table; migration 14's `CREATE TABLE IF NOT EXISTS` is a no-op, so `prompt_name`, `model`, `latency_ms`, `guardrail_actions`, and `human_*` never exist. The exact insert `aiDecisionsService.logDecision` performs fails with `column "prompt_name" … does not exist`. Compensability, RFA, and classification pass `required: true` and would throw. `disbursementService` writes the *other* (migration 04) shape to the same table | Reproduced on PG16 from the committed chain. **Fixed in Sprint 1** |
-| **D-2** | P0 | **No transactions.** Multi-step writes (status + event + WCIS enqueue; reserves to FileHandler then local) are independent calls, many with unchecked errors (`claimService.updateStatus`, `approveReserves`, `reopenClaim`). **Partly fixed in Sprint 2:** `approveReserves` (FileHandler via outbox), RFA approval, and the approval lifecycle are units of work; `updateStatus` and `reopenClaim` remain | `claimService.js:551–719` |
+| **D-2** | P0 | **No transactions.** Multi-step writes (status + event + WCIS enqueue; reserves to FileHandler then local) are independent calls, many with unchecked errors (`claimService.updateStatus`, `approveReserves`, `reopenClaim`). **Fixed for the claim lifecycle in Sprint 2** (increments 1 and 2a, ADR-0006/0007). The benefit-calculation services (TD periods, PD, C&R, disbursements) remain | `claimService.js:551–719` |
 | **D-3** | P0 | **AWW assumes biweekly pay periods**: `aww = totalGross / (payStatements.length * 2)`. For weekly-paid workers this halves AWW and therefore the TD rate | `adp.js:165` |
 | **D-4** | P0 | **TD min/max hardcoded** to one year's values for every claim regardless of date of injury, labeled "2026"; PD advance rates likewise (`PD_RATES_2026`) | `adp.js:161–162`, `pdService.js:31` |
 | **D-5** | P1 | **Determination-dependent notices issued at referral.** The IMR-rights notice and RFA determination letter were generated when an RFA was *routed* to UR, before any determination. The generator has no decision-state guard. **Fixed in #87:** referral no longer sends either notice; they belong to a future physician-determination return path | `rfaService.js:405–411` (pre-fix), `noticeService.js:785` |
 | **D-6** | P1 | **Endpoints that report success without persisting** (DWC-1 signature request, intake progress, `magic_link_sent` event) | `routes/claims.js:465–527`, `routes/employer.js` |
 | **D-7** | P1 | **Test scaffolding in production read paths** (`claimService._testStore`, consulted first by `getClaim` and merged into `listClaims`) | `claimService.js:46, 512, 533` |
 | **D-8** | P1 | **Model output written to operational fields without validation** (`claims.priority` set from model `priority`; reserve figures stored and surfaced) | `claimService._runAnalysis` |
+| **D-10** | P2 | **Demo dataset does not fully seed on a real database (verified on PostgreSQL 16).** It keys rows with readable string ids (`rfa_demo_4`, `employer-brightcare-001`) where the schema has UUID primary keys. 20 inserts across `employers`, `policies`, `rfas`, `td_periods`, `pd_evaluations` and `settlement_offers` are rejected; the in-memory double accepts them. `claims.employer_id` is VARCHAR while `employers.id` is UUID. Ratcheted by `tests/pg/demoReset.pg.test.js` until the dataset is re-keyed | `scripts/seedDemo.js`, `scripts/demoData.js` |
 | **D-9** | P0 | **Writes to columns no migration created (verified on PostgreSQL 16 and on the hosted project).** `rfas.updated_at` (every RFA write — `createRFA` failed outright and RFA decisions never persisted), `diaries.auto_generated` / `generated_by_event` (the statutory `RFA_RESPONSE_DUE` diary, CCR §9792.9.1, was never created), `diaries.resolution_notes` (TD-setup diaries never auto-completed), `notices.pdf_buffer_b64` (stipulation notice audit row never written). Most of these writes do not check their error, so the failures were silent; the in-memory double accepts any column. **Fixed in Sprint 2** (`20261002000001`), now guarded by `scripts/schema-write-audit.js` in CI | `rfaService.js`, `tdPeriodsService.js`, `pdService.js` |
 
 ---
@@ -1231,4 +1232,34 @@ Totals after the increment:
    `tests/pg/`.
 5. Confirm the open domain question in ADR-0006: should a *direct* approval of an RFA already
    decided another way be refused?
+
+## Sprint 2, increment 2a — claim lifecycle as units of work (implemented)
+
+Design: ADR-0007. Migration: `20261003000001_claim_events_append_only.sql`.
+
+| # | Deliverable | Verification |
+|---|---|---|
+| 1 | `createClaim` is one unit: employee, claim, events, five statutory diaries, `claim.created` ledger entry, follow-up jobs. FileHandler create runs inline after commit, with a durable delayed retry job | `tests/pg/claimLifecycle.pg.test.js` |
+| 2 | `updateStatus`, `reopenClaim` and `setAttorneyRepresentation` are units of work. Status is re-checked under a row lock (TOCTOU fixed). Ledger entries are now required. WCIS hooks are durable jobs | `tests/pg/claimLifecycle.pg.test.js` (9 tests, including racing transitions and reopens) |
+| 3 | Diary decisions are one unit: claim, status transition, notices with documents and channels, successors, escalations, outbox, event, audit row, ledger entry. `_rollback` is deleted | `tests/pg/diaryAftermath.pg.test.js` (6 tests: an injected ledger failure leaves nothing behind) |
+| 4 | Document ingestion, triage resolution and legacy migration are units of work. Every compensating delete is gone | `tests/pg/documentIngestion.pg.test.js` (7 tests) |
+| 5 | `claim_events` is append-only (triggers and revoked privileges), with a demo-only purge path. A static guard covers code paths | Contract test (87 assertions), `tests/pg/demoReset.pg.test.js`, `tests/unit/historyIsAppendOnly.test.js` |
+| 6 | Legacy migration no longer stamps real migrated claims as demo data | `legacyMigrationService` |
+| 7 | **D-10 found:** the demo dataset is partly incompatible with the real schema | Ratchet test |
+
+Totals:
+
+- in-memory suite: 88 suites, 1,416 tests;
+- **real-PostgreSQL suite: 10 suites, 83 tests**;
+- schema contract: 87 assertions;
+- write audit: 272 sites;
+- all passing.
+
+**Next — increment 2b:**
+
+- `tenant_id` on every table, inherited from the parent claim;
+- tenant checks on claim access and list queries;
+- retire `_testStore` (D-7);
+- convert the benefit-calculation services (TD periods, PD, C&R, disbursements) to units of work;
+- re-key the demo dataset (D-10).
 

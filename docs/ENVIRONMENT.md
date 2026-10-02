@@ -102,7 +102,9 @@ Required before any live data:
 
 - [ ] `NODE_ENV=production`, served over HTTPS only (session cookies are `Secure`).
 - [ ] Migrations applied in order, *before* the matching backend (`migrate → deploy`),
-  including `20261001000001`–`20261001000004` and `20261002000001`.
+  including `20261001000001`–`20261001000004`, `20261002000001` and `20261003000001`
+  (`claim_events` append-only — after it, demo reset against a real database needs
+  `DATABASE_URL`).
 - [ ] `DATABASE_URL` set (the backend will not boot in production without it), with TLS.
 - [ ] A job poller running: the in-process poller (default), or `npm run worker`
   processes; dead jobs monitored (`GET /admin/jobs?status=dead`).

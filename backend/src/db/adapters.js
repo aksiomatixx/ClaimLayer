@@ -8,6 +8,8 @@
  *   tx.tenantId
  *   tx.insert(table, row | rows)    → row | rows (mirrors the input shape)
  *   tx.update(table, patch, where)  → rows[]   (where is required)
+ *   tx.upsert(table, row, { onConflict: 'col' | ['col', ...] }) → row
+ *                                   (insert, or update every supplied column on conflict)
  *   tx.select(table, where, opts)   → rows[]   opts: { orderBy: [col, 'asc'|'desc'], limit, forUpdate }
  *   tx.selectOne(table, where, opts)→ row | null
  *   tx.query(sql, params)           → rows[]   (pg mode only)
@@ -126,6 +128,25 @@ function pgAdapter(client, { tenantId }) {
         `UPDATE ${_ident(table)} SET ${sets.join(', ')} WHERE ${cond} RETURNING *`, params)).rows;
     },
 
+    async upsert(table, row, { onConflict } = {}) {
+      const conflict = [].concat(onConflict || []);
+      if (!conflict.length) throw new Error('upsert requires onConflict');
+      const cols = await _columns(client, table);
+      const keys = Object.keys(row).filter(k => row[k] !== undefined);
+      [...keys, ...conflict].forEach(k => { if (!cols.has(k)) throw new Error(`unknown column: ${table}.${k}`); });
+      const params = keys.map(k => _encode(cols, k, row[k]));
+      const updates = keys.filter(k => !conflict.includes(k));
+      const action = updates.length
+        ? `DO UPDATE SET ${updates.map(k => `${_ident(k)} = EXCLUDED.${_ident(k)}`).join(', ')}`
+        : 'DO NOTHING';
+      const { rows } = await client.query(
+        `INSERT INTO ${_ident(table)} (${keys.map(_ident).join(', ')})
+         VALUES (${keys.map((_, i) => `$${i + 1}`).join(', ')})
+         ON CONFLICT (${conflict.map(_ident).join(', ')}) ${action} RETURNING *`, params);
+      if (rows[0]) return rows[0];
+      return this.selectOne(table, Object.fromEntries(conflict.map(k => [k, row[k]])));
+    },
+
     async select(table, where = {}, { orderBy, limit, forUpdate } = {}) {
       const cols = await _columns(client, table);
       const params = [];
@@ -193,6 +214,16 @@ function compatAdapter(supabase, { tenantId }) {
       const { data, error } = await _applyWhere(supabase.from(table).update(clean), where).select();
       if (error) _raise(error, 'update', table);
       return Array.isArray(data) ? data : (data ? [data] : []);
+    },
+
+    async upsert(table, row, { onConflict } = {}) {
+      const conflict = [].concat(onConflict || []);
+      if (!conflict.length) throw new Error('upsert requires onConflict');
+      const clean = Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined));
+      const { data, error } = await supabase.from(table)
+        .upsert([clean], { onConflict: conflict.join(',') }).select();
+      if (error) _raise(error, 'upsert', table);
+      return Array.isArray(data) ? data[0] : data;
     },
 
     async select(table, where = {}, { orderBy, limit } = {}) {

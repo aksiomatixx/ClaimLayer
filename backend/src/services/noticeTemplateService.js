@@ -282,6 +282,15 @@ async function generateNotice(noticeType, claimId, ctx = {}, opts = {}) {
   if (!template) {
     throw new Error(`Unknown notice type: ${noticeType}. Valid: ${Object.keys(NOTICE_TEMPLATES).join(', ')}`);
   }
+  // The filed document, its tracking rows and the event are one unit
+  // (ADR-0006). Inside a caller's unit (opts.tx — e.g. a diary decision)
+  // they join it; otherwise they get their own.
+  if (!opts.tx) {
+    const { runInTransaction } = require('../db/unitOfWork');
+    return runInTransaction({ label: `notice.generate:${noticeType}` },
+      (tx) => generateNotice(noticeType, claimId, ctx, { ...opts, tx }));
+  }
+  const { tx } = opts;
 
   const claimService = require('./claimService');
   const claim = await claimService.getClaim(claimId);
@@ -316,9 +325,7 @@ async function generateNotice(noticeType, claimId, ctx = {}, opts = {}) {
     created_at: now,
     updated_at: now,
   };
-  const { data: document, error: docErr } = await supabase
-    .from('claim_documents').insert(docRow).select().single();
-  if (docErr) throw new Error(`noticeTemplateService: document insert failed — ${docErr.message}`);
+  const document = await tx.insert('claim_documents', docRow);
 
   const emp = claim.employee || {};
   const workerName = [emp.firstName, emp.lastName].filter(Boolean).join(' ') || 'Injured Worker';
@@ -381,12 +388,9 @@ async function generateNotice(noticeType, claimId, ctx = {}, opts = {}) {
       recipient: ctx.provider || { name: ctx.provider_name || 'Treating provider' } }));
   }
 
-  for (const row of rows) {
-    const { error } = await supabase.from('benefit_notices').insert(row);
-    if (error) throw new Error(`noticeTemplateService: tracking insert failed — ${error.message}`);
-  }
+  for (const row of rows) await tx.insert('benefit_notices', row);
 
-  await supabase.from('claim_events').insert({
+  await tx.insert('claim_events', {
     claim_id: claimId, type: 'notice_generated', timestamp: now,
     data: { notice_type: noticeType, recipients: rows.map(r => r.audience), due_date: dueDate },
   });

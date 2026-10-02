@@ -18,21 +18,23 @@
  *      outbox (integration_outbox) — durable and retryable, never a
  *      silent fire-and-forget.
  *
- * ATOMICITY + IDEMPOTENCY (Finding 5 of the production-hardening pass):
+ * ATOMICITY + IDEMPOTENCY (Finding 5; ADR-0006):
  *
- *   - completeAction CLAIMS the diary first with a conditional update
- *     (open → completing). Two concurrent completions cannot both run
- *     the aftermath; the loser gets "Diary is not open".
- *   - The local workflow is one durable unit: notices, successor
- *     diaries, outbox rows, events, audit record, status transition,
- *     then the completed flip. If any required step fails, everything
- *     created in the unit is compensated and the diary returns to
- *     open — the diary is NEVER marked completed on partial aftermath.
- *   - Retries after a crash (stale 'completing' older than
- *     STALE_COMPLETING_MS) are idempotent: notices carry
- *     source_diary_id and successors carry an idempotency key, so a
- *     re-run never duplicates either.
- *   - Every Supabase result is error-checked.
+ *   - The whole decision is ONE unit of work: the diary claim, notices
+ *     and their delivery channels, successor diaries, outbox rows,
+ *     events, audit record, ledger entry, status transition and the
+ *     completed flip commit together. A failure in any step rolls all of
+ *     it back — the diary is NEVER completed on partial aftermath — and
+ *     the failure itself is recorded in a separate small unit.
+ *   - completeAction CLAIMS the diary inside the unit with a conditional
+ *     update (open → completing). Two concurrent completions cannot both
+ *     run the aftermath; the loser gets "Diary is not open".
+ *   - External write-back (FileHandler) is enqueued in the outbox inside
+ *     the unit and dispatched only after it commits.
+ *   - Re-runs are idempotent: notices carry source_diary_id and
+ *     successors carry an idempotency key. A 'completing' diary older
+ *     than STALE_COMPLETING_MS (left by a crash in the non-transactional
+ *     compatibility mode, or by pre-ADR-0006 code) can be re-claimed.
  *
  * AFTERMATH_RULES is deterministic policy-in-code, keyed by
  * (diary_type, decision.action). previewAftermath() renders the same
@@ -45,12 +47,16 @@ const { supabase } = require('./supabase');
 const config       = require('../config');
 const logger       = require('../logger');
 const auditLedger  = require('./auditLedgerService');
-const { systemPrincipal } = require('../policy/principal');
+const { runInTransaction, isTransactional } = require('../db/unitOfWork');
 
 const STALE_COMPLETING_MS = 10 * 60 * 1000;
 
 function _rid(prefix) {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+}
+
+class DiaryNotOpenError extends Error {
+  constructor() { super('Diary is not open'); }
 }
 
 function _addDays(n) {
@@ -271,31 +277,27 @@ async function previewAftermath(diaryId) {
 // ── Claiming (the concurrency gate) ──────────────────────────────────────────
 
 /**
- * Claim a diary for a decision workflow: open → completing via
- * conditional update. A stale 'completing' (crashed worker) is
- * reclaimable after STALE_COMPLETING_MS — the idempotency keys on
- * notices/successors make the re-run safe.
+ * Claim a diary for a decision workflow, inside the unit: open →
+ * completing via conditional update (in PostgreSQL the update also takes
+ * the row lock, so a concurrent claimant waits and then finds the diary
+ * no longer open). A stale 'completing' is reclaimable after
+ * STALE_COMPLETING_MS — the idempotency keys on notices/successors make
+ * the re-run safe.
  */
-async function _claimDiary(diary) {
+async function _claimDiary(tx, diary) {
   const now = new Date().toISOString();
 
   if (diary.status === 'open') {
-    const { data, error } = await supabase.from('diaries')
-      .update({ status: 'completing', updated_at: now })
-      .eq('id', diary.id).eq('status', 'open')
-      .select();
-    if (error) throw new Error(`diaryAction: claim failed — ${error.message}`);
-    return (data || []).length > 0;
+    const rows = await tx.update('diaries', { status: 'completing', updated_at: now },
+      { id: diary.id, status: 'open' });
+    return rows.length > 0;
   }
 
   if (diary.status === 'completing' &&
       diary.updated_at && (Date.now() - Date.parse(diary.updated_at)) > STALE_COMPLETING_MS) {
-    const { data, error } = await supabase.from('diaries')
-      .update({ status: 'completing', updated_at: now })
-      .eq('id', diary.id).eq('status', 'completing').eq('updated_at', diary.updated_at)
-      .select();
-    if (error) throw new Error(`diaryAction: stale reclaim failed — ${error.message}`);
-    if ((data || []).length > 0) {
+    const rows = await tx.update('diaries', { status: 'completing', updated_at: now },
+      { id: diary.id, status: 'completing', updated_at: diary.updated_at });
+    if (rows.length > 0) {
       logger.warn({ msg: 'diaryAction: reclaimed stale completing diary', diaryId: diary.id });
       return true;
     }
@@ -304,58 +306,26 @@ async function _claimDiary(diary) {
   return false;
 }
 
-// ── Compensation (rollback of the durable unit) ──────────────────────────────
-
-async function _rollback(diary, created, failure) {
-  const now = new Date().toISOString();
+/**
+ * After a failed decision unit: record the failure (append-only) and make
+ * sure the diary is not left claimed. In PostgreSQL the unit already
+ * rolled back, so the diary is open again; in the non-transactional
+ * compatibility mode it is released here.
+ */
+async function _recordFailure(diary, failure, eventType) {
   try {
-    for (const s of created.successorIds) {
-      await supabase.from('diaries').delete().eq('id', s);
-    }
-    for (const nid of created.noticeIds) {
-      await supabase.from('benefit_notice_channels').delete().eq('notice_id', nid);
-      await supabase.from('benefit_notices').delete().eq('id', nid);
-    }
-    for (const did of created.noticeDocIds) {
-      await supabase.from('claim_documents').update({ status: 'superseded', updated_at: now }).eq('id', did);
-    }
-    for (const eid of created.eventIds) {
-      await supabase.from('claim_events').delete().eq('id', eid);
-    }
-    if (created.outboxIds.length) {
-      const outbox = require('./outboxService');
-      await outbox.removeRows(created.outboxIds);
-    }
-    if (created.prevStatus) {
-      // Direct restore of the prior claim status — honest compensation,
-      // documented in the failure event below.
-      await supabase.from('claims').update({ status: created.prevStatus, updated_at: now }).eq('id', diary.claim_id);
-      // The ledger is append-only: the status change it already recorded
-      // inside this unit is reversed by a compensating entry, never deleted.
-      await auditLedger.append({
-        actor:    systemPrincipal('diary_aftermath'),
-        action:   'claim.status_change_reverted',
-        entity:   { type: 'claim', id: diary.claim_id },
-        claimId:  diary.claim_id,
-        payload:  { restored_to: created.prevStatus, diary_id: diary.id, diary_type: diary.diary_type, error: failure.message },
-        evidence: [{ type: 'diary', id: diary.id }],
+    await runInTransaction({ label: 'diary.decision_failed' }, async (tx) => {
+      if (!isTransactional()) {
+        await tx.update('diaries', { status: 'open', updated_at: new Date().toISOString() },
+          { id: diary.id, status: 'completing' });
+      }
+      await tx.insert('claim_events', {
+        claim_id: diary.claim_id, type: eventType, timestamp: new Date().toISOString(),
+        data: { diary_id: diary.id, diary_type: diary.diary_type, error: failure.message, rolled_back: true },
       });
-    }
-    await supabase.from('claim_events').insert({
-      claim_id: diary.claim_id, type: 'action_completion_failed', timestamp: now,
-      data: {
-        diary_id: diary.id, diary_type: diary.diary_type,
-        error: failure.message, rolled_back: true,
-        status_restored: created.prevStatus || null,
-      },
     });
   } catch (e) {
-    logger.error({ msg: 'diaryAction: ROLLBACK ITSELF FAILED — manual reconciliation required', diaryId: diary.id, rollbackErr: e.message, originalErr: failure.message });
-  } finally {
-    // Whatever else happened, the diary must not stay claimed.
-    await supabase.from('diaries')
-      .update({ status: 'open', updated_at: new Date().toISOString() })
-      .eq('id', diary.id).eq('status', 'completing');
+    logger.error({ msg: 'diaryAction: could not record the failed decision', diaryId: diary.id, err: e.message, originalErr: failure.message });
   }
 }
 
@@ -391,232 +361,214 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
       `A decision rationale is required for "${action}" on ${diary.diary_type} — consequential decisions are documented, never bare.`);
   }
 
-  // The concurrency gate: only one completion may claim the diary.
-  if (!(await _claimDiary(diary))) throw new Error('Diary is not open');
-
   const claimId = diary.claim_id;
   const now = new Date().toISOString();
-  const created = { noticeIds: [], noticeDocIds: [], successorIds: [], eventIds: [], outboxIds: [], prevStatus: null };
-  const noticesGenerated = [];
-  const successors = [];
-  const escalations = [];
-  let statusTransition = null;
+  const actor = { type: 'human', id: actorEmail || 'unattributed', role: null };
 
+  let result;
   try {
-    // 1. Generate + queue the required notices (idempotent on
-    //    source_diary_id — a crashed re-run never duplicates them).
-    const noticeTemplates = require('./noticeTemplateService');
-    const delivery = require('./noticeDeliveryService');
-    const { data: priorNotices, error: pnErr } = await supabase
-      .from('benefit_notices').select('*').eq('source_diary_id', diaryId);
-    if (pnErr) throw new Error(`prior-notice lookup failed: ${pnErr.message}`);
-    const priorTypes = new Set((priorNotices || []).map(n => n.notice_type));
+    result = await runInTransaction({ actorId: actor.id, label: `diary.complete:${diary.diary_type}` }, async (tx) => {
+      // The concurrency gate: only one completion may claim the diary.
+      if (!(await _claimDiary(tx, diary))) throw new DiaryNotOpenError();
 
-    for (const n of outcome.notices) {
-      if (priorTypes.has(n.type)) {
-        for (const row of priorNotices.filter(p => p.notice_type === n.type)) {
-          noticesGenerated.push({ id: row.id, type: row.notice_type, audience: row.audience, status: row.status });
-        }
-        continue;
-      }
-      const { notices, document } = await noticeTemplates.generateNotice(
-        n.type, claimId,
-        { ...(n.ctx || {}), decision_note: note, event_date: now.split('T')[0] },
-        { source_diary_id: diaryId },
-      );
-      if (document) created.noticeDocIds.push(document.id);
-      for (const row of notices) {
-        created.noticeIds.push(row.id);
-        const queued = await delivery.queueNotice(row.id);
-        noticesGenerated.push({ id: row.id, type: row.notice_type, audience: row.audience, status: queued.status });
-      }
-    }
+      const noticesGenerated = [];
+      const successors = [];
+      const escalations = [];
+      let statusTransition = null;
 
-    // 2. Set the successor diaries (idempotent on the successor key).
-    //    Successors with a statutory ceiling are capped at the immutable
-    //    original deadline; a deadline already in the past produces a
-    //    CRITICAL escalation instead of a successor (Finding 6).
-    for (const s of outcome.successors) {
-      const idemKey = `succ:${diaryId}:${s.diary_type}`;
-      const { data: existing, error: exErr } = await supabase
-        .from('diaries').select('*').eq('idempotency_key', idemKey);
-      if (exErr) throw new Error(`successor lookup failed: ${exErr.message}`);
-      if (existing && existing.length > 0) {
-        successors.push(existing[0]);
-        continue;
+      // 0. Status transition first: it carries the business validation
+      //    (an invalid transition fails the decision before anything is
+      //    generated). Its WCIS jobs join this unit.
+      if (outcome.status_to) {
+        const claimService = require('./claimService');
+        await claimService.updateStatus(claimId, outcome.status_to, actorEmail || 'aftermath-automation', { tx });
+        statusTransition = outcome.status_to;
       }
 
-      let dueDate = s.due_days != null ? _addDays(s.due_days) : null;
-      let statutoryDeadline = null;
-      if (s.due_basis) {
-        // The successor lands ON the statutory date (e.g. the LC §5402
-        // presumption: 90 calendar days from claim form receipt). The
-        // date is immutable — derived from the claim record, never from
-        // when the delay decision happened to be made.
-        statutoryDeadline = await _deriveAnchorDate(claimId, s.due_basis);
-        if (!statutoryDeadline) {
-          throw new Error(`successor ${s.diary_type}: cannot derive the ${s.due_basis.cite} date — claim has no receipt date`);
-        }
-        dueDate = statutoryDeadline;
-      } else if (s.ceiling) {
-        statutoryDeadline = diary.statutory_deadline ||
-          await _deriveCeiling(claimId, s.ceiling);
-      }
-      if (statutoryDeadline) {
-        const today = new Date().toISOString().split('T')[0];
-        if (statutoryDeadline < today) {
-          // The statutory deadline has PASSED — never reschedule past
-          // it. Surface an immediate critical escalation instead.
-          const esc = {
-            id: _rid('diy'),
-            claim_id: claimId,
-            diary_type: 'STATUTORY_DEADLINE_ESCALATION',
-            due_date: today,
-            assigned_to: config.adjuster.email,
-            priority: 'CRITICAL', status: 'open', no_snooze: true,
-            parent_diary_id: diaryId,
-            idempotency_key: `esc:${diaryId}:${s.diary_type}`,
-            statutory_deadline: statutoryDeadline,
-            notes: `${(s.due_basis || s.ceiling).cite} statutory deadline ${statutoryDeadline} has PASSED — ` +
-                   `the ${s.diary_type} decision cannot be delayed further. ` +
-                   'Presumption/penalty exposure: resolve immediately.',
-            created_at: now,
-          };
-          const { error: escErr } = await supabase.from('diaries').insert(esc);
-          if (escErr) throw new Error(`escalation insert failed: ${escErr.message}`);
-          created.successorIds.push(esc.id);
-          escalations.push(esc);
+      // 1. Generate + queue the required notices (idempotent on
+      //    source_diary_id — a re-run never duplicates them).
+      const noticeTemplates = require('./noticeTemplateService');
+      const delivery = require('./noticeDeliveryService');
+      const priorNotices = await tx.select('benefit_notices', { source_diary_id: diaryId });
+      const priorTypes = new Set(priorNotices.map(n => n.notice_type));
 
-          const breachEv = {
-            id: _rid('evt'),
-            claim_id: claimId, type: 'statutory_deadline_breached', timestamp: now,
-            data: { diary_id: diaryId, diary_type: s.diary_type, cite: (s.due_basis || s.ceiling).cite,
-                    statutory_deadline: statutoryDeadline, escalation_diary_id: esc.id },
-          };
-          const { error: bevErr } = await supabase.from('claim_events').insert(breachEv);
-          if (bevErr) throw new Error(`breach event insert failed: ${bevErr.message}`);
-          created.eventIds.push(breachEv.id);
+      for (const n of outcome.notices) {
+        if (priorTypes.has(n.type)) {
+          for (const row of priorNotices.filter(p => p.notice_type === n.type)) {
+            noticesGenerated.push({ id: row.id, type: row.notice_type, audience: row.audience, status: row.status });
+          }
           continue;
         }
-        if (statutoryDeadline && dueDate > statutoryDeadline) {
-          dueDate = statutoryDeadline; // capped at the immutable original deadline
+        const { notices } = await noticeTemplates.generateNotice(
+          n.type, claimId,
+          { ...(n.ctx || {}), decision_note: note, event_date: now.split('T')[0] },
+          { source_diary_id: diaryId, tx },
+        );
+        for (const row of notices) {
+          const queued = await delivery.queueNotice(row.id, { tx });
+          noticesGenerated.push({ id: row.id, type: row.notice_type, audience: row.audience, status: queued.status });
         }
       }
 
-      const row = {
-        id: _rid('diy'),
-        claim_id: claimId, diary_type: s.diary_type,
-        due_date: dueDate, assigned_to: config.adjuster.email,
-        priority: s.priority, status: 'open', notes: s.notes,
-        parent_diary_id: diaryId,
-        idempotency_key: idemKey,
-        statutory_deadline: statutoryDeadline,
-        ...(statutoryDeadline ? { no_snooze: true } : {}),
-        created_at: now,
+      // 2. Set the successor diaries (idempotent on the successor key).
+      //    Successors with a statutory ceiling are capped at the immutable
+      //    original deadline; a deadline already in the past produces a
+      //    CRITICAL escalation instead of a successor (Finding 6).
+      for (const s of outcome.successors) {
+        const idemKey = `succ:${diaryId}:${s.diary_type}`;
+        const existing = await tx.select('diaries', { idempotency_key: idemKey });
+        if (existing.length > 0) {
+          successors.push(existing[0]);
+          continue;
+        }
+
+        let dueDate = s.due_days != null ? _addDays(s.due_days) : null;
+        let statutoryDeadline = null;
+        if (s.due_basis) {
+          // The successor lands ON the statutory date (e.g. the LC §5402
+          // presumption: 90 calendar days from claim form receipt). The
+          // date is immutable — derived from the claim record, never from
+          // when the delay decision happened to be made.
+          statutoryDeadline = await _deriveAnchorDate(tx, claimId, s.due_basis);
+          if (!statutoryDeadline) {
+            throw new Error(`successor ${s.diary_type}: cannot derive the ${s.due_basis.cite} date — claim has no receipt date`);
+          }
+          dueDate = statutoryDeadline;
+        } else if (s.ceiling) {
+          statutoryDeadline = diary.statutory_deadline ||
+            await _deriveCeiling(tx, claimId, s.ceiling);
+        }
+        if (statutoryDeadline) {
+          const today = new Date().toISOString().split('T')[0];
+          if (statutoryDeadline < today) {
+            // The statutory deadline has PASSED — never reschedule past
+            // it. Surface an immediate critical escalation instead.
+            const esc = {
+              id: _rid('diy'),
+              claim_id: claimId,
+              diary_type: 'STATUTORY_DEADLINE_ESCALATION',
+              due_date: today,
+              assigned_to: config.adjuster.email,
+              priority: 'CRITICAL', status: 'open', no_snooze: true,
+              parent_diary_id: diaryId,
+              idempotency_key: `esc:${diaryId}:${s.diary_type}`,
+              statutory_deadline: statutoryDeadline,
+              notes: `${(s.due_basis || s.ceiling).cite} statutory deadline ${statutoryDeadline} has PASSED — ` +
+                     `the ${s.diary_type} decision cannot be delayed further. ` +
+                     'Presumption/penalty exposure: resolve immediately.',
+              created_at: now,
+            };
+            await tx.insert('diaries', esc);
+            escalations.push(esc);
+            await tx.insert('claim_events', {
+              id: _rid('evt'),
+              claim_id: claimId, type: 'statutory_deadline_breached', timestamp: now,
+              data: { diary_id: diaryId, diary_type: s.diary_type, cite: (s.due_basis || s.ceiling).cite,
+                      statutory_deadline: statutoryDeadline, escalation_diary_id: esc.id },
+            });
+            continue;
+          }
+          if (statutoryDeadline && dueDate > statutoryDeadline) {
+            dueDate = statutoryDeadline; // capped at the immutable original deadline
+          }
+        }
+
+        const row = {
+          id: _rid('diy'),
+          claim_id: claimId, diary_type: s.diary_type,
+          due_date: dueDate, assigned_to: config.adjuster.email,
+          priority: s.priority, status: 'open', notes: s.notes,
+          parent_diary_id: diaryId,
+          idempotency_key: idemKey,
+          statutory_deadline: statutoryDeadline,
+          ...(statutoryDeadline ? { no_snooze: true } : {}),
+          created_at: now,
+        };
+        await tx.insert('diaries', row);
+        successors.push(row);
+      }
+
+      // 3. System-of-record write-back through the transactional outbox —
+      //    rows inside this unit, dispatched after it commits.
+      const outboxIds = await _enqueueWriteBack(tx, claimId, diary, outcome, { action, note }, actorEmail);
+
+      // 4. Document the decision.
+      await tx.insert('claim_events', {
+        id: _rid('evt'),
+        claim_id: claimId, type: 'action_completed', timestamp: now,
+        data: { diary_id: diaryId, diary_type: diary.diary_type, action: action || 'complete', note: note || null, actor: actorEmail || null },
+      });
+      await tx.insert('audit_log', {
+        action: 'action_completed', resource_type: 'diary', resource_id: diaryId,
+        description: `${diary.diary_type}: ${outcome.describe}${note ? ` — ${note}` : ''}`,
+        actor: actorEmail || null, created_at: now,
+      });
+
+      // 5. Completing → completed with the decision on it.
+      const finalized = await tx.update('diaries', {
+        status: 'completed',
+        completed_at: now,
+        completed_by: actorEmail || null,
+        decision_action: action || 'complete',
+        decision_note: note || null,
+        updated_at: new Date().toISOString(),
+      }, { id: diaryId, status: 'completing' });
+      if (finalized.length === 0) throw new Error('finalize failed: claim was lost');
+
+      // 6. The immutable record of the decision, in the same unit.
+      await auditLedger.append({
+        actor,
+        action:   'diary.action_completed',
+        entity:   { type: 'diary', id: diaryId },
+        claimId,
+        payload:  {
+          diary_type:          diary.diary_type,
+          action:              action || 'complete',
+          rationale:           note || null,
+          status_transition:   statusTransition,
+          notices_generated:   noticesGenerated.length,
+          successor_diaries:   successors.map(sd => sd.diary_type),
+        },
+        evidence: [{ type: 'diary', id: diaryId },
+                   ...(diary.source_document_id ? [{ type: 'document', id: diary.source_document_id }] : [])],
+      }, { tx });
+
+      // After commit: link the human decision to the AI recommendation it
+      // accepted/overrode, and dispatch the outbox opportunistically.
+      if (outcome.ai_link) {
+        tx.afterCommit(async () => {
+          try {
+            const aid = require('./aiDecisionsService');
+            await aid.linkHumanDecision(claimId, outcome.ai_link, {
+              // Decision AND its rationale ride into the audit trail together.
+              human_decision: `${diary.diary_type}:${action}${note ? ` — ${note}` : ''}`,
+              human_decision_at: now,
+              human_decision_by: actorEmail || null,
+            });
+          } catch (e) {
+            logger.warn({ msg: 'completeAction: ai link failed (non-fatal)', err: e.message });
+          }
+        });
+      }
+      tx.afterCommit(() => _dispatchOutbox(outboxIds));
+
+      return {
+        diary_id: diaryId,
+        diary_type: diary.diary_type,
+        action: action || 'complete',
+        notices_generated: noticesGenerated,
+        successor_diaries: successors.map(sd => ({ id: sd.id, diary_type: sd.diary_type, due_date: sd.due_date, statutory_deadline: sd.statutory_deadline || null })),
+        escalations: escalations.map(e => ({ id: e.id, diary_type: e.diary_type, due_date: e.due_date, statutory_deadline: e.statutory_deadline })),
+        status_transition: statusTransition,
       };
-      const { error: insErr } = await supabase.from('diaries').insert(row);
-      if (insErr) throw new Error(`successor insert failed: ${insErr.message}`);
-      created.successorIds.push(row.id);
-      successors.push(row);
-    }
-
-    // 3. System-of-record write-back through the transactional outbox —
-    //    durable rows inside this unit, dispatched after it commits.
-    created.outboxIds = await _enqueueWriteBack(claimId, diary, outcome, { action, note }, actorEmail, created);
-
-    // 4. Document the decision.
-    const evRow = {
-      id: _rid('evt'),
-      claim_id: claimId, type: 'action_completed', timestamp: now,
-      data: { diary_id: diaryId, diary_type: diary.diary_type, action: action || 'complete', note: note || null, actor: actorEmail || null },
-    };
-    const { error: evErr } = await supabase.from('claim_events').insert(evRow);
-    if (evErr) throw new Error(`event insert failed: ${evErr.message}`);
-    created.eventIds.push(evRow.id);
-
-    const { error: auErr } = await supabase.from('audit_log').insert({
-      action: 'action_completed', resource_type: 'diary', resource_id: diaryId,
-      description: `${diary.diary_type}: ${outcome.describe}${note ? ` — ${note}` : ''}`,
-      actor: actorEmail || null, created_at: now,
     });
-    if (auErr) throw new Error(`audit insert failed: ${auErr.message}`);
-
-    // 5. Status transition (fires the already-wired WCIS triggers).
-    if (outcome.status_to) {
-      const { data: claimRow, error: cErr } = await supabase
-        .from('claims').select('status').eq('id', claimId).single();
-      if (cErr) throw new Error(`claim lookup failed: ${cErr.message}`);
-      const claimService = require('./claimService');
-      await claimService.updateStatus(claimId, outcome.status_to, actorEmail || 'aftermath-automation');
-      created.prevStatus = claimRow?.status || null;
-      statusTransition = outcome.status_to;
-    }
-
-    // 6. Commit point: completing → completed with the decision on it.
-    const { data: finalized, error: finErr } = await supabase.from('diaries').update({
-      status: 'completed',
-      completed_at: now,
-      completed_by: actorEmail || null,
-      decision_action: action || 'complete',
-      decision_note: note || null,
-      updated_at: new Date().toISOString(),
-    }).eq('id', diaryId).eq('status', 'completing').select();
-    if (finErr) throw new Error(`finalize failed: ${finErr.message}`);
-    if (!finalized || finalized.length === 0) throw new Error('finalize failed: claim was lost');
   } catch (e) {
-    logger.error({ msg: 'completeAction: aftermath failed — rolling back', diaryId, err: e.message });
-    await _rollback(diary, created, e);
+    if (e instanceof DiaryNotOpenError) throw new Error('Diary is not open');
+    logger.error({ msg: 'completeAction: aftermath failed — rolled back', diaryId, err: e.message });
+    await _recordFailure(diary, e, 'action_completion_failed');
     throw new Error(`Action not completed — required aftermath failed and was rolled back: ${e.message}`);
   }
-
-  // ── The local unit is durable. Best-effort extras follow. ──────────────────
-
-  // Interim best-effort ledger record of the committed decision (ADR-0003);
-  // becomes part of the same transaction once the data layer moves to pg.
-  await auditLedger.append({
-    actor:    { type: 'human', id: actorEmail || 'unattributed', role: null },
-    action:   'diary.action_completed',
-    entity:   { type: 'diary', id: diaryId },
-    claimId,
-    payload:  {
-      diary_type:          diary.diary_type,
-      action:              action || 'complete',
-      rationale:           note || null,
-      status_transition:   statusTransition,
-      notices_generated:   noticesGenerated.length,
-      successor_diaries:   successors.map(sd => sd.diary_type),
-    },
-    evidence: [{ type: 'diary', id: diaryId },
-               ...(diary.source_document_id ? [{ type: 'document', id: diary.source_document_id }] : [])],
-  });
-
-  // Link the human decision to the AI recommendation it accepted/overrode.
-  if (outcome.ai_link) {
-    try {
-      const aid = require('./aiDecisionsService');
-      await aid.linkHumanDecision(claimId, outcome.ai_link, {
-        // Decision AND its rationale ride into the audit trail together.
-        human_decision: `${diary.diary_type}:${action}${note ? ` — ${note}` : ''}`,
-        human_decision_at: now,
-        human_decision_by: actorEmail || null,
-      });
-    } catch (e) {
-      logger.warn({ msg: 'completeAction: ai link failed (non-fatal)', err: e.message });
-    }
-  }
-
-  // Opportunistic outbox dispatch — failures stay pending for the worker.
-  await _dispatchOutbox(created.outboxIds);
-
-  return {
-    diary_id: diaryId,
-    diary_type: diary.diary_type,
-    action: action || 'complete',
-    notices_generated: noticesGenerated,
-    successor_diaries: successors.map(s => ({ id: s.id, diary_type: s.diary_type, due_date: s.due_date, statutory_deadline: s.statutory_deadline || null })),
-    escalations: escalations.map(e => ({ id: e.id, diary_type: e.diary_type, due_date: e.due_date, statutory_deadline: e.statutory_deadline })),
-    status_transition: statusTransition,
-  };
+  return result;
 }
 
 /**
@@ -625,11 +577,10 @@ async function completeAction(diaryId, { action, note } = {}, actorEmail) {
  * was received and the claim filed) — falling back to created_at for
  * rows that predate filed_at. Immutable by construction.
  */
-async function _deriveAnchorDate(claimId, dueBasis) {
+async function _deriveAnchorDate(tx, claimId, dueBasis) {
   if (dueBasis.anchor !== 'claim_form_receipt') return null;
-  const { data: claim, error } = await supabase
-    .from('claims').select('filed_at, created_at').eq('id', claimId).single();
-  if (error || !claim) return null;
+  const claim = await tx.selectOne('claims', { id: claimId });
+  if (!claim) return null;
   const anchor = claim.filed_at || claim.created_at;
   if (!anchor) return null;
   const d = new Date(anchor);
@@ -642,11 +593,10 @@ async function _deriveAnchorDate(claimId, dueBasis) {
  * carry one (legacy rows): doi_plus_days anchors to the claim's
  * date_of_injury — immutable, so the ceiling cannot drift.
  */
-async function _deriveCeiling(claimId, ceiling) {
+async function _deriveCeiling(tx, claimId, ceiling) {
   if (ceiling.basis !== 'doi_plus_days') return null;
-  const { data: claim, error } = await supabase
-    .from('claims').select('date_of_injury').eq('id', claimId).single();
-  if (error || !claim?.date_of_injury) return null;
+  const claim = await tx.selectOne('claims', { id: claimId });
+  if (!claim?.date_of_injury) return null;
   const d = new Date(`${claim.date_of_injury}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + ceiling.days);
   return d.toISOString().split('T')[0];
@@ -654,12 +604,8 @@ async function _deriveCeiling(claimId, ceiling) {
 
 // ── System-of-record write-back (outbox rows) ────────────────────────────────
 
-async function _enqueueWriteBack(claimId, diary, outcome, decision, actorEmail) {
-  const { data: claim, error } = await supabase
-    .from('claims').select('filehandler_id').eq('id', claimId).single();
-  if (error && error.code !== 'PGRST116') {
-    throw new Error(`claim lookup for write-back failed: ${error.message}`);
-  }
+async function _enqueueWriteBack(tx, claimId, diary, outcome, decision, actorEmail) {
+  const claim = await tx.selectOne('claims', { id: claimId });
   if (!claim?.filehandler_id) return [];
 
   const outbox = require('./outboxService');
@@ -680,7 +626,7 @@ async function _enqueueWriteBack(claimId, diary, outcome, decision, actorEmail) 
       },
     });
   }
-  const rows = await outbox.enqueue(entries);
+  const rows = await outbox.enqueue(entries, { tx });
   return rows.map(r => r.id);
 }
 
@@ -710,48 +656,52 @@ async function declineAction(diaryId, { reason } = {}, actorEmail) {
     throw new Error('A decline reason is required — declined actions are documented, never dropped');
   }
 
-  if (!(await _claimDiary(diary))) throw new Error('Diary is not open');
-
   const now = new Date().toISOString();
-  const created = { noticeIds: [], noticeDocIds: [], successorIds: [], eventIds: [], outboxIds: [], prevStatus: null };
-
   try {
-    created.outboxIds = await _enqueueWriteBack(diary.claim_id, diary,
-      { describe: 'Action declined' }, { action: 'declined', note: reason }, actorEmail);
+    await runInTransaction({ actorId: actorEmail || 'unattributed', label: 'diary.decline' }, async (tx) => {
+      if (!(await _claimDiary(tx, diary))) throw new DiaryNotOpenError();
 
-    const evRow = {
-      id: _rid('evt'),
-      claim_id: diary.claim_id, type: 'action_declined', timestamp: now,
-      data: { diary_id: diaryId, diary_type: diary.diary_type, reason, actor: actorEmail || null },
-    };
-    const { error: evErr } = await supabase.from('claim_events').insert(evRow);
-    if (evErr) throw new Error(`event insert failed: ${evErr.message}`);
-    created.eventIds.push(evRow.id);
+      const outboxIds = await _enqueueWriteBack(tx, diary.claim_id, diary,
+        { describe: 'Action declined' }, { action: 'declined', note: reason }, actorEmail);
 
-    const { error: auErr } = await supabase.from('audit_log').insert({
-      action: 'action_declined', resource_type: 'diary', resource_id: diaryId,
-      description: `${diary.diary_type} declined: ${reason}`,
-      actor: actorEmail || null, created_at: now,
+      await tx.insert('claim_events', {
+        id: _rid('evt'),
+        claim_id: diary.claim_id, type: 'action_declined', timestamp: now,
+        data: { diary_id: diaryId, diary_type: diary.diary_type, reason, actor: actorEmail || null },
+      });
+      await tx.insert('audit_log', {
+        action: 'action_declined', resource_type: 'diary', resource_id: diaryId,
+        description: `${diary.diary_type} declined: ${reason}`,
+        actor: actorEmail || null, created_at: now,
+      });
+
+      const finalized = await tx.update('diaries', {
+        status: 'cancelled',
+        completed_at: now,
+        completed_by: actorEmail || null,
+        decision_action: 'declined',
+        decision_note: reason,
+        updated_at: new Date().toISOString(),
+      }, { id: diaryId, status: 'completing' });
+      if (finalized.length === 0) throw new Error('finalize failed: claim was lost');
+
+      await auditLedger.append({
+        actor:    { type: 'human', id: actorEmail || 'unattributed', role: null },
+        action:   'diary.action_declined',
+        entity:   { type: 'diary', id: diaryId },
+        claimId:  diary.claim_id,
+        payload:  { diary_type: diary.diary_type, reason },
+        evidence: [{ type: 'diary', id: diaryId }],
+      }, { tx });
+
+      tx.afterCommit(() => _dispatchOutbox(outboxIds));
     });
-    if (auErr) throw new Error(`audit insert failed: ${auErr.message}`);
-
-    const { data: finalized, error: finErr } = await supabase.from('diaries').update({
-      status: 'cancelled',
-      completed_at: now,
-      completed_by: actorEmail || null,
-      decision_action: 'declined',
-      decision_note: reason,
-      updated_at: new Date().toISOString(),
-    }).eq('id', diaryId).eq('status', 'completing').select();
-    if (finErr) throw new Error(`finalize failed: ${finErr.message}`);
-    if (!finalized || finalized.length === 0) throw new Error('finalize failed: claim was lost');
   } catch (e) {
-    logger.error({ msg: 'declineAction: failed — rolling back', diaryId, err: e.message });
-    await _rollback(diary, created, e);
+    if (e instanceof DiaryNotOpenError) throw new Error('Diary is not open');
+    logger.error({ msg: 'declineAction: failed — rolled back', diaryId, err: e.message });
+    await _recordFailure(diary, e, 'action_decline_failed');
     throw new Error(`Decline not recorded — ${e.message}`);
   }
-
-  await _dispatchOutbox(created.outboxIds);
 
   return { diary_id: diaryId, diary_type: diary.diary_type, status: 'cancelled', reason };
 }
@@ -781,21 +731,22 @@ async function editAction(diaryId, { due_date, priority, notes } = {}, actorEmai
   if (notes !== undefined) { patch.notes = notes; changes.notes = true; }
   if (Object.keys(changes).length === 0) throw new Error('Nothing to edit');
 
-  const { data: updated, error: upErr } = await supabase.from('diaries')
-    .update(patch).eq('id', diaryId).select().single();
-  if (upErr) throw new Error(`diaryAction: edit failed — ${upErr.message}`);
-
-  const { error: evErr } = await supabase.from('claim_events').insert({
-    claim_id: diary.claim_id, type: 'action_edited', timestamp: patch.updated_at,
-    data: { diary_id: diaryId, diary_type: diary.diary_type, changes, actor: actorEmail || null },
+  // The edit, its event and its audit record are one unit: a deadline is
+  // never moved without the record of who moved it.
+  const updated = await runInTransaction({ actorId: actorEmail || 'unattributed', label: 'diary.edit' }, async (tx) => {
+    const [row] = await tx.update('diaries', patch, { id: diaryId, status: 'open' });
+    if (!row) throw new Error('Diary is not open');
+    await tx.insert('claim_events', {
+      claim_id: diary.claim_id, type: 'action_edited', timestamp: patch.updated_at,
+      data: { diary_id: diaryId, diary_type: diary.diary_type, changes, actor: actorEmail || null },
+    });
+    await tx.insert('audit_log', {
+      action: 'action_edited', resource_type: 'diary', resource_id: diaryId,
+      description: `${diary.diary_type} edited: ${Object.keys(changes).join(', ')}`,
+      new_value: changes, actor: actorEmail || null, created_at: patch.updated_at,
+    });
+    return row;
   });
-  if (evErr) logger.error({ msg: 'editAction: event insert failed', err: evErr.message });
-  const { error: auErr } = await supabase.from('audit_log').insert({
-    action: 'action_edited', resource_type: 'diary', resource_id: diaryId,
-    description: `${diary.diary_type} edited: ${Object.keys(changes).join(', ')}`,
-    new_value: changes, actor: actorEmail || null, created_at: patch.updated_at,
-  });
-  if (auErr) logger.error({ msg: 'editAction: audit insert failed', err: auErr.message });
 
   return updated;
 }

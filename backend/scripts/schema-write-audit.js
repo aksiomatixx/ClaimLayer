@@ -14,7 +14,8 @@
  * Statically scans backend/src for supabase-js writes —
  *   .from('<table>').insert|update|upsert({ ...literal })
  *   .from('<table>').insert|update|upsert(row)   with `const row = { ... }`
- *   tx.insert|update('<table>', { ...literal })  (unit-of-work adapter)
+ *   tx.insert|update|upsert('<table>', { ...literal } | [{...}, ...] | row)
+ *                                                (unit-of-work adapter)
  * — and checks each top-level key against information_schema. Rows built
  * dynamically (spreads, keys added later) are outside its reach; the
  * real-PostgreSQL suite (npm run test:pg) covers the transactional paths.
@@ -68,13 +69,39 @@ function writesIn(file) {
 
   const literal = /from\(\s*'([a-z_]+)'\s*\)\s*\.(insert|update|upsert)\(\s*\{/g;
   const viaVar  = /from\(\s*'([a-z_]+)'\s*\)\s*\.(insert|update|upsert)\(\s*([A-Za-z_]\w*)\s*[,)]/g;
-  const viaTx   = /\btx\.(insert|update)\(\s*'([a-z_]+)'\s*,\s*\{/g;
+  const viaTx   = /\btx\.(insert|update|upsert)\(\s*'([a-z_]+)'\s*,\s*\{/g;
+  const viaTxArr = /\btx\.(insert)\(\s*'([a-z_]+)'\s*,\s*\[/g;
+  const viaTxVar = /\btx\.(insert|update|upsert)\(\s*'([a-z_]+)'\s*,\s*([A-Za-z_]\w*)\s*[,)]/g;
   let m;
   while ((m = literal.exec(src))) {
     out.push({ table: m[1], op: m[2], keys: literalKeys(src, m.index + m[0].length - 1), at: line(m.index) });
   }
   while ((m = viaTx.exec(src))) {
     out.push({ table: m[2], op: m[1], keys: literalKeys(src, m.index + m[0].length - 1), at: line(m.index) });
+  }
+  while ((m = viaTxArr.exec(src))) {
+    // every top-level object literal inside the array
+    let i = m.index + m[0].length;
+    let depth = 0;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (c === ']' && depth === 0) break;
+      if (c === '{') {
+        if (depth === 0) out.push({ table: m[2], op: m[1], keys: literalKeys(src, i), at: line(m.index) });
+        depth++;
+      } else if (c === '}') depth--;
+    }
+  }
+  const resolveVar = (name, before) => {
+    const def = new RegExp(`(?:const|let)\\s+${name}\\s*=\\s*\\{`, 'g');
+    let d;
+    let last = null;
+    while ((d = def.exec(src)) && d.index < before) last = d;
+    return last;
+  };
+  while ((m = viaTxVar.exec(src))) {
+    const last = resolveVar(m[3], m.index);
+    if (last) out.push({ table: m[2], op: m[1], keys: literalKeys(src, last.index + last[0].length - 1), at: line(m.index) });
   }
   while ((m = viaVar.exec(src))) {
     const def = new RegExp(`(?:const|let)\\s+${m[3]}\\s*=\\s*\\{`, 'g');

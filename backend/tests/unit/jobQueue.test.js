@@ -63,6 +63,22 @@ describe('compatibility mode (no DATABASE_URL)', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it('a delayed job waits for its run time instead of running on the next tick', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+    try {
+      const run = jest.spyOn(registry.QUEUES['rfa.evaluate'], 'run').mockResolvedValue();
+      await jobQueue.enqueue({ queue: 'rfa.evaluate', payload: { rfaId: 'later' },
+                               runAt: new Date(Date.now() + 60_000).toISOString() });
+      await flush();
+      expect(run).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(60_000);
+      await flush();
+      expect(run).toHaveBeenCalledWith({ rfaId: 'later' }, expect.anything());
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('rejects an unknown queue at the call site', async () => {
     await expect(jobQueue.enqueue({ queue: 'claim.anaylsis', payload: {} }))
       .rejects.toThrow(/unknown queue 'claim.anaylsis'/);
@@ -119,6 +135,7 @@ describe('registry', () => {
       'rfa.evaluate':                 ['rfaService', 'evaluateRFA'],
       'notice.rfa_letter':            ['noticeService', 'generateRfaLetter'],
       'documents.filehandler_push':   ['documentPushService', 'pushToFileHandler'],
+      'filehandler.create_claim':     ['claimService', '_syncFileHandlerClaim'],
     };
     expect(registry.names().sort()).toEqual(Object.keys(targets).sort());
     for (const [queue, [mod, fn]] of Object.entries(targets)) {

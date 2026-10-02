@@ -90,7 +90,7 @@ async function main() {
   }
 
   console.log('── Re-applying the hardening-era + trust-foundation + transactional-core migrations (idempotency)');
-  const hardening = files.filter(f => /^(20260611|20261001|20261002)/.test(f));
+  const hardening = files.filter(f => /^(20260611|20261001|20261002|20261003)/.test(f));
   for (const f of hardening) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8');
     await client.query(sql);
@@ -757,6 +757,73 @@ async function main() {
     client.query(
       `INSERT INTO notices (claim_id, notice_type, statutory_deadline, generated_at, pdf_buffer_b64)
        VALUES ('claim_ct_1', 'stipulation', '2026-07-01', now(), 'JVBERi0=')`));
+
+  console.log('── claim_events is append-only');
+
+  await check('claim_events rejects UPDATE', async () => {
+    try {
+      await client.query(`UPDATE claim_events SET type = 'rewritten' WHERE id = 'evt_ct_1'`);
+    } catch (e) {
+      if (/claim_events is append-only: UPDATE/.test(e.message)) return;
+      throw e;
+    }
+    throw new Error('UPDATE succeeded');
+  });
+
+  await check('claim_events rejects DELETE of a real claim\'s history, even with the purge flag', async () => {
+    await client.query('BEGIN');
+    try {
+      await client.query(`SELECT set_config('app.history_purge', 'demo', true)`);
+      await client.query(`DELETE FROM claim_events WHERE id = 'evt_ct_1'`);
+      throw new Error('DELETE succeeded');
+    } catch (e) {
+      if (!/claim_events is append-only: DELETE/.test(e.message)) throw e;
+    } finally {
+      await client.query('ROLLBACK');
+    }
+  });
+
+  await check('claim_events rejects TRUNCATE', async () => {
+    try {
+      await client.query('TRUNCATE claim_events');
+    } catch (e) {
+      if (/claim_events is append-only: TRUNCATE/.test(e.message)) return;
+      throw e;
+    }
+    throw new Error('TRUNCATE succeeded');
+  });
+
+  await check('a demo claim\'s events are purgeable only inside a purge transaction', async () => {
+    await client.query(
+      `INSERT INTO claims (id, claim_number, status, date_of_injury, metadata)
+       VALUES ('claim_ct_demo', 'HHW-2026-CDM', 'new_claim', '2026-05-05', '{"demo": true}')`);
+    await client.query(`INSERT INTO claim_events (id, claim_id, type, data) VALUES ('evt_ct_demo', 'claim_ct_demo', 'x', '{}')`);
+    try {
+      await client.query(`DELETE FROM claim_events WHERE id = 'evt_ct_demo'`);
+      throw new Error('DELETE without the purge flag succeeded');
+    } catch (e) {
+      if (!/append-only/.test(e.message)) throw e;
+    }
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.history_purge', 'demo', true)`);
+    const { rowCount } = await client.query(`DELETE FROM claim_events WHERE claim_id = 'claim_ct_demo'`);
+    await client.query('COMMIT');
+    if (rowCount !== 1) throw new Error(`expected 1 purged demo event, got ${rowCount}`);
+  });
+
+  await check('API roles cannot UPDATE / DELETE / TRUNCATE claim_events (revoked even after Supabase-style default grants)', async () => {
+    // Supabase grants ALL on public tables to its API roles by default;
+    // re-applying the migration must take the mutating privileges away.
+    await client.query('GRANT ALL ON claim_events TO service_role, authenticated, anon');
+    await client.query(fs.readFileSync(path.join(MIGRATIONS_DIR, '20261003000001_claim_events_append_only.sql'), 'utf8'));
+    const { rows } = await client.query(
+      `SELECT has_table_privilege('service_role', 'claim_events', 'INSERT')   AS sr_insert,
+              has_table_privilege('service_role', 'claim_events', 'UPDATE')   AS sr_update,
+              has_table_privilege('service_role', 'claim_events', 'DELETE')   AS sr_delete,
+              has_table_privilege('service_role', 'claim_events', 'TRUNCATE') AS sr_truncate`);
+    const p = rows[0];
+    if (!p.sr_insert || p.sr_update || p.sr_delete || p.sr_truncate) throw new Error('unexpected privileges: ' + JSON.stringify(p));
+  });
 
   await check('jobs has row-level security enabled', async () => {
     const { rows } = await client.query(`SELECT relrowsecurity FROM pg_class WHERE oid = 'public.jobs'::regclass`);

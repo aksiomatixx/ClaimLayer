@@ -21,6 +21,10 @@ const crypto             = require('crypto');
 const { supabase }       = require('./supabase');
 const { getAdapter, SYSTEMS } = require('./legacy/adapterRegistry');
 const logger             = require('../logger');
+const { runInTransaction } = require('../db/unitOfWork');
+
+// The one legacy source that serves synthetic demo data.
+const SYSTEMS_DEMO = 'mock_legacy';
 
 // claims.id is VARCHAR(60). Short, filesystem-safe external ids keep the
 // readable form; anything longer (or carrying unsafe characters) gets a
@@ -113,47 +117,46 @@ async function migrateFromLegacy(sourceSystem, filter) {
 
 async function _insertCanonicalClaim(claimId, draft, sourceSystem, now) {
   const claimNumber = await _legacyClaimNumber(draft.external_claim_id, claimId);
-  const { error: insErr } = await supabase.from('claims').insert({
-    id:                 claimId,
-    claim_number:       claimNumber,
-    employer_id:        null,                // legacy claims may pre-date our employers table
-    employee:           draft.employee || {},
-    status:             draft.status || 'intake_complete',
-    aww:                draft.aww    || null,
-    td_rate:            draft.td_rate || null,
-    weeks_calculated:   52,
-    date_of_injury:     draft.date_of_injury,
-    body_part:          draft.body_part,
-    injury_type:        draft.injury_type,
-    injury_description: draft.injury_description,
-    employer_name:      draft.employer_name,
-    filed_at:           now,
-    source_system:      sourceSystem,
-    external_claim_id:  draft.external_claim_id,
-    sync_status:        'migrated',
-    last_synced_at:     now,
-    metadata:           { demo: true, migrated_from: sourceSystem, raw: draft.raw || null },
-    created_at:         now,
-    updated_at:         now,
+  // The claim and its migration event are one unit of work (ADR-0006): a
+  // migrated claim never exists without the record of where it came from.
+  await runInTransaction({ actorId: `system:legacy-migration:${sourceSystem}`, label: 'claim.migrate' }, async (tx) => {
+    await tx.insert('claims', {
+      id:                 claimId,
+      claim_number:       claimNumber,
+      employer_id:        null,                // legacy claims may pre-date our employers table
+      employee:           draft.employee || {},
+      status:             draft.status || 'intake_complete',
+      aww:                draft.aww    || null,
+      td_rate:            draft.td_rate || null,
+      weeks_calculated:   52,
+      date_of_injury:     draft.date_of_injury,
+      body_part:          draft.body_part,
+      injury_type:        draft.injury_type,
+      injury_description: draft.injury_description,
+      employer_name:      draft.employer_name,
+      filed_at:           now,
+      source_system:      sourceSystem,
+      external_claim_id:  draft.external_claim_id,
+      sync_status:        'migrated',
+      last_synced_at:     now,
+      // Only the synthetic mock legacy system produces demo data. A claim
+      // migrated from a real system is a real claim (and its history is
+      // never purgeable — migration 20261003000001).
+      metadata:           { demo: sourceSystem === SYSTEMS_DEMO, migrated_from: sourceSystem, raw: draft.raw || null },
+      created_at:         now,
+      updated_at:         now,
+    });
+    await tx.insert('claim_events', {
+      claim_id:  claimId,
+      type:      'migrated_from_legacy',
+      timestamp: now,
+      data: {
+        source_system:     sourceSystem,
+        external_claim_id: draft.external_claim_id,
+        status_at_migration: draft.status,
+      },
+    });
   });
-  if (insErr) throw new Error(`claims insert failed — ${insErr.message}`);
-
-  const { error: evErr } = await supabase.from('claim_events').insert({
-    claim_id:  claimId,
-    type:      'migrated_from_legacy',
-    timestamp: now,
-    data: {
-      source_system:     sourceSystem,
-      external_claim_id: draft.external_claim_id,
-      status_at_migration: draft.status,
-    },
-  });
-  if (evErr) {
-    // Compensate: a migrated claim without its migration event is a
-    // half-written unit — remove it so the re-run can repeat cleanly.
-    await supabase.from('claims').delete().eq('id', claimId);
-    throw new Error(`migration event insert failed — ${evErr.message}`);
-  }
 }
 
 /**
