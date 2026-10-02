@@ -4,9 +4,26 @@ const express                    = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const rfaService                 = require('../services/rfaService');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireClaimScope }         = require('../middleware/claimAccess');
 const { humanPrincipal }           = require('../policy/principal');
+const config                       = require('../config');
 
 const router = express.Router();
+const readScopeOptions = { readRoles: ['adjuster', 'supervisor'] };
+const scopeRfaClaim = requireClaimScope('query.claimId', readScopeOptions);
+const scopeRfa = requireClaimScope(async (req) => {
+  req.scopedRfa = await rfaService.getRFA(req.params.id);
+  return req.scopedRfa?.claim_id;
+}, readScopeOptions);
+
+function bindReadTenant(req, res, next) {
+  // Legacy staff/employer sessions use the same default as auth._sign;
+  // absence of a tenant must not turn an RFA read into global access.
+  if (['admin', 'adjuster', 'supervisor', 'employer'].includes(req.user.role) && !req.user.tenantId) {
+    req.user = { ...req.user, tenantId: config.tenancy.defaultTenantId };
+  }
+  next();
+}
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -43,12 +60,16 @@ router.post(
 );
 
 // ── GET /api/v1/rfas — List RFAs ─────────────────────────────────────────────
-// ?claimId=xxx              — list for a specific claim (any authenticated user)
+// ?claimId=xxx              — list for an authorized claim
 // ?status=pending_adjuster_review — list by status (admin/adjuster only)
 // At least one filter is required.
 router.get(
   '/',
   requireAuth,
+  bindReadTenant,
+  [query('claimId').optional().isString().notEmpty(), query('status').optional().isString().notEmpty()],
+  validate,
+  (req, res, next) => req.query.claimId ? scopeRfaClaim(req, res, next) : next(),
   async (req, res) => {
     const { claimId, status } = req.query;
 
@@ -65,7 +86,12 @@ router.get(
     }
 
     try {
-      const rfas = await rfaService.listRFAs({ claimId, status });
+      const rfas = await rfaService.listRFAs({
+        claimId, status,
+        // Claim-specific queries passed the ownership gate above. A work
+        // queue must be restricted even when it names no individual claim.
+        tenantId: claimId ? undefined : (req.user.tenantId || config.tenancy.defaultTenantId),
+      });
       res.json({ rfas, count: rfas.length });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -77,11 +103,14 @@ router.get(
 router.get(
   '/:id',
   requireAuth,
+  bindReadTenant,
   [param('id').notEmpty().withMessage('id is required')],
   validate,
+  scopeRfa,
   async (req, res) => {
     try {
-      const rfa = await rfaService.getRFA(req.params.id);
+      // Return the same record checked by the scope gate.
+      const rfa = req.scopedRfa;
       if (!rfa) return res.status(404).json({ error: 'RFA not found' });
       res.json(rfa);
     } catch (err) {

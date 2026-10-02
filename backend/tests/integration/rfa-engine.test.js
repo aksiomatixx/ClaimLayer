@@ -142,7 +142,10 @@ beforeEach(() => {
   seedClaim();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Compat-mode jobs run on setImmediate. Finish them while the test's
+  // records and mocks still exist, before Jest tears down the environment.
+  await new Promise(resolve => setImmediate(() => setImmediate(resolve)));
   jest.clearAllMocks();
 });
 
@@ -421,12 +424,13 @@ describe('GET /api/v1/rfas/:id', () => {
     expect(res.body).toHaveProperty('evaluation');
   });
 
-  test('returns 404 for non-existent RFA', async () => {
+  test('does not reveal a missing RFA to a tenant-scoped reader', async () => {
     const res = await request(app)
       .get('/api/v1/rfas/rfa_nonexistent')
       .set('Authorization', AUTH);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
   });
 });
 

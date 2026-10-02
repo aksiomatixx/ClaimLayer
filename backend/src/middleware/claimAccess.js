@@ -22,8 +22,9 @@ const config       = require('../config');
 const DENIED = { error: 'Access denied' };
 
 async function _claimMeta(claimId) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('claims').select('employer_id, tenant_id').eq('id', claimId).single();
+  if (error && error.code !== 'PGRST116') throw new Error('Claim ownership lookup failed');
   if (data) return { employerId: data.employer_id, tenantId: data.tenant_id };
   const claimService = require('../services/claimService');
   const claim = await claimService.getClaim(claimId).catch(() => null);
@@ -63,54 +64,46 @@ async function userMayAccessClaim(user, claimId) {
  * `resolve` locates the claim id on the request: either a dotted path
  * shorthand ('params.id', 'body.claim_id') or an async (req) => claimId
  * function for routes where the claim hangs off another resource
- * (appointment id, document id). Resolution runs only for non-admins,
- * so admin requests for missing resources still reach the route's own
- * 404 handling.
+ * (appointment id, document id). Every tenant-scoped caller must resolve
+ * the claim before reading the resource.
+ *
+ * readRoles can opt additional staff roles into GET access on a specific
+ * route. Tenant checks still run; this option never grants write access.
  *
  * On success the verified id is exposed as req.scopedClaimId.
  */
-function requireClaimScope(resolve) {
+function requireClaimScope(resolve, { readRoles = ['supervisor'] } = {}) {
   const resolver = typeof resolve === 'function'
     ? resolve
     : (req) => resolve.split('.').reduce((o, k) => (o == null ? undefined : o[k]), req);
 
   return async (req, res, next) => {
-    let claimId;
     try {
-      claimId = await resolver(req);
-    } catch {
-      return res.status(403).json(DENIED);
-    }
+      const claimId = await resolver(req);
 
-    if (!claimId) {
-      if (req.user?.role === 'admin' && !req.user?.tenantId) return next();
-      return res.status(403).json(DENIED);
-    }
-
-    // Cross-tenant enforcement for tenant-scoped callers
-    if (req.user?.tenantId) {
-      const meta = await _claimMeta(claimId);
-      const claimTenant = meta.tenantId || (meta.employerId ? config.tenancy.defaultTenantId : null);
-      if (claimTenant && claimTenant !== req.user.tenantId) {
+      if (!claimId) {
+        if (req.user?.role === 'admin' && !req.user?.tenantId) return next();
         return res.status(403).json(DENIED);
       }
-    }
 
-    if (req.user?.role === 'admin') {
+      // Cross-tenant enforcement for tenant-scoped callers
+      if (req.user?.tenantId) {
+        const meta = await _claimMeta(claimId);
+        const claimTenant = meta.tenantId || (meta.employerId ? config.tenancy.defaultTenantId : null);
+        if (claimTenant && claimTenant !== req.user.tenantId) {
+          return res.status(403).json(DENIED);
+        }
+      }
+
+      const staffRead = req.method === 'GET' && readRoles.includes(req.user?.role);
+      if (req.user?.role !== 'admin' && !staffRead && !(await userMayAccessClaim(req.user, claimId))) {
+        return res.status(403).json(DENIED);
+      }
       req.scopedClaimId = claimId;
-      return next();
-    }
-    // Read-only oversight: supervisors may READ any claim-scoped
-    // resource (their daily alert spans every adjuster's book), never
-    // write through this gate.
-    if (req.user?.role === 'supervisor' && req.method === 'GET') {
-      req.scopedClaimId = claimId;
-      return next();
-    }
-    if (!(await userMayAccessClaim(req.user, claimId))) {
+    } catch {
+      // A failed ownership/tenant lookup must never release the resource.
       return res.status(403).json(DENIED);
     }
-    req.scopedClaimId = claimId;
     next();
   };
 }

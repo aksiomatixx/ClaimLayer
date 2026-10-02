@@ -553,13 +553,24 @@ async function getRFA(rfaId) {
 
 /**
  * List RFAs with optional filters.
- * @param {string|object} filters  claimId string (legacy) or { claimId, status }
+ * @param {string|object} filters  claimId string (legacy) or { claimId, status, tenantId }
  */
 async function listRFAs(filters = {}) {
   const opts = typeof filters === 'string' ? { claimId: filters } : filters;
-  const { claimId, status } = opts;
+  const { claimId, status, tenantId } = opts;
+
+  let tenantClaims;
+  if (tenantId) {
+    // The parent claim is authoritative. Do not rely on child tenant_id
+    // defaults, which can be stale for RFAs created in another tenant.
+    const { data, error } = await supabase.from('claims').select('id').eq('tenant_id', tenantId);
+    if (error) throw new Error(`rfaService.listRFAs: ${error.message}`);
+    tenantClaims = (data || []).map(claim => claim.id);
+    if (!tenantClaims.length) return [];
+  }
 
   let q = supabase.from('rfas').select('*').order('created_at', { ascending: false });
+  if (tenantClaims) q = q.in('claim_id', tenantClaims);
   if (claimId) q = q.eq('claim_id', claimId);
   if (status)  q = q.eq('decision', status);
 
