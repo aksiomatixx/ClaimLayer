@@ -621,7 +621,7 @@ Severity: **P0** = launch blocker · **P1** = required before the first meaningf
 | Gap | Sev | Existing state | Required state | Recommended solution | Dependencies |
 |---|---|---|---|---|---|
 | No immutable audit ledger | P0 | Four partial, mutable trails | One append-only, hash-chained ledger for consequential actions | `audit_ledger` with triggers + privileges + verify fn (**Sprint 1**) | — |
-| History deletable | P0 | `claim_events` CASCADE; compensation code deletes events | No deletes of history; corrections are new events | Remove CASCADE (Sprint 2); compensation becomes transactions | Transactions |
+| History deletable | P0 | `claim_events` CASCADE; compensation code deletes events | No deletes of history; corrections are new events | **CASCADE removed from every FK into `claims` (Sprint 2).** Compensating deletes remain in `diaryActionService` / `documentIngestionService` until they become transactions (increment 2) | Transactions |
 | AI decision trail broken (D-1) | P0 | Insert fails on migrated schema | Working, contract-tested | Reconciling migration (**Sprint 1**) | — |
 | Recommendation ↔ decision linkage | P0 | "Most recent row within 7 days", mutated in place | Explicit ids: decision references the exact recommendation shown | `action_requests.ai_decision_id` (**Sprint 1**) | Approval framework |
 | No actor on events | P1 | `claim_events` has no actor | Actor type/id/role on every event | Ledger columns; event writer requires actor | AuthZ |
@@ -705,8 +705,8 @@ Severity: **P0** = launch blocker · **P1** = required before the first meaningf
 
 | Gap | Sev | Existing state | Required state | Recommended solution | Dependencies |
 |---|---|---|---|---|---|
-| No transactions | P0 | PostgREST client; compensation code | ACID transactions around every consequential unit | `pg` pool + unit-of-work (Sprint 2) | — |
-| Fire-and-forget side effects | P0 | 15 `setImmediate` (AI, DWC-7, WCIS enqueue, write-backs) | Durable jobs created in the same transaction | Postgres-backed job queue + outbox | Transactions |
+| No transactions | P0 | PostgREST client; compensation code | ACID transactions around every consequential unit | `pg` pool + unit of work (**Sprint 2:** approval lifecycle, reserve approval, RFA approval). Claim create/status, diary actions and document ingestion are next | — |
+| Fire-and-forget side effects | P0 | 15 `setImmediate` (AI, DWC-7, WCIS enqueue, write-backs) | Durable jobs created in the same transaction | **Durable Postgres job queue replaced all 15 (Sprint 2)** — retries, leases, dead-letter to diary + ledger. Enqueued in-transaction on converted paths; immediately after the write elsewhere | Transactions |
 | TOCTOU races | P1 | Read-check-write in `updateStatus`, `approveReserves` | Optimistic concurrency (`version` column) or row locks | `version` columns + conditional updates | Transactions |
 | No deployable runtime / scheduler | P0 | None in repo | Containerized API + worker + scheduler; health checks; graceful shutdown | Dockerfile + IaC | Infra |
 | Observability | P1 | stdout logs | Metrics, traces, SLOs, alerting, on-call | OpenTelemetry | Infra |
@@ -724,7 +724,7 @@ Severity: **P0** = launch blocker · **P1** = required before the first meaningf
 
 | Gap | Sev | Existing state | Required state | Recommended solution | Dependencies |
 |---|---|---|---|---|---|
-| Mock DB hides real defects | P0 | 75/81 suites on in-memory mock | Integration tests on real Postgres (ephemeral DB per run) | Testcontainers or a CI service DB; retire the mock for data-layer tests | Data access layer |
+| Mock DB hides real defects | P0 | 75/81 suites on in-memory mock | Integration tests on real Postgres (ephemeral DB per run) | **Sprint 2:** `npm run test:pg` (ephemeral database per run, in CI) and a CI schema-write audit — together they found D-9. Retiring the mock for data-layer tests continues | Data access layer |
 | No permission-matrix tests | P1 | Spot IDOR tests | Generated tests: every route × role × tenant | Generated from permission catalog | AuthZ |
 | No financial property tests | P1 | Example-based | Property-based tests (invariants: ledger balances, no negative outstanding, idempotency) | fast-check | Financial ledger |
 | No synthetic portfolio simulation | P1 | 14 demo claims | Seeded generator of hundreds to thousands of claims with expected outcomes, run through simulated time | Simulation harness (Section H) | Rules engine, clock injection |
@@ -913,13 +913,14 @@ or by execution in this review.
 | # | Sev | Defect | Evidence |
 |---|---|---|---|
 | **D-1** | P0 | **`ai_decisions` schema drift (verified).** Migration 04 creates the table; migration 14's `CREATE TABLE IF NOT EXISTS` is a no-op, so `prompt_name`, `model`, `latency_ms`, `guardrail_actions`, and `human_*` never exist. The exact insert `aiDecisionsService.logDecision` performs fails with `column "prompt_name" … does not exist`. Compensability, RFA, and classification pass `required: true` and would throw. `disbursementService` writes the *other* (migration 04) shape to the same table | Reproduced on PG16 from the committed chain. **Fixed in Sprint 1** |
-| **D-2** | P0 | **No transactions.** Multi-step writes (status + event + WCIS enqueue; reserves to FileHandler then local) are independent calls, many with unchecked errors (`claimService.updateStatus`, `approveReserves`, `reopenClaim`) | `claimService.js:551–719` |
+| **D-2** | P0 | **No transactions.** Multi-step writes (status + event + WCIS enqueue; reserves to FileHandler then local) are independent calls, many with unchecked errors (`claimService.updateStatus`, `approveReserves`, `reopenClaim`). **Partly fixed in Sprint 2:** `approveReserves` (FileHandler via outbox), RFA approval, and the approval lifecycle are units of work; `updateStatus` and `reopenClaim` remain | `claimService.js:551–719` |
 | **D-3** | P0 | **AWW assumes biweekly pay periods**: `aww = totalGross / (payStatements.length * 2)`. For weekly-paid workers this halves AWW and therefore the TD rate | `adp.js:165` |
 | **D-4** | P0 | **TD min/max hardcoded** to one year's values for every claim regardless of date of injury, labeled "2026"; PD advance rates likewise (`PD_RATES_2026`) | `adp.js:161–162`, `pdService.js:31` |
 | **D-5** | P1 | **Determination-dependent notices issued at referral.** The IMR-rights notice and RFA determination letter were generated when an RFA was *routed* to UR, before any determination. The generator has no decision-state guard. **Fixed in #87:** referral no longer sends either notice; they belong to a future physician-determination return path | `rfaService.js:405–411` (pre-fix), `noticeService.js:785` |
 | **D-6** | P1 | **Endpoints that report success without persisting** (DWC-1 signature request, intake progress, `magic_link_sent` event) | `routes/claims.js:465–527`, `routes/employer.js` |
 | **D-7** | P1 | **Test scaffolding in production read paths** (`claimService._testStore`, consulted first by `getClaim` and merged into `listClaims`) | `claimService.js:46, 512, 533` |
 | **D-8** | P1 | **Model output written to operational fields without validation** (`claims.priority` set from model `priority`; reserve figures stored and surfaced) | `claimService._runAnalysis` |
+| **D-9** | P0 | **Writes to columns no migration created (verified on PostgreSQL 16 and on the hosted project).** `rfas.updated_at` (every RFA write — `createRFA` failed outright and RFA decisions never persisted), `diaries.auto_generated` / `generated_by_event` (the statutory `RFA_RESPONSE_DUE` diary, CCR §9792.9.1, was never created), `diaries.resolution_notes` (TD-setup diaries never auto-completed), `notices.pdf_buffer_b64` (stipulation notice audit row never written). Most of these writes do not check their error, so the failures were silent; the in-memory double accepts any column. **Fixed in Sprint 2** (`20261002000001`), now guarded by `scripts/schema-write-audit.js` in CI | `rfaService.js`, `tdPeriodsService.js`, `pdService.js` |
 
 ---
 
@@ -1169,7 +1170,7 @@ The contract test also caught a real defect during the sprint. A `CHECK` constra
 `NULL` through three-valued logic, so an `approved` status without a decision would have been
 allowed. It was fixed before merge.
 
-### Recommended Sprint 2 — transactional core
+### Recommended Sprint 2 — transactional core (as planned before the sprint)
 
 1. Replace supabase-js with a `pg` unit of work on the consequential paths
    (`claimService`, `diaryActionService`, `documentIngestionService`, `approvalService`).
@@ -1181,3 +1182,53 @@ allowed. It was fixed before merge.
 4. Replace the 15 `setImmediate` side effects with a durable Postgres-backed job queue.
 5. Start the integration-test migration off the in-memory mock, using a real Postgres per CI
    run.
+
+---
+
+## Sprint 2, increment 1 — "Transactional Core" (implemented)
+
+Design: ADR-0006. Migration: `20261002000001_transactional_core.sql`.
+
+| # | Deliverable | Status | Verification |
+|---|---|---|---|
+| 1 | `pg` data layer: pool with PostgREST-shaped types, TLS; unit of work with transaction-local `app.tenant_id` / `app.actor_id`, deadlock/serialization retry, after-commit hooks; `pg` and compatibility adapters; **production refuses to boot without `DATABASE_URL`** | Done | `tests/pg/unitOfWork.pg.test.js` (incl. a real deadlock), `tests/pg/adapters.pg.test.js` |
+| 2 | Durable Postgres job queue (`jobs`): in-transaction enqueue, `SKIP LOCKED` leases, fencing, backoff, dead-letter to ledger + diary, idempotency keys, worker process, admin list / re-queue / run | Done | `tests/pg/jobQueue.pg.test.js` (18), `tests/unit/jobQueue.test.js` (13), contract assertions |
+| 3 | All 15 `setImmediate` side effects → named jobs (`src/jobs/registry.js`) | Done | No `setImmediate` remains in `src/`; the in-memory suite runs unchanged (compat timing) |
+| 4 | Approval lifecycle transactional: proposal, decision and execution each commit with their ledger entries; execution effects commit with `executed`; failures roll back fully and are retryable | Done | `tests/pg/approvals.pg.test.js` (13): injected ledger / DB failures leave no effect; races have one winner |
+| 5 | Reserve approval as one unit; FileHandler via the outbox (`set_reserves`, idempotency key) | Done | pg + HTTP tests: outage leaves the approval committed and the sync pending |
+| 6 | RFA approval as one unit (decision, event, diary, `rfa.approved`, letter job); executor re-checks under the row lock | Done | `tests/pg/approvals.pg.test.js`, `tests/pg/rfaFlow.pg.test.js` |
+| 7 | No `ON DELETE CASCADE` from `claims`; demo reset deletes every child table in FK order and fails loudly | Done | Contract assertions; `tests/pg/schemaGuards.pg.test.js` checks the delete order against the live FK graph |
+| 8 | **D-9 found and fixed** — five phantom columns (above) | Done | `scripts/schema-write-audit.js` (274 write sites) + contract assertions, both in CI |
+| 9 | ADR-0006; environment, developer and readiness docs | Done | `docs/adr/0006-transactional-core.md` |
+
+Totals after the increment:
+
+- backend (in-memory): **87 suites, 1,415 tests**;
+- real-PostgreSQL suite: **6 suites, 58 tests**;
+- schema contract: **82 assertions**;
+- schema write audit: 274 write sites;
+- frontend: 84 tests;
+- all passing.
+
+**Behavior changes:**
+
+- A FileHandler outage no longer fails a reserve approval. The approval commits and the sync is
+  retried through the outbox.
+- Background work that fails is retried and then dead-lettered to a diary, instead of being
+  logged and lost.
+- A direct RFA approval writes an `rfa.approved` ledger entry.
+
+### Sprint 2, increment 2 (next)
+
+1. Convert `claimService` (create, status change, reopen), `diaryActionService` and
+   `documentIngestionService` to units of work. Delete their compensating writes. Enqueue
+   their jobs in-transaction.
+2. Make `claim_events` append-only (triggers + privileges, as for `audit_ledger`) once no code
+   deletes events.
+3. Propagate `tenant_id` and `client_id` to every table. Scope every query by the session
+   tenant, and add RLS policies keyed on `app.tenant_id` for a non-owner database role.
+4. Retire `_testStore` (D-7) and move data-layer tests from the in-memory double to
+   `tests/pg/`.
+5. Confirm the open domain question in ADR-0006: should a *direct* approval of an RFA already
+   decided another way be refused?
+

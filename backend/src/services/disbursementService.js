@@ -28,6 +28,7 @@
 const { supabase } = require('./supabase');
 const config = require('../config');
 const logger       = require('../logger');
+const jobQueue     = require('./jobQueue');
 
 // Lazy requires to break cycles.
 function _getPdService()         { return require('./pdService'); }
@@ -496,59 +497,10 @@ async function recordDisbursementPayment(disbursementId, { paidDate, reference }
   // Fire SROI PY with stip breakdown payload. If stipulation
   // future_medical = false, follow with SROI FN. If true, no FN
   // (claim stays future-medical-only).
-  setImmediate(async () => {
-    try {
-      const wcis = require('./wcisTriggerService');
-
-      await wcis.enqueueIfReportable({
-        claim_id:         row.claim_id,
-        trigger_event:    'stip_disbursement_paid',
-        source_service:   'disbursementService',
-        source_record_id: disbursementId,
-        event_date:       paidDate,
-        payload_context: {
-          source:          'stip_disbursement',
-          disbursement_id: disbursementId,
-          paid_date:       paidDate,
-        },
-      });
-
-      let futureMedical = null;
-      if (row.stipulation_id) {
-        const { data: stip } = await supabase
-          .from('stipulations')
-          .select('future_medical')
-          .eq('id', row.stipulation_id)
-          .single();
-        futureMedical = stip ? !!stip.future_medical : null;
-      }
-
-      if (futureMedical === false) {
-        await wcis.enqueueIfReportable({
-          claim_id:         row.claim_id,
-          trigger_event:    'claim_closed',
-          source_service:   'disbursementService',
-          source_record_id: disbursementId,
-          event_date:       paidDate,
-          payload_context: {
-            source:             'stip_disbursement',
-            disbursement_id:    disbursementId,
-            closed_date:        paidDate,
-            claim_status_code:  'C',
-          },
-        });
-      } else if (futureMedical === true) {
-        logger.info({
-          msg: 'disbursementService.recordDisbursementPayment: future_medical=true, no FN',
-          disbursementId,
-        });
-      }
-    } catch (err) {
-      logger.error({
-        msg: 'disbursementService.recordDisbursementPayment: WCIS hook failed',
-        disbursementId, err: err.message,
-      });
-    }
+  await jobQueue.enqueue({
+    queue: 'wcis.disbursement_paid', claimId: row.claim_id,
+    payload: { disbursementId, claimId: row.claim_id, stipulationId: row.stipulation_id || null, paidDate },
+    idempotencyKey: `wcis.disbursement_paid:${disbursementId}`,
   });
 
   logger.info({
@@ -727,6 +679,58 @@ async function _writeAuditLog(action, resourceId, description, newValue) {
   }
 }
 
+// Job handler (wcis.disbursement_paid): SROI PY with the stip breakdown; if
+// the stipulation has future_medical = false, follow with SROI FN (if true,
+// the claim stays future-medical-only). wcisTriggerService dedupes, so a
+// retry after a partial run is safe.
+async function _wcisOnPayment({ disbursementId, claimId, stipulationId, paidDate }) {
+  const wcis = require('./wcisTriggerService');
+
+  await wcis.enqueueIfReportable({
+    claim_id:         claimId,
+    trigger_event:    'stip_disbursement_paid',
+    source_service:   'disbursementService',
+    source_record_id: disbursementId,
+    event_date:       paidDate,
+    payload_context: {
+      source:          'stip_disbursement',
+      disbursement_id: disbursementId,
+      paid_date:       paidDate,
+    },
+  });
+
+  let futureMedical = null;
+  if (stipulationId) {
+    const { data: stip } = await supabase
+      .from('stipulations')
+      .select('future_medical')
+      .eq('id', stipulationId)
+      .single();
+    futureMedical = stip ? !!stip.future_medical : null;
+  }
+
+  if (futureMedical === false) {
+    await wcis.enqueueIfReportable({
+      claim_id:         claimId,
+      trigger_event:    'claim_closed',
+      source_service:   'disbursementService',
+      source_record_id: disbursementId,
+      event_date:       paidDate,
+      payload_context: {
+        source:             'stip_disbursement',
+        disbursement_id:    disbursementId,
+        closed_date:        paidDate,
+        claim_status_code:  'C',
+      },
+    });
+  } else if (futureMedical === true) {
+    logger.info({
+      msg: 'disbursementService.recordDisbursementPayment: future_medical=true, no FN',
+      disbursementId,
+    });
+  }
+}
+
 module.exports = {
   DISBURSEMENT_POLICY,
   proposeDisbursement,
@@ -745,4 +749,6 @@ module.exports = {
   _writeAuditLog,
   _getPdService,
   _getCommutationService,
+  // Job handler (src/jobs/registry.js)
+  _wcisOnPayment,
 };

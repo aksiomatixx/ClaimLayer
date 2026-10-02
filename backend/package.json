@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "worker": "node src/worker.js",
     "test": "jest --runInBand",
+    "test:pg": "jest --config jest.pg.config.js --runInBand",
     "gen:test-docs": "node src/scripts/generateTestDocuments.js"
   },
   "dependencies": {
@@ -26,6 +28,7 @@
     "openai": "^6.34.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
+    "pg": "^8.21.0",
     "qs": "^6.12.1",
     "twilio": "^5.13.1",
     "winston": "^3.13.0"
@@ -33,13 +36,16 @@
   "devDependencies": {
     "jest": "^29.7.0",
     "nodemon": "^3.0.2",
-    "pg": "^8.21.0",
     "supertest": "^7.0.0"
   },
   "jest": {
     "testEnvironment": "node",
     "testMatch": [
       "**/tests/**/*.test.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/pg/"
     ],
     "setupFiles": [
       "./tests/setup.js"

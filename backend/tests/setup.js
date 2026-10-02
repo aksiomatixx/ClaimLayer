@@ -33,6 +33,13 @@ for (const [key, value] of Object.entries(defaults)) {
   if (!process.env[key]) process.env[key] = value;
 }
 
+// This suite runs against the in-memory Supabase double, i.e. the unit of
+// work's non-transactional compatibility mode. A developer's DATABASE_URL
+// (from .env) must never switch it onto a real database. The real-Postgres
+// suite (npm run test:pg, tests/pg/) has its own setup. An empty string
+// also stops dotenv from loading the value later (it never overrides).
+process.env.DATABASE_URL = '';
+
 // Warn if Anthropic key is missing — AI tests will be skipped, not failed
 if (!process.env.ANTHROPIC_API_KEY) {
   console.warn('\n⚠  ANTHROPIC_API_KEY not set — AI analysis tests will be skipped\n');

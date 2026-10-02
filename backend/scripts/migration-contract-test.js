@@ -22,32 +22,13 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 
-const MIGRATIONS_DIR = path.join(__dirname, '..', '..', 'supabase', 'migrations');
+const { MIGRATIONS_DIR, SUPABASE_SHIMS } = require('./lib/testDatabase');
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
   console.error('DATABASE_URL is required');
   process.exit(1);
 }
-
-// Vanilla Postgres lacks the Supabase runtime objects some migrations
-// reference (RLS policies use the authenticated role and auth.uid()).
-const SUPABASE_SHIMS = `
-  DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-      CREATE ROLE authenticated NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-      CREATE ROLE anon NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-      CREATE ROLE service_role NOLOGIN;
-    END IF;
-  END $$;
-  CREATE SCHEMA IF NOT EXISTS auth;
-  CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid
-    LANGUAGE sql STABLE AS 'SELECT NULL::uuid';
-`;
 
 let passed = 0;
 let failed = 0;
@@ -108,8 +89,8 @@ async function main() {
     }
   }
 
-  console.log('── Re-applying the hardening-era + trust-foundation migrations (idempotency)');
-  const hardening = files.filter(f => f.startsWith('20260611') || f.startsWith('20261001'));
+  console.log('── Re-applying the hardening-era + trust-foundation + transactional-core migrations (idempotency)');
+  const hardening = files.filter(f => /^(20260611|20261001|20261002)/.test(f));
   for (const f of hardening) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8');
     await client.query(sql);
@@ -633,6 +614,153 @@ async function main() {
       throw e;
     }
     throw new Error('claim with approval history was deleted');
+  });
+
+  console.log('── Transactional core: job queue + no cascading claim deletes');
+
+  await check('no foreign key into claims cascades on delete', async () => {
+    const { rows } = await client.query(
+      `SELECT conrelid::regclass::text AS tbl, conname FROM pg_constraint
+        WHERE contype = 'f' AND confrelid = 'public.claims'::regclass AND confdeltype = 'c'`);
+    if (rows.length) throw new Error('cascading FKs remain: ' + rows.map(r => `${r.tbl}.${r.conname}`).join(', '));
+  });
+
+  await check('the rewritten FKs kept their names and still enforce references', async () => {
+    const { rows } = await client.query(
+      `SELECT count(*)::int AS n FROM pg_constraint
+        WHERE contype = 'f' AND confrelid = 'public.claims'::regclass
+          AND conname IN ('claim_events_claim_id_fkey', 'diaries_claim_id_fkey', 'reserves_claim_id_fkey',
+                          'td_periods_claim_id_fkey', 'claim_links_claim_id_a_fkey', 'claim_links_claim_id_b_fkey')`);
+    if (rows[0].n !== 6) throw new Error(`expected 6 named FKs, found ${rows[0].n}`);
+  });
+
+  await expectViolation(client,
+    'an event for a non-existent claim is still rejected',
+    `INSERT INTO claim_events (id, claim_id, type, data) VALUES ('evt_ct_orphan', 'claim_ct_missing', 'x', '{}')`);
+
+  await check('deleting a claim with event history is refused (history is never cascaded away)', async () => {
+    await client.query(
+      `INSERT INTO claims (id, claim_number, status, date_of_injury) VALUES ('claim_ct_nc', 'HHW-2026-CNC', 'new_claim', '2026-05-04')`);
+    await client.query(
+      `INSERT INTO claim_events (id, claim_id, type, data) VALUES ('evt_ct_nc', 'claim_ct_nc', 'claim_created', '{}')`);
+    try {
+      await client.query(`DELETE FROM claims WHERE id = 'claim_ct_nc'`);
+    } catch (e) {
+      if (/claim_events_claim_id_fkey/.test(e.message)) {
+        const { rows } = await client.query(`SELECT count(*)::int AS n FROM claim_events WHERE claim_id = 'claim_ct_nc'`);
+        if (rows[0].n !== 1) throw new Error('event history changed');
+        return;
+      }
+      throw e;
+    }
+    throw new Error('claim with event history was deleted');
+  });
+
+  await check('a claim with no dependent rows can still be deleted (create-compensation path)', async () => {
+    await client.query(
+      `INSERT INTO claims (id, claim_number, status, date_of_injury) VALUES ('claim_ct_comp', 'HHW-2026-CMP', 'new_claim', '2026-05-04')`);
+    await client.query(`DELETE FROM claims WHERE id = 'claim_ct_comp'`);
+  });
+
+  await check('jobs accepts the enqueue shape with database defaults', async () => {
+    const { rows } = await client.query(
+      `INSERT INTO jobs (queue, payload, claim_id, idempotency_key, correlation_id)
+       VALUES ('claim.analysis', '{"claimId":"claim_ct_1"}', 'claim_ct_1', 'claim.analysis:claim_ct_1', 'corr-ct-1')
+       RETURNING id, tenant_id, status, attempts, max_attempts, run_at <= now() AS due`);
+    const j = rows[0];
+    if (j.tenant_id !== TENANT_A || j.status !== 'pending' || j.attempts !== 0 || j.max_attempts !== 8 || !j.due) {
+      throw new Error('unexpected defaults: ' + JSON.stringify(j));
+    }
+  });
+
+  await check('jobs idempotency keys are unique per queue (ON CONFLICT DO NOTHING is a no-op)', async () => {
+    const { rowCount } = await client.query(
+      `INSERT INTO jobs (queue, idempotency_key) VALUES ('claim.analysis', 'claim.analysis:claim_ct_1')
+       ON CONFLICT (queue, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`);
+    if (rowCount !== 0) throw new Error('duplicate job inserted');
+    await client.query(`INSERT INTO jobs (queue, idempotency_key) VALUES ('notice.dwc7', 'claim.analysis:claim_ct_1')`);
+    await client.query(`INSERT INTO jobs (queue) VALUES ('claim.analysis'), ('claim.analysis')`); // NULL keys never collide
+  });
+
+  await expectViolation(client, 'a malformed queue name is rejected',
+    `INSERT INTO jobs (queue) VALUES ('Claim Analysis; drop')`);
+
+  await expectViolation(client, 'an unknown job status is rejected',
+    `INSERT INTO jobs (queue, status) VALUES ('claim.analysis', 'maybe')`);
+
+  await expectViolation(client, 'a running job without a lease is rejected',
+    `INSERT INTO jobs (queue, status) VALUES ('claim.analysis', 'running')`);
+
+  await expectViolation(client, 'a finished job without finished_at is rejected',
+    `INSERT INTO jobs (queue, status) VALUES ('claim.analysis', 'succeeded')`);
+
+  await expectViolation(client, 'max_attempts outside 1..25 is rejected',
+    `INSERT INTO jobs (queue, max_attempts) VALUES ('claim.analysis', 0)`);
+
+  await check('two workers claiming concurrently never get the same job (SKIP LOCKED)', async () => {
+    await client.query(`DELETE FROM jobs`);
+    await client.query(`INSERT INTO jobs (queue) SELECT 'ct.concurrency' FROM generate_series(1, 6)`);
+    const claimSql = (worker) => `
+      UPDATE jobs SET status = 'running', locked_by = '${worker}', locked_until = now() + interval '5 minutes',
+                      attempts = attempts + 1, updated_at = now()
+       WHERE id IN (SELECT id FROM jobs WHERE status = 'pending' AND run_at <= now()
+                     ORDER BY run_at, id LIMIT 4 FOR UPDATE SKIP LOCKED)
+      RETURNING id`;
+    const other = new Client({ connectionString: DATABASE_URL });
+    await other.connect();
+    try {
+      await client.query('BEGIN');
+      await other.query('BEGIN');
+      const a = (await client.query(claimSql('worker-a'))).rows.map(r => r.id);
+      const b = (await other.query(claimSql('worker-b'))).rows.map(r => r.id);
+      await client.query('COMMIT');
+      await other.query('COMMIT');
+      const overlap = a.filter(id => b.includes(id));
+      if (overlap.length) throw new Error('both workers claimed ' + overlap.join(','));
+      if (a.length !== 4 || b.length !== 2) throw new Error(`expected 4 + 2, got ${a.length} + ${b.length}`);
+    } finally {
+      await other.end();
+    }
+  });
+
+  await check('rfas accepts every rfaService write shape (incl. updated_at)', async () => {
+    const { rows: [rfa] } = await client.query(
+      `INSERT INTO rfas (claim_id, received_at, received_via, requesting_physician, treatment_description,
+                         cpt_codes, urgency, response_due_at, decision, created_at, updated_at)
+       VALUES ('claim_ct_1', now(), 'fax', 'Dr. Contract', 'PT 2x/week', ARRAY['97110'], 'standard',
+               now() + interval '5 days', NULL, now(), now())
+       RETURNING id`);
+    for (const patch of [
+      `decision = 'pending_adjuster_review', decision_made_at = now(), decision_made_by = 'ai_system', updated_at = now()`,
+      `decision = 'sent_to_uro', decision_made_at = now(), decision_made_by = 'ai_system',
+       enlyte_referral_id = 'ref-1', enlyte_sent_at = now(), updated_at = now()`,
+      `decision = 'deferred', decision_made_at = now(), decision_made_by = 'ai_system', updated_at = now()`,
+      `decision = 'adjuster_approved', decision_made_at = now(), decision_made_by = 'adj@ct.test', updated_at = now()`,
+    ]) {
+      await client.query(`UPDATE rfas SET ${patch} WHERE id = $1`, [rfa.id]);
+    }
+  });
+
+  await check('diaries accept the RFA response-due seed and the TD-setup completion shapes', async () => {
+    await client.query(
+      `INSERT INTO diaries (id, claim_id, diary_type, due_date, assigned_to, priority, status, notes,
+                            auto_generated, generated_by_event)
+       VALUES ('diy_ct_rfa_due', 'claim_ct_1', 'RFA_RESPONSE_DUE', '2026-06-01', 'adj@ct.test', 'HIGH', 'open',
+               'RFA response due — CCR §9792.9.1', TRUE, 'rfa_received')`);
+    await client.query(
+      `UPDATE diaries SET status = 'completed', completed_at = now(), completed_by = 'system',
+                          resolution_notes = 'Completed by td_period creation', updated_at = now()
+        WHERE id = 'diy_ct_rfa_due'`);
+  });
+
+  await check('notices accept the stipulation audit row (with its PDF)', () =>
+    client.query(
+      `INSERT INTO notices (claim_id, notice_type, statutory_deadline, generated_at, pdf_buffer_b64)
+       VALUES ('claim_ct_1', 'stipulation', '2026-07-01', now(), 'JVBERi0=')`));
+
+  await check('jobs has row-level security enabled', async () => {
+    const { rows } = await client.query(`SELECT relrowsecurity FROM pg_class WHERE oid = 'public.jobs'::regclass`);
+    if (!rows[0].relrowsecurity) throw new Error('RLS disabled on jobs');
   });
 
   await client.end();

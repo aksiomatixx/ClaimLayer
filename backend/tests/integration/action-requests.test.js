@@ -177,9 +177,13 @@ describe('decision', () => {
       status: 'executed', decision: 'approve', decided_by: 'sup@tpa.test', executed_by: 'sup@tpa.test',
       execution_result: { total_cents: 6_000_000 },
     });
+    // FileHandler is updated through the outbox, dispatched right after
+    // commit, with the outbox row id as the idempotency key.
     expect(filehandler.setReserves).toHaveBeenCalledWith(
       'fh_ar_1', expect.objectContaining({ medical: 35000, indemnity: 20000, expense: 5000 }),
-      'ADJUSTER', 'sup@tpa.test');
+      'ADJUSTER', 'sup@tpa.test', { idempotencyKey: expect.stringMatching(/^obx_/) });
+    const { data: outboxRows } = await supabase.from('integration_outbox').select('*');
+    expect(outboxRows).toEqual([expect.objectContaining({ operation: 'set_reserves', status: 'succeeded', claim_id: CLAIM })]);
 
     const trail = await ledger();
     expect(trail.map(e => [e.action, e.actor_id])).toEqual([
@@ -252,21 +256,57 @@ describe('decision', () => {
 });
 
 describe('execution', () => {
+  // Make the next insert into `table` fail the way a database error does.
+  function failNextInsert(table, message) {
+    const realFrom = supabase.from.bind(supabase);
+    let armed = true;
+    jest.spyOn(supabase, 'from').mockImplementation((t) => {
+      if (t !== table || !armed) return realFrom(t);
+      armed = false;
+      return { insert: () => ({ select: async () => ({ data: null, error: { message } }) }) };
+    });
+  }
+  afterEach(() => jest.restoreAllMocks());
+
   test('a failed execution is recorded, surfaced as 502, and retryable', async () => {
-    filehandler.setReserves.mockRejectedValueOnce(new Error('ledger system unavailable'));
+    failNextInsert('reserves', 'reserves table unavailable');
     const { body } = await propose();
     const res = await decide(body.request.id, SUP, { decision: 'approve', rationale: 'Supported by the PR-2 findings.' });
     expect(res.status).toBe(502);
-    expect(res.body.request).toMatchObject({ status: 'execution_failed', execution_error: 'ledger system unavailable' });
+    expect(res.body.request).toMatchObject({ status: 'execution_failed', execution_error: expect.stringMatching(/reserves table unavailable/) });
+    expect(filehandler.setReserves).not.toHaveBeenCalled();   // nothing reached the system of record
 
     const retry = await request(app).post(`/api/v1/action-requests/${body.request.id}/execute`).set('Authorization', SUP);
     expect(retry.status).toBe(200);
     expect(retry.body.request).toMatchObject({ status: 'executed', execution_attempts: 2 });
     expect((await ledger()).map(e => e.action)).toEqual(expect.arrayContaining(['action.execution_failed', 'action.executed']));
+    expect(filehandler.setReserves).toHaveBeenCalledTimes(1);
+  });
+
+  test('a FileHandler outage does not fail an approved execution — the sync waits in the outbox', async () => {
+    filehandler.setReserves.mockRejectedValueOnce(new Error('ledger system unavailable'));
+    const { body } = await propose();
+    const res = await decide(body.request.id, SUP, { decision: 'approve', rationale: 'Supported by the PR-2 findings.' });
+    expect(res.status).toBe(200);
+    expect(res.body.request.status).toBe('executed');
+
+    const { data: reserves } = await supabase.from('reserves').select('*').eq('claim_id', CLAIM);
+    expect(reserves).toHaveLength(1);
+    const { data: [row] } = await supabase.from('integration_outbox').select('*');
+    expect(row).toMatchObject({ operation: 'set_reserves', status: 'pending', attempts: 1, last_error: 'ledger system unavailable' });
+
+    // The outbox worker retries the same operation with the same key.
+    const outbox = require('../../src/services/outboxService');
+    await supabase.from('integration_outbox').update({ next_attempt_at: new Date(0).toISOString() }).eq('id', row.id);
+    await outbox.dispatchPending('test-worker');
+    expect(filehandler.setReserves).toHaveBeenCalledTimes(2);
+    expect(filehandler.setReserves.mock.calls[1][4]).toEqual({ idempotencyKey: row.id });
+    const { data: [after] } = await supabase.from('integration_outbox').select('*');
+    expect(after.status).toBe('succeeded');
   });
 
   test('a retry requires the same authority as the approval', async () => {
-    filehandler.setReserves.mockRejectedValueOnce(new Error('ledger system unavailable'));
+    failNextInsert('reserves', 'reserves table unavailable');
     const { body } = await propose();
     await decide(body.request.id, SUP, { decision: 'approve', rationale: 'Supported by the PR-2 findings.' });
     const retry = await request(app).post(`/api/v1/action-requests/${body.request.id}/execute`).set('Authorization', ADJ2);

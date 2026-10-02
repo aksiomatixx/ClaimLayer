@@ -40,51 +40,95 @@ const SEED_MODEL = 'claude-sonnet-4-6';
 
 // ── Wipe & seed ───────────────────────────────────────────────────────────────
 
+// Every table with a claim_id that references a claim, ordered so each
+// table is emptied before any table it references (claims no longer
+// cascade — migration 20261002000001). Audit history (audit_ledger,
+// audit_log) is kept. rfa_evaluations has no claim_id and is removed via
+// its RFA first (DEMO_RFA_DEPENDENTS). tests/pg/schemaGuards.pg.test.js
+// checks this list against the live foreign-key graph.
+const DEMO_CHILD_TABLES = [
+  // settlement / permanent-disability chain (leaf → root)
+  'award_disbursements', 'stipulations', 'settlement_offers', 'msa_screenings',
+  'pd_advance_payments', 'pd_advances', 'pd_evaluations',
+  'pr4_solicitations', 'mmi_evaluations',
+  // WCIS chain
+  'wcis_claim_state', 'wcis_transactions', 'wcis_trigger_queue',
+  // notices (benefit_notices → claim_documents)
+  'benefit_notice_channels', 'benefit_notices', 'notices', 'deferred_penalty_flags',
+  // diaries / AI decisions reference rfas and documents
+  'diaries', 'ai_decisions', 'supplemental_requests', 'rfas', 'qme_panels',
+  'claim_documents', 'documents', 'appointments', 'magic_link_tokens',
+  // money + history
+  'td_periods', 'reserve_line_items', 'reserves', 'claim_events',
+  // workflow plumbing
+  'action_requests', 'integration_outbox', 'jobs',
+];
+
+// Tables without a claim_id that reference a claim child table, wiped by
+// that parent's ids before the parent: [table, column, parent table].
+const DEMO_RFA_DEPENDENTS = [['rfa_evaluations', 'rfa_id', 'rfas']];
+
+// A table an older schema doesn't have is not an error for a demo reset.
+function _isMissingTable(error) {
+  return error.code === '42P01' || error.code === 'PGRST205'
+    || /does not exist|could not find the table/i.test(error.message || '');
+}
+
+async function _wipeWhere(table, col, val, problems) {
+  const { error } = await supabase.from(table).delete().eq(col, val);
+  if (error && !_isMissingTable(error)) problems.push(`${table} (${col}=${val}): ${error.message}`);
+}
+
 /**
- * Wipe every demo claim plus child rows that FK into them.
- * Idempotent — safe to call when no demo data exists.
+ * Wipe every demo claim plus every row that references it.
+ * Idempotent — safe to call when no demo data exists. Throws if any demo
+ * claim could not be removed, rather than leaving a half-wiped seed.
  */
 async function wipeDemo() {
   const ids = [];
   for (let i = 0; i < LIFECYCLE_PLANS.length; i++) ids.push(makeClaimId(i));
   ids.push('claim_demo_009'); // the linked 2024 prior claim (CL-DEMO2)
 
-  // Child tables first to avoid FK violations on real Postgres. The
-  // in-memory mock ignores FKs but the order is still correct.
-  const childTables = [
-    'td_periods', 'pd_evaluations', 'settlement_offers',
-    'rfas', 'rfa_evaluations', 'ai_decisions',
-    'pr4_solicitations', 'mmi_evaluations',  // pr4 FKs into mmi — delete first
-    'diaries', 'claim_events', 'reserves', 'reserve_line_items', 'audit_log',
-    'claim_documents',
-  ];
-  for (const id of ids) {
-    try { await supabase.from('claim_links').delete().eq('claim_id_a', id); } catch { /* ignore */ }
-    try { await supabase.from('claim_links').delete().eq('claim_id_b', id); } catch { /* ignore */ }
+  // Claims the legacy-migration demo created (LEG-*), found by external id.
+  const legacyExternalIds = ['LEG-000', 'LEG-001', 'LEG-002', 'LEG-003'];
+  const migrated = [];
+  for (const ext of legacyExternalIds) {
+    const { data } = await supabase.from('claims').select('id').eq('external_claim_id', ext);
+    for (const row of data || []) migrated.push(row.id);
   }
-  try { await supabase.from('supervisor_alerts').delete().eq('recipient_user_id', 'supervisor@homecaretpa.com'); } catch { /* ignore */ }
-  for (const tbl of childTables) {
-    for (const id of ids) {
-      try { await supabase.from(tbl).delete().eq('claim_id', id); } catch { /* table may not exist */ }
+  const allIds = [...new Set([...ids, ...migrated])];
+
+  const problems = [];
+  for (const id of allIds) {
+    await _wipeWhere('claim_links', 'claim_id_a', id, problems);
+    await _wipeWhere('claim_links', 'claim_id_b', id, problems);
+  }
+  await _wipeWhere('supervisor_alerts', 'recipient_user_id', 'supervisor@homecaretpa.com', problems);
+  for (const [tbl, col, parent] of DEMO_RFA_DEPENDENTS) {
+    for (const id of allIds) {
+      const { data: parents } = await supabase.from(parent).select('id').eq('claim_id', id);
+      const parentIds = (parents || []).map(r => r.id);
+      if (!parentIds.length) continue;
+      const { error } = await supabase.from(tbl).delete().in(col, parentIds);
+      if (error && !_isMissingTable(error)) problems.push(`${tbl} (${col} of ${id}): ${error.message}`);
     }
   }
-  for (const id of ids) {
-    try { await supabase.from('claims').delete().eq('id', id); } catch { /* ignore */ }
+  for (const tbl of DEMO_CHILD_TABLES) {
+    for (const id of allIds) await _wipeWhere(tbl, 'claim_id', id, problems);
   }
+  for (const id of allIds) await _wipeWhere('claims', 'id', id, problems);
 
   // ── Legacy integration demo (M_legacy_integration) ────────────────────────
-  // Wipe the mock legacy system tables + any claim rows the migration
-  // service created from them. External IDs are deterministic so this is
-  // safe to re-run.
-  const legacyExternalIds = ['LEG-000', 'LEG-001', 'LEG-002', 'LEG-003'];
+  // The mock legacy system's own tables. External IDs are deterministic so
+  // this is safe to re-run.
   for (const tbl of ['legacy_updates', 'legacy_diaries', 'legacy_documents']) {
-    for (const ext of legacyExternalIds) {
-      try { await supabase.from(tbl).delete().eq('external_claim_id', ext); } catch { /* table may not exist */ }
-    }
+    for (const ext of legacyExternalIds) await _wipeWhere(tbl, 'external_claim_id', ext, problems);
   }
-  for (const ext of legacyExternalIds) {
-    try { await supabase.from('legacy_claims').delete().eq('external_id', ext); } catch { /* */ }
-    try { await supabase.from('claims').delete().eq('external_claim_id', ext); } catch { /* */ }
+  for (const ext of legacyExternalIds) await _wipeWhere('legacy_claims', 'external_id', ext, problems);
+
+  if (problems.length) {
+    logger.error({ msg: 'seedDemo: demo wipe incomplete', problems });
+    throw new Error(`demo wipe incomplete: ${problems.slice(0, 3).join('; ')}${problems.length > 3 ? ` (+${problems.length - 3} more)` : ''}`);
   }
   return ids.length;
 }
@@ -1171,4 +1215,4 @@ function _buildDocuments(claimId, idx, plan) {
 
 module.exports = { PERSONAS, EMPLOYER_BRIGHTCARE, EMPLOYER_WESTSIDE,
   LIFECYCLE_PLANS, isoDaysAgo, dateDaysAgo, makeClaimId, makeClaimNumber,
-  seedDemo, wipeDemo };
+  seedDemo, wipeDemo, DEMO_CHILD_TABLES, DEMO_RFA_DEPENDENTS };

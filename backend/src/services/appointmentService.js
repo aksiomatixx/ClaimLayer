@@ -16,6 +16,7 @@ const db              = require('./db');
 const filehandler     = require('./filehandler');
 const pdfService      = require('./pdfService');
 const logger          = require('../logger');
+const jobQueue        = require('./jobQueue');
 
 // ── Lazy-load to avoid circular dependency ────────────────────────────────────
 function getClaimService() { return require('./claimService'); }
@@ -139,13 +140,25 @@ async function confirmAppointment(appointmentId, confirmationNumber) {
     if (claim.intakeProgress) claim.intakeProgress.appointment_confirmed = true;
   }
 
-  // Async: generate auth letter + trigger DWC-1
-  setImmediate(() => _postConfirmationTasks(appointment, claim).catch(err =>
-    logger.error({ msg: 'appointmentService: post-confirmation tasks failed', err: err.message })
-  ));
+  // Async: generate auth letter + trigger DWC-1 (durable job, ADR-0006)
+  await jobQueue.enqueue({
+    queue: 'appointment.post_confirmation', claimId: appointment.claim_id,
+    payload: { appointmentId },
+    idempotencyKey: `appointment.post_confirmation:${appointmentId}`,
+  });
 
   logger.info({ msg: 'appointmentService: appointment confirmed', appointmentId, confirmationNumber });
   return updated;
+}
+
+// ── _runPostConfirmation (job handler: appointment.post_confirmation) ──────────
+// Reloads the appointment and claim by id — the job may run in another
+// process, after a restart, or on retry.
+async function _runPostConfirmation(appointmentId) {
+  const appointment = await db.appointments.findById(appointmentId);
+  if (!appointment) throw new Error(`Appointment not found: ${appointmentId}`);
+  const claim = await getClaimService().getClaim(appointment.claim_id);
+  return _postConfirmationTasks(appointment, claim);
 }
 
 // ── _postConfirmationTasks ────────────────────────────────────────────────────
@@ -255,4 +268,5 @@ module.exports = {
   logMpnAcknowledgment,
   createAppointment,
   confirmAppointment,
+  _runPostConfirmation,
 };

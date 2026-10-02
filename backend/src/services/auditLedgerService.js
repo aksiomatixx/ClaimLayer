@@ -22,6 +22,10 @@
  * record could not be written does not proceed. Best-effort appends log and
  * return null — used only by legacy dual-write paths that are not yet
  * transactional (see ADR-0003, "Interim").
+ *
+ * Transactional appends (ADR-0006): `append(entry, { tx })` writes through
+ * the caller's unit of work, so the ledger entry commits or rolls back with
+ * the change it records. A failure always throws (it aborts the unit).
  */
 
 const { supabase }   = require('./supabase');
@@ -75,14 +79,26 @@ function buildEntry({ actor, action, entity, claimId, payload, evidence, occurre
  * Append one entry. Returns the stored row (with the database-assigned seq
  * and hash), or null when a best-effort append failed.
  */
-async function append(entry, { required = false } = {}) {
+async function append(entry, { required = false, tx = null } = {}) {
   let row;
   try {
-    row = buildEntry(entry);
+    row = buildEntry(tx ? { ...entry, tenantId: entry?.tenantId || entry?.actor?.tenantId || tx.tenantId } : entry);
+    if (tx && tx.tenantId && row.tenant_id !== tx.tenantId) {
+      throw new Error(`audit ledger tenant ${row.tenant_id} does not match the transaction tenant ${tx.tenantId}`);
+    }
   } catch (err) {
     // A malformed entry is a programming error — always loud.
     logger.error({ msg: 'auditLedger: invalid entry', action: entry?.action, err: err.message });
     throw err;
+  }
+
+  if (tx) {
+    try {
+      return await tx.insert('audit_ledger', row);
+    } catch (err) {
+      logger.error({ msg: 'auditLedger: transactional append failed', action: row.action, claimId: row.claim_id, err: err.message });
+      throw new Error(`Audit ledger append failed for ${row.action}: ${err.message}`);
+    }
   }
 
   const { data, error } = await supabase.from('audit_ledger').insert(row).select().single();

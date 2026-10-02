@@ -27,6 +27,11 @@ const { supabase }        = require('./supabase');
 const config = require('../config');
 const enlyte              = require('./enlyteService');
 const logger              = require('../logger');
+const jobQueue            = require('./jobQueue');
+const auditLedger         = require('./auditLedgerService');
+const { runInTransaction, isTransactional } = require('../db/unitOfWork');
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const { addBusinessDays } = require('../utils/businessDays');
 
 // ── M22A WCIS SROI 4P hook — DEFERRED ────────────────────────────
@@ -50,20 +55,6 @@ const { addBusinessDays } = require('../utils/businessDays');
 // Lazy require to break circular dependency: rfaService ↔ claimService
 function getClaimService() {
   return require('./claimService');
-}
-
-// Lazy require to avoid loading noticeService before it is fully initialised
-function _getNoticeService() {
-  return require('./noticeService');
-}
-
-// Fire-and-forget notice helper — logs errors, never throws
-function _fireNotice(fn, ...args) {
-  setImmediate(() => {
-    fn(...args).catch(err =>
-      logger.error({ msg: 'rfaService: notice trigger failed', fn: fn.name, err: err.message }),
-    );
-  });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -152,26 +143,6 @@ async function _seedRFADiary(claimId, rfaId, deadline) {
   const { error } = await supabase.from('diaries').insert(row);
   if (error) {
     logger.error({ msg: 'rfaService._seedRFADiary: insert failed', error: error.message, rfaId });
-  }
-}
-
-async function _completeRFADiary(claimId, rfaId) {
-  const now = new Date().toISOString();
-  const { data: diaries } = await supabase
-    .from('diaries')
-    .select('id')
-    .eq('claim_id', claimId)
-    .eq('rfa_id', rfaId)
-    .eq('diary_type', 'RFA_RESPONSE_DUE')
-    .eq('status', 'open');
-
-  if (!diaries || diaries.length === 0) return;
-
-  for (const d of diaries) {
-    await supabase
-      .from('diaries')
-      .update({ status: 'completed', completed_at: now, completed_by: 'system', updated_at: now })
-      .eq('id', d.id);
   }
 }
 
@@ -282,7 +253,7 @@ async function _deferRFA(rfaId, claimId, reason) {
 
 /**
  * Persist a new RFA, seed the statutory response-due diary, then trigger
- * async AI evaluation (via setImmediate so the HTTP response returns first).
+ * async AI evaluation (a durable job, so the HTTP response returns first).
  */
 async function createRFA(claimId, rfaData, receivedVia) {
   const now       = new Date().toISOString();
@@ -337,9 +308,10 @@ async function createRFA(claimId, rfaData, receivedVia) {
 
   logger.info({ msg: 'rfaService.createRFA: created', rfaId, claimId, urgency, deadline });
 
-  // Trigger async AI evaluation — runs after HTTP response is sent
-  setImmediate(() => evaluateRFA(rfaId).catch(err =>
-    logger.error({ msg: 'RFA evaluation requires retry', rfaId, err: err.message })));
+  // Async AI evaluation — durable job, runs after the HTTP response is sent
+  // and is retried if it fails (ADR-0006).
+  await jobQueue.enqueue({ queue: 'rfa.evaluate', claimId, payload: { rfaId },
+                           idempotencyKey: `rfa.evaluate:${rfaId}` });
 
   return inserted;
 }
@@ -426,50 +398,99 @@ async function evaluateRFA(rfaId) {
 }
 
 /**
- * Adjuster manually approves an RFA that was queued for review.
+ * Adjuster approves an RFA — directly (POST /rfas/:id/approve) or by
+ * approving an action request (the medical.rfa.approve executor, which
+ * passes its transaction as opts.tx and sets requireUndecided).
+ *
+ * One unit of work (ADR-0006): the RFA decision, its claim event, the
+ * RFA-scoped diary completion, the audit-ledger entry and the
+ * determination-letter job commit together, or not at all.
+ *
+ * opts: { tx, actor, requireUndecided, actionRequestId }
+ * Returns the RFA (null when it does not exist).
  */
-async function adjusterApproveRFA(rfaId, adjusterEmail) {
-  const now = new Date().toISOString();
+async function adjusterApproveRFA(rfaId, adjusterEmail, opts = {}) {
+  // rfas.id is a UUID: a malformed id cannot exist, and would otherwise
+  // abort the transaction with a type error (a 500 instead of a 404).
+  if (isTransactional() && !UUID_RE.test(String(rfaId))) return null;
+  const work = (tx) => _approveRFAInTx(tx, rfaId, adjusterEmail, opts);
+  const approved = opts.tx
+    ? await work(opts.tx)
+    : await runInTransaction({
+      tenantId: opts.actor?.tenantId, actorId: opts.actor?.id || adjusterEmail, label: 'rfa.approve',
+    }, work);
+  if (!approved) return null;
 
-  const { data: rfa } = await supabase.from('rfas').select('*').eq('id', rfaId).single();
+  logger.info({ msg: 'rfaService.adjusterApproveRFA: approved', rfaId, adjusterEmail });
+  // Inside a caller's transaction the committed view is not visible yet.
+  return opts.tx ? approved : getRFA(rfaId);
+}
+
+async function _approveRFAInTx(tx, rfaId, adjusterEmail, opts) {
+  const rfa = await tx.selectOne('rfas', { id: rfaId }, { forUpdate: true });
   if (!rfa) return null;
+  if (opts.requireUndecided && rfa.decision && rfa.decision !== 'pending_adjuster_review') {
+    const { PreconditionError } = require('./actionExecutors');
+    throw new PreconditionError(`RFA is already decided (${rfa.decision})`);
+  }
+  // TODO(domain validation): a DIRECT approval of an RFA that is already
+  // decided (e.g. routed to URO) is not refused here — whether it should be
+  // is a utilization-review rule to confirm, not one to invent.
 
-  await supabase.from('rfas').update({
+  const now = new Date().toISOString();
+  const actor = opts.actor || { type: 'human', id: adjusterEmail || 'unattributed', role: null };
+
+  const [updated] = await tx.update('rfas', {
     decision:         'adjuster_approved',
     decision_made_at: now,
     decision_made_by: adjusterEmail,
     updated_at:       now,
-  }).eq('id', rfaId);
+  }, { id: rfaId });
 
-  await supabase.from('claim_events').insert({
+  await tx.insert('claim_events', {
     claim_id:  rfa.claim_id,
     type:      'rfa_approved',
     timestamp: now,
     data:      { rfaId, decision: 'adjuster_approved', decidedBy: adjusterEmail },
   });
 
-  await _completeRFADiary(rfa.claim_id, rfaId);
-  _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+  // Close only this RFA's response diary (diaries.rfa_id scope).
+  await tx.update('diaries',
+    { status: 'completed', completed_at: now, completed_by: 'system', updated_at: now },
+    { claim_id: rfa.claim_id, rfa_id: rfaId, diary_type: 'RFA_RESPONSE_DUE', status: 'open' });
 
-  // A direct approval makes any queued agent proposal for this RFA moot.
-  await require('./approvalService').supersedePending({
-    actionType: 'medical.rfa.approve',
-    matches:    (proposal) => proposal.rfa_id === rfaId,
-    actor:      { type: 'human', id: adjusterEmail || 'unattributed', role: null },
-    reason:     'rfa_decided_directly',
+  await auditLedger.append({
+    actor,
+    action:   'rfa.approved',
+    entity:   { type: 'rfa', id: rfaId },
+    claimId:  rfa.claim_id,
+    payload:  { decision: 'adjuster_approved', path: opts.actionRequestId ? 'action_request' : 'direct' },
+    evidence: opts.actionRequestId ? [{ type: 'action_request', id: opts.actionRequestId }] : [],
+  }, { tx });
+
+  // The determination letter is generated once the approval has committed.
+  await jobQueue.enqueue({ queue: 'notice.rfa_letter', claimId: rfa.claim_id, payload: { rfaId },
+                           idempotencyKey: `notice.rfa_letter:${rfaId}` }, { tx });
+
+  tx.afterCommit(async () => {
+    // A direct approval makes any queued agent proposal for this RFA moot.
+    await require('./approvalService').supersedePending({
+      actionType: 'medical.rfa.approve',
+      matches:    (proposal) => proposal.rfa_id === rfaId,
+      actor,
+      reason:     'rfa_decided_directly',
+    });
+    // Link the adjuster's action back to the most recent ai_decisions row
+    // so the audit trail shows model rec → human override pairing.
+    try {
+      await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
+        human_reviewer_id: null, human_decision: `adjuster_approved by ${adjusterEmail}`,
+        human_decision_by: adjusterEmail,
+      });
+    } catch { /* non-fatal */ }
   });
 
-  // Link the adjuster's action back to the most recent ai_decisions
-  // row so the audit trail shows model rec → human override pairing.
-  try {
-    await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
-      human_reviewer_id: null, human_decision: `adjuster_approved by ${adjusterEmail}`,
-      human_decision_by: adjusterEmail,
-    });
-  } catch { /* non-fatal */ }
-  logger.info({ msg: 'rfaService.adjusterApproveRFA: approved', rfaId, adjusterEmail });
-
-  return getRFA(rfaId);
+  return updated || { ...rfa, decision: 'adjuster_approved', decision_made_by: adjusterEmail };
 }
 
 /**

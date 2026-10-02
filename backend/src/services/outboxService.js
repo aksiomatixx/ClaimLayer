@@ -18,9 +18,11 @@
  *                INTEGRATION_SYNC_FAILED diary, never silently dropped
  *
  * Retries are idempotent on the external side by construction: the
- * supported operations (FileHandler add_note / complete_diary) repeat
- * the same payload; a duplicated note in the ledger is visible and
- * harmless, a lost decision note is neither.
+ * supported operations (FileHandler add_note / complete_diary /
+ * set_reserves) repeat the same payload with the same idempotency key;
+ * set_reserves sets absolute amounts, so a repeat converges; a duplicated
+ * note in the ledger is visible and harmless, a lost decision note is
+ * neither.
  */
 
 const crypto       = require('crypto');
@@ -42,8 +44,12 @@ function _id() {
  * complete with its external effects silently lost.
  * Each entry: { target, operation, claim_id, payload }.
  * Returns the created rows (so a compensating rollback can remove them).
+ *
+ * With { tx } (ADR-0006) the rows are written in the caller's transaction:
+ * they exist if and only if the change that needs them committed, so no
+ * compensating removal is needed. Dispatch after commit (tx.afterCommit).
  */
-async function enqueue(entries) {
+async function enqueue(entries, { tx = null } = {}) {
   const now = new Date().toISOString();
   const rows = entries.map(e => ({
     id: _id(),
@@ -59,6 +65,10 @@ async function enqueue(entries) {
     updated_at: now,
   }));
   if (rows.length === 0) return [];
+  if (tx) {
+    await tx.insert('integration_outbox', rows);
+    return rows;
+  }
   const { error } = await supabase.from('integration_outbox').insert(rows);
   if (error) throw new Error(`outbox: enqueue failed — ${error.message}`);
   return rows;
@@ -87,6 +97,11 @@ async function _execute(row) {
     }
     if (row.operation === 'complete_diary') {
       return filehandler.completeDiary(p.fh_claim_id, p.fh_diary_id, p.completion_note, p.completed_by || 'ADJUSTER', opts);
+    }
+    if (row.operation === 'set_reserves') {
+      return filehandler.setReserves(p.fh_claim_id,
+        { medical: p.medical, indemnity: p.indemnity, expense: p.expense, reason: p.reason },
+        p.set_by || 'ADJUSTER', p.approved_by, opts);
     }
   }
   throw new Error(`outbox: unknown target/operation ${row.target}/${row.operation}`);

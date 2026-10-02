@@ -46,6 +46,36 @@ const config = {
     anonKey:        process.env.SUPABASE_ANON_KEY,
   },
 
+  // Direct Postgres connection for transactional writes (ADR-0006).
+  // Required in production: consequential writes must commit atomically
+  // with their audit-ledger entries and queued jobs. Without it (dev /
+  // DB-less demo / the in-memory test suite) the unit of work runs in a
+  // non-transactional compatibility mode over supabase-js.
+  database: {
+    url:              process.env.DATABASE_URL || null,
+    // 'disable' | 'require' (TLS, no CA check) | 'verify' (TLS + CA check,
+    // DATABASE_SSL_CA or system roots). Default: disable for localhost,
+    // require otherwise.
+    ssl:              process.env.DATABASE_SSL || null,
+    sslCa:            process.env.DATABASE_SSL_CA || null,
+    poolMax:          parseInt(process.env.DATABASE_POOL_MAX || '10', 10),
+    statementTimeoutMs: parseInt(process.env.DATABASE_STATEMENT_TIMEOUT_MS || '15000', 10),
+  },
+
+  jobs: {
+    // How long a claimed job is leased before another worker may reclaim it.
+    // Handlers that can run longer than this must be safe to run twice.
+    leaseSeconds: parseInt(process.env.JOBS_LEASE_SECONDS || '300', 10),
+    pollIntervalMs: parseInt(process.env.JOBS_POLL_INTERVAL_MS || '2000', 10),
+    // After commit, the API process tries a newly enqueued job at once
+    // (low latency). Workers still own retries and recovery.
+    kick: process.env.JOBS_KICK !== 'false',
+    // Run a poller inside the API process (retries, expired leases). Set
+    // 'false' when dedicated workers (npm run worker) are deployed;
+    // running both is safe (SKIP LOCKED), just redundant.
+    inProcessPoller: process.env.JOBS_IN_PROCESS_POLLER !== 'false',
+  },
+
   tenancy: {
     // The well-known default tenant created by the multi-tenancy foundation
     // migration. Sessions that aren't yet tied to a provisioned tenant (dev
@@ -110,6 +140,11 @@ const required = [
   ['ADP_CLIENT_ID',        config.adp.clientId],
   ['ADP_CLIENT_SECRET',    config.adp.clientSecret],
 ];
+
+// Production must run the transactional path (ADR-0006).
+if (config.nodeEnv === 'production') {
+  required.push(['DATABASE_URL', config.database.url]);
+}
 
 if (config.nodeEnv !== 'test') {
   const missing = required.filter(([, v]) => !v).map(([k]) => k);

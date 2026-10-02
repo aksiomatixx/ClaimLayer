@@ -11,7 +11,7 @@
 const express  = require('express');
 const { body, param, validationResult } = require('express-validator');
 const db       = require('../services/db');
-const filehandler = require('../services/filehandler');
+const jobQueue = require('../services/jobQueue');
 const logger   = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { requireClaimScope } = require('../middleware/claimAccess');
@@ -112,25 +112,15 @@ router.post(
       const doc = await db.documents.findById(req.params.id);
       if (!doc) return res.status(404).json({ error: 'Document not found' });
 
-      // Async: push to FileHandler
-      setImmediate(async () => {
-        try {
-          // In M3 this reads from Supabase Storage; in M2 we use a placeholder buffer
-          const placeholder = Buffer.from(`[Binary content — ${doc.mime_type} — ${doc.storage_path}]`);
-          await filehandler.attachDocument(
-            null, // claimId — look up from doc.claim_id's filehandlerId in M3
-            placeholder,
-            doc.doc_type.toUpperCase(),
-            `${doc.doc_type} — ${doc.file_name || doc.storage_path}`
-          );
-          await db.documents.update(doc.id, { filehandler_pushed: true });
-          logger.info({ msg: 'documents: FH push complete', docId: doc.id });
-        } catch (err) {
-          logger.error({ msg: 'documents: FH push failed', docId: doc.id, err: err.message });
-        }
+      await db.documents.update(doc.id, { upload_confirmed_at: new Date().toISOString() });
+
+      // Async: push to FileHandler — durable job, retried on failure (ADR-0006)
+      await jobQueue.enqueue({
+        queue: 'documents.filehandler_push', claimId: doc.claim_id,
+        payload: { documentId: doc.id },
+        idempotencyKey: `documents.filehandler_push:${doc.id}`,
       });
 
-      await db.documents.update(doc.id, { upload_confirmed_at: new Date().toISOString() });
       res.json({ status: 'queued', document_id: doc.id });
     } catch (err) {
       res.status(500).json({ error: err.message });

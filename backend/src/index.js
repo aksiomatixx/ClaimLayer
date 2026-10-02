@@ -152,6 +152,13 @@ if (require.main === module) {
       app.listen(config.port, () => {
         logger.info({ msg: 'HomeCare TPA backend listening', port: config.port, env: config.nodeEnv });
       });
+      // Durable job queue (ADR-0006): retries, expired leases and scheduled
+      // jobs need a poller. Single-process deployments get one here; set
+      // JOBS_IN_PROCESS_POLLER=false when dedicated workers run.
+      if (require('./db/unitOfWork').isTransactional() && config.jobs.inProcessPoller) {
+        const poller = require('./services/jobQueue').startPoller();
+        logger.info({ msg: 'job queue: in-process poller started', workerId: poller.workerId });
+      }
     })
     .catch(err => {
       logger.error({ msg: 'Supabase connection check failed — refusing to start', err: err.message });

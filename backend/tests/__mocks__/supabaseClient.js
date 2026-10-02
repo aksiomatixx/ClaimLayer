@@ -10,6 +10,7 @@
  *
  * Supports:
  *   supabase.from(table).select(cols).eq(col,val).[single()|await]
+ *     filters: eq · neq · is · lt · in · or('a.eq.x,b.is.null')
  *   supabase.from(table).insert(data).[select().[single()]|await]
  *   supabase.from(table).update(data).eq(col,val).[select().[single()]|await]
  *   supabase.from(table).upsert(data, {onConflict}).[select().[single()]|await]
@@ -240,6 +241,7 @@ class QueryBuilder {
   neq(col, val) { this._filters.push({ col, val, op: 'neq' }); return this; }
   is(col, val) { this._filters.push({ col, val, op: 'is' }); return this; }
   lt(col, val) { this._filters.push({ col, val, op: 'lt' }); return this; }
+  in(col, vals) { this._filters.push({ col, val: vals, op: 'in' }); return this; }
 
   // PostgREST .or('a.eq.x,b.is.true') — disjunction of simple predicates.
   or(expr) { this._filters.push({ op: 'or', expr: String(expr) }); return this; }
@@ -280,6 +282,7 @@ class QueryBuilder {
       // PostgREST semantics: NULL comparisons require .is()
       if (f.op === 'is')  return f.val === null ? row[f.col] == null : row[f.col] === f.val;
       if (f.op === 'lt')  return row[f.col] != null && row[f.col] < f.val;
+      if (f.op === 'in')  return Array.isArray(f.val) && f.val.includes(row[f.col]);
       if (f.op === 'or') {
         return f.expr.split(',').some(term => {
           const [col, op, ...rest] = term.split('.');
