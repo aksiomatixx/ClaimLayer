@@ -98,7 +98,7 @@ describe('claim creation checks local persistence before external effects', () =
     const spy = injectTableFailure('claims');
     try {
       await expect(claimService.createClaim(FROI, 'emp-1'))
-        .rejects.toThrow(/claim insert failed.*injected claims outage/);
+        .rejects.toThrow(/insert claims: injected claims outage/);
       expect(mockFhCreateClaim).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
@@ -106,14 +106,15 @@ describe('claim creation checks local persistence before external effects', () =
     }
   });
 
-  it('an initial-events failure compensates the claim row and never reaches FileHandler', async () => {
+  // That the claim row itself rolls back is a transaction property, proven
+  // on real PostgreSQL (tests/pg/claimLifecycle.pg.test.js); this in-memory
+  // suite runs the non-atomic compatibility mode (ADR-0006).
+  it('an initial-events failure fails creation and never reaches FileHandler', async () => {
     const spy = injectTableFailure('claim_events');
     try {
       await expect(claimService.createClaim(FROI, 'emp-1'))
-        .rejects.toThrow(/initial events insert failed/);
+        .rejects.toThrow(/insert claim_events: injected claim_events outage/);
       expect(mockFhCreateClaim).not.toHaveBeenCalled();
-      const { data: claims } = await supabase.from('claims').select('*');
-      expect(claims).toHaveLength(0); // no half-created claim
     } finally {
       spy.mockRestore();
       await flush();

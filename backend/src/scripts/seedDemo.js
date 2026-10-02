@@ -25,6 +25,7 @@
  */
 
 const { supabase } = require('../services/supabase');
+const { runInTransaction, isTransactional } = require('../db/unitOfWork');
 const config = require('../config');
 const logger       = require('../logger');
 
@@ -68,6 +69,42 @@ const DEMO_CHILD_TABLES = [
 // that parent's ids before the parent: [table, column, parent table].
 const DEMO_RFA_DEPENDENTS = [['rfa_evaluations', 'rfa_id', 'rfas']];
 
+async function _wipeDemoInTransaction(ids, legacyExternalIds) {
+  return runInTransaction({ actorId: 'system:demo-reset', label: 'demo.wipe' }, async (tx) => {
+    await tx.query(`SELECT set_config('app.history_purge', 'demo', true)`);
+    const migrated = await tx.query(
+      'SELECT id FROM claims WHERE external_claim_id = ANY($1)', [legacyExternalIds]);
+    const all = [...new Set([...ids, ...migrated.map(r => r.id)])];
+
+    const real = await tx.query(
+      `SELECT id FROM claims WHERE id = ANY($1) AND coalesce(metadata ->> 'demo', '') <> 'true'`, [all]);
+    if (real.length) {
+      throw new Error(`refusing to wipe claims not flagged as demo data: ${real.map(r => r.id).join(', ')}`);
+    }
+
+    const tables = new Set((await tx.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`)).map(r => r.table_name));
+    const del = async (table, sql, params) => {
+      if (!IDENT.test(table)) throw new Error(`invalid table ${table}`);
+      if (tables.has(table)) await tx.query(sql, params);
+    };
+
+    await del('claim_links', 'DELETE FROM claim_links WHERE claim_id_a = ANY($1) OR claim_id_b = ANY($1)', [all]);
+    await del('supervisor_alerts', 'DELETE FROM supervisor_alerts WHERE recipient_user_id = $1', ['supervisor@homecaretpa.com']);
+    for (const [tbl, col, parent] of DEMO_RFA_DEPENDENTS) {
+      if (!IDENT.test(col) || !IDENT.test(parent)) throw new Error('invalid dependent spec');
+      await del(tbl, `DELETE FROM ${tbl} WHERE ${col} IN (SELECT id FROM ${parent} WHERE claim_id = ANY($1))`, [all]);
+    }
+    for (const tbl of DEMO_CHILD_TABLES) await del(tbl, `DELETE FROM ${tbl} WHERE claim_id = ANY($1)`, [all]);
+    await del('claims', 'DELETE FROM claims WHERE id = ANY($1)', [all]);
+
+    for (const tbl of ['legacy_updates', 'legacy_diaries', 'legacy_documents']) {
+      await del(tbl, `DELETE FROM ${tbl} WHERE external_claim_id = ANY($1)`, [legacyExternalIds]);
+    }
+    await del('legacy_claims', 'DELETE FROM legacy_claims WHERE external_id = ANY($1)', [legacyExternalIds]);
+  });
+}
+
 // A table an older schema doesn't have is not an error for a demo reset.
 function _isMissingTable(error) {
   return error.code === '42P01' || error.code === 'PGRST205'
@@ -79,10 +116,17 @@ async function _wipeWhere(table, col, val, problems) {
   if (error && !_isMissingTable(error)) problems.push(`${table} (${col}=${val}): ${error.message}`);
 }
 
+const IDENT = /^[a-z_][a-z0-9_]*$/;
+
 /**
  * Wipe every demo claim plus every row that references it.
  * Idempotent — safe to call when no demo data exists. Throws if any demo
  * claim could not be removed, rather than leaving a half-wiped seed.
+ *
+ * On a real database (DATABASE_URL) the wipe is ONE transaction that sets
+ * app.history_purge = 'demo' — the only way claim_events (append-only,
+ * migration 20261003000001) lets history go, and only for claims flagged
+ * metadata.demo. It refuses outright to touch any claim not so flagged.
  */
 async function wipeDemo() {
   const ids = [];
@@ -91,6 +135,11 @@ async function wipeDemo() {
 
   // Claims the legacy-migration demo created (LEG-*), found by external id.
   const legacyExternalIds = ['LEG-000', 'LEG-001', 'LEG-002', 'LEG-003'];
+
+  if (isTransactional()) {
+    await _wipeDemoInTransaction(ids, legacyExternalIds);
+    return ids.length;
+  }
   const migrated = [];
   for (const ext of legacyExternalIds) {
     const { data } = await supabase.from('claims').select('id').eq('external_claim_id', ext);

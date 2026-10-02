@@ -33,6 +33,10 @@ const { runInTransaction } = require('../db/unitOfWork');
 const { addBusinessDays }  = require('../utils/businessDays');
 const { toCents }          = require('../utils/money');
 
+// A FileHandler create that fails inline is retried by a durable job this
+// long after the claim commits (the job is a no-op when inline succeeded).
+const FH_RETRY_DELAY_MS = 5 * 60 * 1000;
+
 // ── Sequence counter (fallback when RPC is unavailable in tests) ──────────────
 let _claimSeq = 42;
 
@@ -160,36 +164,6 @@ async function createClaim(froiData, employerId) {
     throw new Error(`ADP pull failed — cannot create claim without employee data: ${err.message}`);
   }
 
-  // ── Step 2: Upsert the employee record ─────────────────────────────────────
-  const { data: empRow, error: empErr } = await supabase
-    .from('employees')
-    .upsert(
-      {
-        adp_employee_id:     froiData.adpEmployeeId,
-        adp_associate_oid:   employee.associateOID,
-        first_name:          employee.firstName,
-        last_name:           employee.lastName,
-        dob:                 employee.dob,
-        address_line1:       employee.address?.line1,
-        address_state:       employee.address?.state,
-        address_zip:         employee.address?.zip,
-        phone:               employee.phone,
-        job_title:           employee.jobTitle,
-        hire_date:           employee.hireDate,
-        aww:                 employee.aww,
-        td_rate:             employee.tdRate,
-        weeks_calculated:    employee.weeksCalculated,
-        adp_data_last_pulled: now,
-        updated_at:          now,
-      },
-      { onConflict: 'adp_employee_id' }
-    )
-    .select()
-    .single();
-  if (empErr) {
-    throw new Error(`createClaim: employee upsert failed — ${empErr.message}`);
-  }
-
   // Build the employee snapshot stored inside the claim row (JSONB)
   const employeeSnapshot = {
     adpEmployeeId: froiData.adpEmployeeId,
@@ -203,149 +177,145 @@ async function createClaim(froiData, employerId) {
     hireDate:      employee.hireDate,
   };
 
-  // ── Step 3: Insert the claim row ───────────────────────────────────────────
-  const claimRow = {
-    id:               claimId,
-    claim_number:     claimNumber,
-    employer_id:      employerId,
-    employee_id:      empRow?.id || null,
-    status:           'new_claim',
-    employee:         employeeSnapshot,
-    aww:              employee.aww,
-    td_rate:          employee.tdRate,
-    weeks_calculated: employee.weeksCalculated,
-    date_of_injury:   froiData.dateOfInjury,
-    policy_id:        policyId,
-    body_part:        froiData.bodyPart,
-    injury_type:      froiData.injuryType,
-    injury_description: froiData.injuryDescription,
-    employer_name:    froiData.employerName,
-    filed_at:             now,
-    filehandler_id:       null,
-    ai_analysis:          null,
-    priority:             null,
-    motor_vehicle_fields: froiData.motorVehicleFields || null,
-    employer_contests:    froiData.employerContests   || false,
-    subrogation_status:   null,
-    created_at:           now,
-    updated_at:           now,
-  };
+  // ── Steps 2–9: one unit of work (ADR-0006) ─────────────────────────────────
+  // The employee record, the claim, its opening events, the statutory
+  // diaries, the ledger entry and every follow-up job commit together —
+  // or nothing does. No external system is called inside the unit.
+  await runInTransaction({ actorId: 'system:intake', label: 'claim.create' }, async (tx) => {
+    const empRow = await tx.upsert('employees', {
+      adp_employee_id:     froiData.adpEmployeeId,
+      adp_associate_oid:   employee.associateOID,
+      first_name:          employee.firstName,
+      last_name:           employee.lastName,
+      dob:                 employee.dob,
+      address_line1:       employee.address?.line1,
+      address_state:       employee.address?.state,
+      address_zip:         employee.address?.zip,
+      phone:               employee.phone,
+      job_title:           employee.jobTitle,
+      hire_date:           employee.hireDate,
+      aww:                 employee.aww,
+      td_rate:             employee.tdRate,
+      weeks_calculated:    employee.weeksCalculated,
+      adp_data_last_pulled: now,
+      updated_at:          now,
+    }, { onConflict: 'adp_employee_id' });
 
-  // The local claim record must be durably stored BEFORE any external
-  // side effect (FileHandler create, WCIS enqueue, notices) fires — an
-  // unchecked insert here could create a ledger claim with no local
-  // system-of-record row behind it.
-  const { error: claimInsErr } = await supabase.from('claims').insert(claimRow);
-  if (claimInsErr) {
-    throw new Error(`createClaim: claim insert failed — ${claimInsErr.message}`);
-  }
-
-  // ── Step 4: Insert initial events ──────────────────────────────────────────
-  const initEvents = [
-    {
-      claim_id:  claimId,
-      type:      'claim_created',
-      timestamp: now,
-      data:      { source: 'froi', employerId, adpEmployeeId: froiData.adpEmployeeId },
-    },
-    {
-      claim_id:  claimId,
-      type:      'adp_pull_complete',
-      timestamp: new Date().toISOString(),
-      data:      { aww: employee.aww, tdRate: employee.tdRate, weeks: employee.weeksCalculated },
-    },
-  ];
-  const { error: evInsErr } = await supabase.from('claim_events').insert(initEvents);
-  if (evInsErr) {
-    // Compensate: no external side effect has fired yet, so remove the
-    // half-created claim rather than leaving it without its event log.
-    await supabase.from('claims').delete().eq('id', claimId);
-    throw new Error(`createClaim: initial events insert failed — ${evInsErr.message}`);
-  }
-
-  // ── Step 5: FileHandler sync ────────────────────────────────────────────────
-  let filehandlerId = null;
-  try {
-    const fhResult = await filehandler.createClaim({
-      claimNumber,
-      firstName:    employee.firstName,
-      lastName:     employee.lastName,
-      dob:          employee.dob,
-      employerName: froiData.employerName,
-      dateOfInjury: froiData.dateOfInjury,
-      bodyPart:     froiData.bodyPart,
-      injuryType:   froiData.injuryType,
+    await tx.insert('claims', {
+      id:               claimId,
+      claim_number:     claimNumber,
+      employer_id:      employerId,
+      employee_id:      empRow?.id || null,
+      status:           'new_claim',
+      employee:         employeeSnapshot,
+      aww:              employee.aww,
+      td_rate:          employee.tdRate,
+      weeks_calculated: employee.weeksCalculated,
+      date_of_injury:   froiData.dateOfInjury,
+      policy_id:        policyId,
+      body_part:        froiData.bodyPart,
+      injury_type:      froiData.injuryType,
+      injury_description: froiData.injuryDescription,
+      employer_name:    froiData.employerName,
+      filed_at:             now,
+      filehandler_id:       null,
+      ai_analysis:          null,
+      priority:             null,
+      motor_vehicle_fields: froiData.motorVehicleFields || null,
+      employer_contests:    froiData.employerContests   || false,
+      // Motor-vehicle injuries open a subrogation evaluation.
+      subrogation_status:   froiData.injuryType === 'Motor Vehicle' ? 'under_evaluation' : null,
+      created_at:           now,
+      updated_at:           now,
     });
 
-    filehandlerId = fhResult.claimId;
+    await tx.insert('claim_events', [
+      {
+        claim_id:  claimId,
+        type:      'claim_created',
+        timestamp: now,
+        data:      { source: 'froi', employerId, adpEmployeeId: froiData.adpEmployeeId },
+      },
+      {
+        claim_id:  claimId,
+        type:      'adp_pull_complete',
+        timestamp: now,
+        data:      { aww: employee.aww, tdRate: employee.tdRate, weeks: employee.weeksCalculated },
+      },
+    ]);
 
-    await supabase.from('claims')
-      .update({ filehandler_id: fhResult.claimId, updated_at: new Date().toISOString() })
-      .eq('id', claimId);
+    // UNCONDITIONALLY: the statutory clocks (14-day compensability
+    // decision, DWC-1, TD setup) run from claim-form receipt whether or
+    // not the system-of-record sync succeeds. A FileHandler outage must
+    // never leave a claim with no decision path on the queue.
+    await _seedInitialDiaries(tx, claimId, froiData.dateOfInjury, now, employee.aww, employee.tdRate);
 
-    await supabase.from('claim_events').insert({
-      claim_id:  claimId,
-      type:      'filehandler_claim_created',
-      timestamp: new Date().toISOString(),
-      data:      { fhClaimId: fhResult.claimId, fhStatus: fhResult.status },
-    });
+    await auditLedger.append({
+      actor:    { type: 'system', id: 'system:intake', role: 'system' },
+      action:   'claim.created',
+      entity:   { type: 'claim', id: claimId },
+      claimId,
+      payload:  {
+        claim_number: claimNumber, employer_id: employerId, date_of_injury: froiData.dateOfInjury,
+        source: 'froi', policy_id: policyId,
+      },
+    }, { tx });
 
-    logger.info({ msg: 'createClaim: FileHandler sync OK', claimNumber, fhClaimId: fhResult.claimId });
-  } catch (err) {
-    logger.error({ msg: 'createClaim: FileHandler sync FAILED', err: err.message, claimNumber });
-    await supabase.from('claim_events').insert({
-      claim_id:  claimId,
-      type:      'filehandler_sync_failed',
-      timestamp: new Date().toISOString(),
-      data:      { error: err.message, willRetry: true },
-    });
-  }
-
-  // ── Step 6: Seed initial statutory diaries ─────────────────────────────────
-  // UNCONDITIONALLY: the statutory clocks (14-day compensability
-  // decision, DWC-1, TD setup) run from claim-form receipt whether or
-  // not the system-of-record sync succeeded. A FileHandler outage must
-  // never leave a claim with no decision path on the queue.
-  await _seedInitialDiaries(claimId, froiData.dateOfInjury, now, employee.aww, employee.tdRate);
-
-  // ── Step 6.5: Motor vehicle subrogation flag ─────────────────────────────────
-  if (froiData.injuryType === 'Motor Vehicle') {
-    await supabase
-      .from('claims')
-      .update({ subrogation_status: 'under_evaluation' })
-      .eq('id', claimId);
-  }
-
-  // ── Steps 7–9: background work — durable jobs (ADR-0006) ────────────────
-  // Run after the HTTP response returns; retried with backoff and
-  // dead-lettered to a diary if they keep failing.
-  //   7. AI compensability analysis
-  //   8. DWC-7 notice
-  //   9. WCIS FROI 00 (M22A claim-creation hook). wcisTriggerService handles
-  //      all gating (wcis_enabled, DOI cutoff, duplicate detection).
-  await jobQueue.enqueue({ queue: 'claim.analysis', payload: { claimId }, claimId,
-                           idempotencyKey: `claim.analysis:${claimId}:created` });
-  await jobQueue.enqueue({ queue: 'notice.dwc7', payload: { claimId }, claimId,
-                           idempotencyKey: `notice.dwc7:${claimId}` });
-  await jobQueue.enqueue({
-    queue: 'wcis.trigger', claimId,
-    idempotencyKey: `wcis.trigger:${claimId}:claim_created`,
-    payload: {
-      trigger: {
-        claim_id:         claimId,
-        trigger_event:    'claim_created',
-        source_service:   'claimService',
-        source_record_id: null,
-        event_date:       froiData.dateOfInjury,
-        payload_context: {
-          doi:         froiData.dateOfInjury,
-          employer_id: employerId,
-          employee_id: froiData.employeeId || null,
-          source:      'intake',
+    // Background work (durable jobs, run after commit):
+    //   AI compensability analysis · DWC-7 notice · WCIS FROI 00 (M22A
+    //   claim-creation hook; wcisTriggerService gates and dedupes) ·
+    //   a FileHandler create retry, which is a no-op when the inline
+    //   attempt below succeeds.
+    await jobQueue.enqueue({ queue: 'claim.analysis', payload: { claimId }, claimId,
+                             idempotencyKey: `claim.analysis:${claimId}:created` }, { tx });
+    await jobQueue.enqueue({ queue: 'notice.dwc7', payload: { claimId }, claimId,
+                             idempotencyKey: `notice.dwc7:${claimId}` }, { tx });
+    await jobQueue.enqueue({
+      queue: 'wcis.trigger', claimId,
+      idempotencyKey: `wcis.trigger:${claimId}:claim_created`,
+      payload: {
+        trigger: {
+          claim_id:         claimId,
+          trigger_event:    'claim_created',
+          source_service:   'claimService',
+          source_record_id: null,
+          event_date:       froiData.dateOfInjury,
+          payload_context: {
+            doi:         froiData.dateOfInjury,
+            employer_id: employerId,
+            employee_id: froiData.employeeId || null,
+            source:      'intake',
+          },
         },
       },
-    },
+    }, { tx });
+    await jobQueue.enqueue({
+      queue: 'filehandler.create_claim', claimId, payload: { claimId },
+      idempotencyKey: `filehandler.create_claim:${claimId}`,
+      runAt: new Date(Date.now() + FH_RETRY_DELAY_MS).toISOString(),
+    }, { tx });
   });
+
+  // ── FileHandler sync (after commit) ────────────────────────────────────────
+  // Attempted inline so the response carries the FileHandler id in the
+  // normal case. A failure is recorded and retried by the job above.
+  try {
+    await _syncFileHandlerClaim(claimId);
+  } catch (err) {
+    logger.error({ msg: 'createClaim: FileHandler sync FAILED — will retry', err: err.message, claimNumber });
+    // The claim is committed and its retry job is durable: recording the
+    // failure is informative only and must not turn creation into an error.
+    try {
+      await runInTransaction({ label: 'claim.filehandler_sync_failed' }, (tx) => tx.insert('claim_events', {
+        claim_id:  claimId,
+        type:      'filehandler_sync_failed',
+        timestamp: new Date().toISOString(),
+        data:      { error: err.message, willRetry: true },
+      }));
+    } catch (e) {
+      logger.error({ msg: 'createClaim: could not record the FileHandler sync failure', claimId, err: e.message });
+    }
+  }
 
   logger.info({ msg: 'createClaim: complete', claimNumber, claimId });
 
@@ -353,8 +323,50 @@ async function createClaim(froiData, employerId) {
   return _fetchClaim(claimId);
 }
 
+/**
+ * Create the claim in FileHandler (the external system of record) once,
+ * and record its id. Used inline after createClaim commits and by the
+ * 'filehandler.create_claim' job. A claim that already carries a
+ * FileHandler id is skipped; the id is written only while still unset,
+ * so a racing attempt cannot overwrite it.
+ * TODO(integration): FileHandler's claim-create API takes no idempotency
+ * key — a create that succeeds remotely but fails to record locally can be
+ * duplicated by the retry. Confirm a dedupe key with the vendor.
+ */
+async function _syncFileHandlerClaim(claimId) {
+  const claim = await _fetchClaim(claimId);
+  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  if (claim.filehandlerId) return { skipped: true, filehandlerId: claim.filehandlerId };
+
+  const fhResult = await filehandler.createClaim({
+    claimNumber:  claim.claimNumber,
+    firstName:    claim.employee?.firstName,
+    lastName:     claim.employee?.lastName,
+    dob:          claim.employee?.dob,
+    employerName: claim.employerName,
+    dateOfInjury: claim.dateOfInjury,
+    bodyPart:     claim.bodyPart,
+    injuryType:   claim.injuryType,
+  });
+
+  await runInTransaction({ tenantId: claim.tenantId, label: 'claim.filehandler_synced' }, async (tx) => {
+    const [updated] = await tx.update('claims',
+      { filehandler_id: fhResult.claimId, updated_at: new Date().toISOString() },
+      { id: claimId, filehandler_id: null });
+    if (!updated) return;
+    await tx.insert('claim_events', {
+      claim_id:  claimId,
+      type:      'filehandler_claim_created',
+      timestamp: new Date().toISOString(),
+      data:      { fhClaimId: fhResult.claimId, fhStatus: fhResult.status },
+    });
+  });
+  logger.info({ msg: 'createClaim: FileHandler sync OK', claimNumber: claim.claimNumber, fhClaimId: fhResult.claimId });
+  return { skipped: false, filehandlerId: fhResult.claimId };
+}
+
 // ── Initial diaries (statutory deadlines) ─────────────────────────────────────
-async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
+async function _seedInitialDiaries(tx, claimId, doi, filedAt, aww, tdRate) {
   const diaryDefs = [
     {
       diary_type:  'DWC1_ISSUE',
@@ -419,7 +431,7 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
     created_at:  new Date().toISOString(),
   }));
 
-  await supabase.from('diaries').insert(diaryRows);
+  await tx.insert('diaries', diaryRows);
 
   const diaryEvents = diaryRows.map(d => ({
     claim_id:  claimId,
@@ -429,7 +441,7 @@ async function _seedInitialDiaries(claimId, doi, filedAt, aww, tdRate) {
   }));
 
   if (diaryEvents.length) {
-    await supabase.from('claim_events').insert(diaryEvents);
+    await tx.insert('claim_events', diaryEvents);
   }
 }
 
@@ -674,71 +686,49 @@ const VALID_TRANSITIONS = {
 async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
   const claim = await getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  const now = new Date().toISOString();
 
-  const allowed = VALID_TRANSITIONS[claim.status] || [];
-  if (!allowed.includes(newStatus)) {
-    throw new Error(`Invalid status transition: ${claim.status} → ${newStatus}`);
-  }
+  // One unit of work (ADR-0006): the transition, its event, its ledger
+  // entry and the WCIS / legacy follow-up jobs commit together. Inside a
+  // caller's unit (opts.tx — e.g. a diary decision) it joins that unit.
+  const work = async (tx) => {
+    // Re-read the status under a row lock so two concurrent transitions
+    // cannot both pass the check (test-seeded claims live only in memory).
+    const row = await tx.selectOne('claims', { id: claimId }, { forUpdate: true });
+    const prev = row ? row.status : claim.status;
+    const allowed = VALID_TRANSITIONS[prev] || [];
+    if (!allowed.includes(newStatus)) {
+      throw new Error(`Invalid status transition: ${prev} → ${newStatus}`);
+    }
 
-  const prev = claim.status;
-  const now  = new Date().toISOString();
+    if (row) await tx.update('claims', { status: newStatus, updated_at: now }, { id: claimId });
 
-  await supabase.from('claims')
-    .update({ status: newStatus, updated_at: now })
-    .eq('id', claimId);
+    await tx.insert('claim_events', {
+      claim_id:  claimId,
+      type:      'status_changed',
+      timestamp: now,
+      data:      { from: prev, to: newStatus, changedBy },
+    });
 
-  await supabase.from('claim_events').insert({
-    claim_id:  claimId,
-    type:      'status_changed',
-    timestamp: now,
-    data:      { from: prev, to: newStatus, changedBy },
-  });
+    await auditLedger.append({
+      actor:    _ledgerActorFor(changedBy, opts),
+      action:   'claim.status_changed',
+      entity:   { type: 'claim', id: claimId },
+      claimId,
+      tenantId: claim.tenantId,
+      payload:  { from: prev, to: newStatus },
+      evidence: opts.evidence || [],
+    }, { tx });
 
-  await auditLedger.append({
-    actor:    _ledgerActorFor(changedBy, opts),
-    action:   'claim.status_changed',
-    entity:   { type: 'claim', id: claimId },
-    claimId,
-    tenantId: claim.tenantId,
-    payload:  { from: prev, to: newStatus },
-    evidence: opts.evidence || [],
-  });
-
-  // Compensability accept/deny is the human counterpart to the
-  // AI compensability decision — link them so the audit trail
-  // shows model rec → adjuster decision pairing.
-  if (newStatus === 'accepted' || newStatus === 'denied') {
-    try {
-      await require('./aiDecisionsService').linkHumanDecision(claimId, 'compensability', {
-        human_reviewer_id: null, human_decision: `${newStatus} by ${changedBy}`,
-        actor: _ledgerActorFor(changedBy, opts),
-      });
-    } catch { /* non-fatal */ }
-  }
-
-  // Keep test store in sync
-  if (_testStore.has(claimId)) {
-    const c = _testStore.get(claimId);
-    c.status    = newStatus;
-    c.updatedAt = now;
-    c.events = c.events || [];
-    c.events.push({ type: 'status_changed', timestamp: now, data: { from: prev, to: newStatus, changedBy } });
-  }
-
-  // ── WCIS hook — M22A ──────────────────────────────────────────
-  // Intercept status transitions that are reportable to WCIS.
-  //   denied   → FROI 04 or SROI 04 (depends on prior FROI accept)
-  //   closed   → SROI FN (unless suppressed by settlement path)
-  //
-  // opts.suppressWcisClose=true is passed by cnrService.recordPayment
-  // and disbursementService.recordDisbursementPayment to avoid
-  // duplicate enqueue on settlement-driven closures.
-  {
+    // ── WCIS hook — M22A ────────────────────────────────────────
+    // Status transitions that are reportable to WCIS:
+    //   denied → FROI 04 or SROI 04 (wcisTriggerService routes on
+    //            wcis_claim_state.first_froi_accepted_at)
+    //   closed → SROI FN (unless suppressed by a settlement path:
+    //            cnrService.recordPayment / disbursementService pass
+    //            opts.suppressWcisClose to avoid a duplicate enqueue)
     const doi = claim.dateOfInjury;
-
     if (newStatus === 'denied') {
-      // wcisTriggerService handles FROI 04 vs SROI 04 routing by
-      // inspecting wcis_claim_state.first_froi_accepted_at.
       await jobQueue.enqueue({
         queue: 'wcis.trigger', claimId,
         payload: {
@@ -750,9 +740,8 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
             payload_context: { doi, changedBy, from_status: prev },
           },
         },
-      });
+      }, { tx });
     }
-
     if (newStatus === 'closed' && !opts.suppressWcisClose) {
       await jobQueue.enqueue({
         queue: 'wcis.trigger', claimId,
@@ -770,27 +759,52 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
             },
           },
         },
+      }, { tx });
+    }
+
+    // ── Legacy adapter write-back (M_legacy_integration) ──────────
+    // For claims migrated from a legacy system-of-record, push the field
+    // change to that system through the adapter registry (A1TrackerAdapter
+    // delegates to filehandler for native claims). The adapter records its
+    // own failures (claim_event + sync_status='sync_failed').
+    await jobQueue.enqueue({
+      queue: 'claim.legacy_writeback', claimId,
+      payload: { claimId, change: { field: 'status', oldValue: prev, newValue: newStatus } },
+    }, { tx });
+
+    // Compensability accept/deny is the human counterpart to the AI
+    // compensability decision — link them (after commit) so the audit
+    // trail shows model rec → adjuster decision pairing.
+    if (newStatus === 'accepted' || newStatus === 'denied') {
+      tx.afterCommit(async () => {
+        try {
+          await require('./aiDecisionsService').linkHumanDecision(claimId, 'compensability', {
+            human_reviewer_id: null, human_decision: `${newStatus} by ${changedBy}`,
+            actor: _ledgerActorFor(changedBy, opts),
+          });
+        } catch { /* non-fatal */ }
       });
     }
-  }
+    return prev;
+  };
 
-  // ── Legacy adapter write-back (M_legacy_integration) ──────────────────────
-  // For claims migrated from a legacy system-of-record, push the field
-  // change to that system through the adapter registry. Native and
-  // a1_tracker claims also flow through the adapter — A1TrackerAdapter
-  // delegates to filehandler so behavior is unchanged for them.
-  //
-  // QUEUE-NEVER-BLOCK: any failure is logged as a claim_event and toggles
-  // sync_status='sync_failed'. Never throws into updateStatus.
-  await jobQueue.enqueue({
-    queue: 'claim.legacy_writeback', claimId,
-    payload: { claimId, change: { field: 'status', oldValue: prev, newValue: newStatus } },
-  });
+  const prev = opts.tx
+    ? await work(opts.tx)
+    : await runInTransaction({
+      tenantId: claim.tenantId, actorId: _ledgerActorFor(changedBy, opts).id, label: 'claim.status_change',
+    }, work);
 
+  // Keep test store in sync
   if (_testStore.has(claimId)) {
-    return _testStore.get(claimId);
+    const c = _testStore.get(claimId);
+    c.status    = newStatus;
+    c.updatedAt = now;
+    c.events = c.events || [];
+    c.events.push({ type: 'status_changed', timestamp: now, data: { from: prev, to: newStatus, changedBy } });
+    return c;
   }
-  return getClaim(claimId);
+  // Inside a caller's transaction the committed view is not visible yet.
+  return opts.tx ? { ...claim, status: newStatus, updatedAt: now } : getClaim(claimId);
 }
 
 // ── Legacy write-back helper ─────────────────────────────────────────────────
@@ -884,11 +898,7 @@ async function setAttorneyRepresentation(claimId, { represented, attorney }, cha
   const claim = await getClaim(claimId);
   if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
-  const { data: row } = await supabase
-    .from('claims').select('attorney_represented').eq('id', claimId).single();
-  const wasRepresented = !!(row && row.attorney_represented);
   const nowRepresented = !!represented;
-
   const now = new Date().toISOString();
   const update = {
     attorney_represented: nowRepresented,
@@ -898,46 +908,53 @@ async function setAttorneyRepresentation(claimId, { represented, attorney }, cha
     attorney_phone: nowRepresented ? (attorney?.phone || null) : null,
     updated_at: now,
   };
-  await supabase.from('claims').update(update).eq('id', claimId);
 
-  await supabase.from('claim_events').insert({
-    claim_id: claimId,
-    type: 'representation_changed',
-    timestamp: now,
-    data: { represented: nowRepresented, attorney_name: update.attorney_name, changed_by: changedBy },
-  });
+  // One unit of work: the representation change, its event, its ledger
+  // entry and (on a change of state) the WCIS SROI 02 job (M17B).
+  await runInTransaction({
+    tenantId: claim.tenantId, actorId: _ledgerActorFor(changedBy, opts).id, label: 'claim.representation',
+  }, async (tx) => {
+    const row = await tx.selectOne('claims', { id: claimId }, { forUpdate: true });
+    const wasRepresented = !!(row && row.attorney_represented);
 
-  await auditLedger.append({
-    actor:    _ledgerActorFor(changedBy, opts),
-    action:   'claim.representation_changed',
-    entity:   { type: 'claim', id: claimId },
-    claimId,
-    tenantId: claim.tenantId,
-    payload:  {
-      was_represented: wasRepresented,
-      represented:     nowRepresented,
-      attorney_name:   update.attorney_name,
-      attorney_firm:   update.attorney_firm,
-    },
-  });
+    await tx.update('claims', update, { id: claimId });
+    await tx.insert('claim_events', {
+      claim_id: claimId,
+      type: 'representation_changed',
+      timestamp: now,
+      data: { represented: nowRepresented, attorney_name: update.attorney_name, changed_by: changedBy },
+    });
 
-  if (wasRepresented !== nowRepresented) {
-    // WCIS HOOK — SROI 02 (M17B). Non-fatal: a queue failure never
-    // blocks the representation change.
-    try {
-      const wcis = require('./wcisTriggerService');
-      await wcis.enqueueIfReportable({
-        claim_id:         claimId,
-        trigger_event:    'representation_changed',
-        source_service:   'claimService',
-        source_record_id: claimId,
-        event_date:       now.split('T')[0],
-        payload_context:  { represented: nowRepresented },
-      });
-    } catch (e) {
-      logger.error({ msg: 'setAttorneyRepresentation: WCIS enqueue failed (non-fatal)', claimId, err: e.message });
+    await auditLedger.append({
+      actor:    _ledgerActorFor(changedBy, opts),
+      action:   'claim.representation_changed',
+      entity:   { type: 'claim', id: claimId },
+      claimId,
+      tenantId: claim.tenantId,
+      payload:  {
+        was_represented: wasRepresented,
+        represented:     nowRepresented,
+        attorney_name:   update.attorney_name,
+        attorney_firm:   update.attorney_firm,
+      },
+    }, { tx });
+
+    if (wasRepresented !== nowRepresented) {
+      await jobQueue.enqueue({
+        queue: 'wcis.trigger', claimId,
+        payload: {
+          trigger: {
+            claim_id:         claimId,
+            trigger_event:    'representation_changed',
+            source_service:   'claimService',
+            source_record_id: claimId,
+            event_date:       now.split('T')[0],
+            payload_context:  { represented: nowRepresented },
+          },
+        },
+      }, { tx });
     }
-  }
+  });
 
   return getClaim(claimId);
 }
@@ -957,45 +974,50 @@ async function reopenClaim(claimId, reason, changedBy, opts = {}) {
   if (!reason) throw new Error('A reopen reason is required');
 
   const now = new Date().toISOString();
-  await supabase.from('claims')
-    .update({ status: 'active_medical', updated_at: now })
-    .eq('id', claimId);
+  await runInTransaction({
+    tenantId: claim.tenantId, actorId: _ledgerActorFor(changedBy, opts).id, label: 'claim.reopen',
+  }, async (tx) => {
+    // Re-check under the row lock: a concurrent reopen loses here.
+    const row = await tx.selectOne('claims', { id: claimId }, { forUpdate: true });
+    const from = row ? row.status : claim.status;
+    if (!['closed', 'future_medical_only'].includes(from)) {
+      throw new Error(`Only closed claims can be reopened (status: ${from})`);
+    }
 
-  await supabase.from('claim_events').insert({
-    claim_id: claimId,
-    type: 'claim_reopened',
-    timestamp: now,
-    data: { from_status: claim.status, reason, changed_by: changedBy },
-  });
-
-  await supabase.from('audit_log').insert({
-    action: 'claim_reopened', resource_type: 'claim', resource_id: claimId,
-    description: `Claim reopened from ${claim.status}: ${reason}`,
-    actor: changedBy || null, created_at: now,
-  });
-
-  await auditLedger.append({
-    actor:    _ledgerActorFor(changedBy, opts),
-    action:   'claim.reopened',
-    entity:   { type: 'claim', id: claimId },
-    claimId,
-    tenantId: claim.tenantId,
-    payload:  { from_status: claim.status, to_status: 'active_medical', reason },
-  });
-
-  try {
-    const wcis = require('./wcisTriggerService');
-    await wcis.enqueueIfReportable({
-      claim_id:         claimId,
-      trigger_event:    'froi_data_changed',
-      source_service:   'claimService',
-      source_record_id: claimId,
-      event_date:       now.split('T')[0],
-      payload_context:  { reason: 'claim_reopened', from_status: claim.status },
+    await tx.update('claims', { status: 'active_medical', updated_at: now }, { id: claimId });
+    await tx.insert('claim_events', {
+      claim_id: claimId,
+      type: 'claim_reopened',
+      timestamp: now,
+      data: { from_status: from, reason, changed_by: changedBy },
     });
-  } catch (e) {
-    logger.error({ msg: 'reopenClaim: WCIS enqueue failed (non-fatal)', claimId, err: e.message });
-  }
+    await tx.insert('audit_log', {
+      action: 'claim_reopened', resource_type: 'claim', resource_id: claimId,
+      description: `Claim reopened from ${from}: ${reason}`,
+      actor: changedBy || null, created_at: now,
+    });
+    await auditLedger.append({
+      actor:    _ledgerActorFor(changedBy, opts),
+      action:   'claim.reopened',
+      entity:   { type: 'claim', id: claimId },
+      claimId,
+      tenantId: claim.tenantId,
+      payload:  { from_status: from, to_status: 'active_medical', reason },
+    }, { tx });
+    await jobQueue.enqueue({
+      queue: 'wcis.trigger', claimId,
+      payload: {
+        trigger: {
+          claim_id:         claimId,
+          trigger_event:    'froi_data_changed',
+          source_service:   'claimService',
+          source_record_id: claimId,
+          event_date:       now.split('T')[0],
+          payload_context:  { reason: 'claim_reopened', from_status: from },
+        },
+      },
+    }, { tx });
+  });
 
   return getClaim(claimId);
 }
@@ -1016,4 +1038,5 @@ module.exports = {
   _seedClaim,
   _resetClaims,
   _legacyWriteBackUpdate,
+  _syncFileHandlerClaim,
 };

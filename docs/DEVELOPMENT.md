@@ -138,6 +138,11 @@ Rules:
   records by id, and must be idempotent.
 - Run a worker locally with `DATABASE_URL=… npm run worker`, or rely on the API's in-process
   poller.
+- Do not write compensating deletes. A failed unit rolls back. History tables are append-only:
+  `audit_ledger` and `claim_events` (ADR-0007) refuse UPDATE and DELETE, so a correction is a
+  new event. `tests/unit/historyIsAppendOnly.test.js` fails on code that tries.
+- Prove rollback behavior in `tests/pg/`. The in-memory suite runs the non-atomic compatibility
+  mode and cannot show it.
 
 ## Verifying the audit ledger
 

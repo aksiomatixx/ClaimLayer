@@ -28,6 +28,12 @@ const QUEUES = {
     maxAttempts: 3,
     run: (p) => svc('claimService')._runAnalysis(p.claimId),
   },
+  // claimService.createClaim — FileHandler create retry. Enqueued with the
+  // claim (delayed); a no-op when the inline attempt after commit succeeded.
+  'filehandler.create_claim': {
+    maxAttempts: 8,
+    run: (p) => svc('claimService')._syncFileHandlerClaim(p.claimId),
+  },
   'notice.dwc7': {
     maxAttempts: 5,
     run: (p) => svc('noticeService').generateDwc7(p.claimId),

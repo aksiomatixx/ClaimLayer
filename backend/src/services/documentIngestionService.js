@@ -24,6 +24,7 @@
  */
 
 const { supabase } = require('./supabase');
+const { runInTransaction, isTransactional } = require('../db/unitOfWork');
 const config       = require('../config');
 const logger       = require('../logger');
 const { DOCUMENT_CATEGORIES } = require('../constants');
@@ -110,7 +111,7 @@ function _resolveReceivedAt(receivedAt) {
   return new Date(t).toISOString();
 }
 
-async function _createDiary(claimId, rule, docId, receivedAt) {
+async function _createDiary(tx, claimId, rule, docId, receivedAt) {
   const row = {
     id:          `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     claim_id:    claimId,
@@ -126,18 +127,16 @@ async function _createDiary(claimId, rule, docId, receivedAt) {
     source_document_id: docId,
     created_at:  new Date().toISOString(),
   };
-  const { error } = await supabase.from('diaries').insert(row);
-  if (error) throw new Error(`diary insert failed: ${error.message}`);
+  await tx.insert('diaries', row);
   return row;
 }
 
-async function _writeEvent(claimId, type, data) {
+async function _writeEvent(tx, claimId, type, data) {
   const row = {
     id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     claim_id: claimId, type, timestamp: new Date().toISOString(), data,
   };
-  const { error } = await supabase.from('claim_events').insert(row);
-  if (error) throw new Error(`event insert failed: ${error.message}`);
+  await tx.insert('claim_events', row);
   return row;
 }
 
@@ -254,42 +253,35 @@ async function _persistClassified({ classification, receivedAt, explicitClaimId,
     ...fields,
   };
 
-  const { data: inserted, error } = await supabase
-    .from('claim_documents').insert(doc).select().single();
-  if (error) throw new Error(`documentIngestionService.ingestDocument: ${error.message}`);
-
-  if (needsTriage) {
-    logger.info({
-      msg: 'documentIngestion: routed to human triage',
-      docId: inserted.id, reason: doc.triage_reason, confidence,
-    });
-    return { document: inserted, diary: null, routed: 'triage' };
-  }
-
-  // Document + action diary + event are one unit: a failure after the
-  // document insert compensates (removes the orphan) and surfaces the
-  // error — a filed document without its prepared action would be a
-  // silent inbox.
-  let diary;
+  // Document + action diary + event are one unit of work (ADR-0006): a
+  // filed document never exists without its prepared action — that would
+  // be a silent inbox. A triaged document is filed alone, for a human.
+  let result;
   try {
-    const rule = _resolveRule(category, signals);
-    diary = await _createDiary(resolvedClaimId, rule, inserted.id, receivedAt);
-    try {
-      await _writeEvent(resolvedClaimId, 'document_ingested', {
+    result = await runInTransaction({ actorId: actorEmail || 'system:ingestion', label: 'document.ingest' }, async (tx) => {
+      const inserted = await tx.insert('claim_documents', doc);
+      if (needsTriage) return { document: inserted, diary: null, routed: 'triage' };
+
+      const rule = _resolveRule(category, signals);
+      const diary = await _createDiary(tx, resolvedClaimId, rule, inserted.id, receivedAt);
+      await _writeEvent(tx, resolvedClaimId, 'document_ingested', {
         document_id: inserted.id, category, confidence, received_at: receivedAt,
         diary_type: rule.diary_type, match_basis: matchBasis, actor: actorEmail || null,
       });
-    } catch (e) {
-      await supabase.from('diaries').delete().eq('id', diary.id);
-      throw e;
-    }
+      return { document: inserted, diary, routed: 'filed' };
+    });
   } catch (e) {
-    await supabase.from('claim_documents').delete().eq('id', inserted.id);
-    logger.error({ msg: 'documentIngestion: filing unit failed — compensated', docId: inserted.id, err: e.message });
+    logger.error({ msg: 'documentIngestion: filing unit failed — rolled back', err: e.message });
     throw new Error(`documentIngestionService.ingestDocument: filing failed and was rolled back — ${e.message}`);
   }
 
-  return { document: inserted, diary, routed: 'filed' };
+  if (result.routed === 'triage') {
+    logger.info({
+      msg: 'documentIngestion: routed to human triage',
+      docId: result.document.id, reason: doc.triage_reason, confidence,
+    });
+  }
+  return result;
 }
 
 // ── PDF intake (Tier 1.5 #1) ─────────────────────────────────────────────────
@@ -446,126 +438,80 @@ async function resolveTriage(docId, { action, claim_id, category, reason }, acto
     throw new Error('A rejection reason is required — rejected documents are documented, never dropped');
   }
 
-  // Atomic claim: pending → resolving. Loser of a race gets the same
-  // "not pending" error a stale read would.
+  // One unit of work (ADR-0006): the claim on the document (pending →
+  // resolving, then resolved), the filing or rejection, the action diary,
+  // the event and the audit record commit together. The loser of a race
+  // gets the same "not pending" error a stale read would.
   const now = new Date().toISOString();
-  const { data: claimed, error: clErr } = await supabase.from('claim_documents')
-    .update({ triage_status: 'resolving', updated_at: now })
-    .eq('id', docId).eq('triage_status', 'pending')
-    .select();
-  if (clErr) throw new Error(`resolveTriage: claim failed — ${clErr.message}`);
-  if (!claimed || claimed.length === 0) throw new Error('Document is not pending triage');
+  const state = { claimed: false };
+  try {
+    return await _resolveTriageUnit(doc, { action, claim_id, reason, finalCategory, rule }, actorEmail, now, state);
+  } catch (e) {
+    if (state.claimed && !isTransactional()) {
+      // Compatibility mode (no transaction): release the claim so the
+      // document is not stranded in 'resolving'. In PostgreSQL the unit
+      // has already rolled back.
+      await supabase.from('claim_documents')
+        .update({
+          triage_status: 'pending', status: 'triage',
+          claim_id: doc.claim_id, category: doc.category,
+          rejection_reason: null, resolved_by: null, resolved_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', docId).eq('triage_status', 'resolving');
+    }
+    throw e;
+  }
+}
 
-  const _audit = async (auditAction, description, newValue) => {
-    const { error } = await supabase.from('audit_log').insert({
+function _resolveTriageUnit(doc, { action, claim_id, reason, finalCategory, rule }, actorEmail, now, state) {
+  const docId = doc.id;
+  return runInTransaction({ actorId: actorEmail || 'unattributed', label: `document.triage_${action}` }, async (tx) => {
+    const claimed = await tx.update('claim_documents', { triage_status: 'resolving', updated_at: now },
+      { id: docId, triage_status: 'pending' });
+    if (claimed.length === 0) throw new Error('Document is not pending triage');
+    state.claimed = true;
+
+    const _audit = (auditAction, description, newValue) => tx.insert('audit_log', {
       action: auditAction, resource_type: 'claim_document', resource_id: docId,
       description, new_value: newValue || null, actor: actorEmail || null, created_at: now,
     });
-    if (error) throw new Error(`audit insert failed: ${error.message}`);
-  };
 
-  try {
+    let diary = null;
     if (action === 'reject') {
-      const { error: upErr } = await supabase.from('claim_documents')
-        .update({
-          status: 'rejected',
-          rejection_reason: reason, resolved_by: actorEmail || null, resolved_at: now,
-          updated_at: now,
-        })
-        .eq('id', docId);
-      if (upErr) throw new Error(`reject update failed: ${upErr.message}`);
+      await tx.update('claim_documents', {
+        status: 'rejected',
+        rejection_reason: reason, resolved_by: actorEmail || null, resolved_at: now,
+        updated_at: now,
+      }, { id: docId });
       await _audit('document_rejected',
         `Triage rejection: "${doc.title}" — ${reason}`,
         { reason, triage_reason: doc.triage_reason });
-      const { data: updated, error: finErr } = await supabase.from('claim_documents')
-        .update({ triage_status: 'resolved', updated_at: new Date().toISOString() })
-        .eq('id', docId).eq('triage_status', 'resolving')
-        .select().single();
-      if (finErr || !updated) {
-        // audit_log is append-only — reverse the rejection entry with a
-        // compensating one so the trail matches the reverted document.
-        await supabase.from('audit_log').insert({
-          action: 'document_rejected_reverted', resource_type: 'claim_document', resource_id: docId,
-          description: `Triage rejection of "${doc.title}" reverted — finalization failed; document returned to pending`,
-          actor: actorEmail || null, created_at: new Date().toISOString(),
-        });
-        throw new Error(`finalize failed: ${finErr ? finErr.message : 'claim was lost'}`);
-      }
-      return { document: updated, diary: null };
-    }
-
-    // triage_status stays 'resolving' until the WHOLE unit commits, so
-    // a failure can always revert on that guard.
-    const { error: upErr } = await supabase.from('claim_documents')
-      .update({
+    } else {
+      await tx.update('claim_documents', {
         claim_id, category: finalCategory, status: 'filed',
         relevant_to: [rule.diary_type],
         resolved_by: actorEmail || null, resolved_at: now,
         updated_at: now,
-      })
-      .eq('id', docId);
-    if (upErr) throw new Error(`file update failed: ${upErr.message}`);
-
-    let diary;
-    let filedEvent;
-    let filedAudited = false;
-
-    // Compensation for the filed-record trio (diary, claim event, audit
-    // row): a failed finalize must not leave records asserting the
-    // document was filed while it reverts to pending.
-    const _compensateFiled = async () => {
-      if (diary) await supabase.from('diaries').delete().eq('id', diary.id);
-      if (filedEvent) await supabase.from('claim_events').delete().eq('id', filedEvent.id);
-      if (filedAudited) {
-        // audit_log is append-only (7-year retention) — reverse with a
-        // compensating entry rather than deleting.
-        await supabase.from('audit_log').insert({
-          action: 'document_triage_filed_reverted', resource_type: 'claim_document', resource_id: docId,
-          description: `Triage filing of "${doc.title}" reverted — finalization failed; document returned to pending`,
-          actor: actorEmail || null, created_at: new Date().toISOString(),
-        });
-      }
-    };
-
-    try {
+      }, { id: docId });
       // Deadlines still anchor to the original channel receipt — triage
       // latency never extends a statutory clock.
-      diary = await _createDiary(claim_id, rule, docId, doc.received_at);
-      filedEvent = await _writeEvent(claim_id, 'document_ingested', {
+      diary = await _createDiary(tx, claim_id, rule, docId, doc.received_at);
+      await _writeEvent(tx, claim_id, 'document_ingested', {
         document_id: docId, category: finalCategory, via: 'human_triage',
         received_at: doc.received_at, actor: actorEmail || null,
       });
       await _audit('document_triage_filed',
         `Triage filed: "${doc.title}" → ${claim_id} (${finalCategory})`,
         { claim_id, category: finalCategory, diary_type: rule.diary_type });
-      filedAudited = true;
-    } catch (e) {
-      await _compensateFiled();
-      throw e;
     }
 
-    const { data: updated, error: finErr } = await supabase.from('claim_documents')
-      .update({ triage_status: 'resolved', updated_at: new Date().toISOString() })
-      .eq('id', docId).eq('triage_status', 'resolving')
-      .select().single();
-    if (finErr || !updated) {
-      await _compensateFiled();
-      throw new Error(`finalize failed: ${finErr ? finErr.message : 'claim was lost'}`);
-    }
-
+    const [updated] = await tx.update('claim_documents',
+      { triage_status: 'resolved', updated_at: new Date().toISOString() },
+      { id: docId, triage_status: 'resolving' });
+    if (!updated) throw new Error('finalize failed: claim was lost');
     return { document: updated, diary };
-  } catch (e) {
-    // Revert the claim so the document is not stranded in 'resolving'.
-    await supabase.from('claim_documents')
-      .update({
-        triage_status: 'pending', status: 'triage',
-        claim_id: doc.claim_id, category: doc.category,
-        rejection_reason: null, resolved_by: null, resolved_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', docId).eq('triage_status', 'resolving');
-    throw e;
-  }
+  });
 }
 
 module.exports = {

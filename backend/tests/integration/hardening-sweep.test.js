@@ -484,66 +484,10 @@ describe('E14 — outbox idempotency keys', () => {
   });
 });
 
-// ── E15 — triage finalize failure compensates event/audit rows ───────────────
-
-describe('E15 — triage finalize compensation', () => {
-  const ingestion = require('../../src/services/documentIngestionService');
-
-  it('a failed finalize removes the filed event and reverses the audit entry', async () => {
-    await seedClaim('claim_swp_j');
-    await supabase.from('claim_documents').insert({
-      id: 'doc_swp_tri', claim_id: null, title: 'Faxed work status', category: 'work_status',
-      status: 'triage', triage_status: 'pending', triage_reason: 'low_confidence',
-      received_at: new Date().toISOString(), key_fields: { signals: [] },
-    });
-
-    // Inject a failure into the FINALIZE update (triage_status → resolved)
-    // only; every other claim_documents operation runs for real.
-    const realFrom = supabase.from.bind(supabase);
-    let injected = false;
-    jest.spyOn(supabase, 'from').mockImplementation((table) => {
-      const b = realFrom(table);
-      if (table === 'claim_documents' && !injected) {
-        const realUpdate = b.update.bind(b);
-        b.update = (patch) => {
-          if (patch && patch.triage_status === 'resolved') {
-            injected = true;
-            const fail = {
-              eq: () => fail, select: () => fail,
-              single: async () => ({ data: null, error: { message: 'injected finalize failure' } }),
-            };
-            return fail;
-          }
-          return realUpdate(patch);
-        };
-      }
-      return b;
-    });
-
-    await expect(ingestion.resolveTriage('doc_swp_tri',
-      { action: 'file', claim_id: 'claim_swp_j', category: 'work_status' }, 'adm@test'))
-      .rejects.toThrow(/injected finalize failure/);
-
-    jest.restoreAllMocks();
-
-    // Document reverted to pending triage…
-    const { data: docs } = await supabase.from('claim_documents').select('*').eq('id', 'doc_swp_tri');
-    expect(docs[0].triage_status).toBe('pending');
-    expect(docs[0].status).toBe('triage');
-
-    // …with no surviving record claiming it was filed.
-    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', 'claim_swp_j');
-    expect(diaries).toHaveLength(0);
-    const { data: events } = await supabase.from('claim_events').select('*').eq('claim_id', 'claim_swp_j');
-    expect(events.filter(e => e.type === 'document_ingested')).toHaveLength(0);
-
-    const { data: audit } = await supabase.from('audit_log').select('*');
-    const filed = audit.find(a => a.action === 'document_triage_filed' && a.resource_id === 'doc_swp_tri');
-    const reverted = audit.find(a => a.action === 'document_triage_filed_reverted' && a.resource_id === 'doc_swp_tri');
-    expect(filed).toBeTruthy();    // append-only trail keeps the attempt…
-    expect(reverted).toBeTruthy(); // …and its reversal
-  });
-});
+// ── E15 — triage finalize failure leaves no filed records ────────────────────
+// Now a transaction property: proven on real PostgreSQL in
+// tests/pg/documentIngestion.pg.test.js ("a failed finalize leaves no
+// record claiming the document was filed").
 
 // ── H20/H21/H22 — legacy migration ───────────────────────────────────────────
 
@@ -590,11 +534,13 @@ describe('H20/H21/H22 — legacy migration hardening', () => {
       const b = realFrom(table);
       if (table === 'claims') {
         const realInsert = b.insert.bind(b);
-        b.insert = (row) => {
+        b.insert = (rowOrRows) => {
+          const row = Array.isArray(rowOrRows) ? rowOrRows[0] : rowOrRows;
           if (row && row.external_claim_id === 'BOOM-1') {
-            return Promise.resolve({ data: null, error: { message: 'injected constraint violation' } });
+            const failed = Promise.resolve({ data: null, error: { message: 'injected constraint violation' } });
+            return { then: failed.then.bind(failed), select: () => failed };
           }
-          return realInsert(row);
+          return realInsert(rowOrRows);
         };
       }
       return b;

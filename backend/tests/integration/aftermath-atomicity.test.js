@@ -5,9 +5,9 @@
  * hardening pass).
  *
  * - concurrent completions: exactly one wins (conditional-update claim)
- * - the local workflow is one durable unit: failure in any required
- *   step (notice generation, status transition) rolls everything back
- *   and the diary is NOT marked completed
+ * - the local workflow is one unit of work: failure in any required
+ *   step (notice generation, status transition) leaves the diary NOT
+ *   completed (full rollback is proven on PostgreSQL in tests/pg/)
  * - crashed-and-retried completions are idempotent: notices carry
  *   source_diary_id, successors carry idempotency keys
  * - external FileHandler write-back goes through the transactional
@@ -128,28 +128,28 @@ describe('failure injection — the durable unit rolls back', () => {
     expect(after.status).toBe('completed');
   });
 
-  it('status-transition failure: notices and successors are compensated, status unchanged', async () => {
+  // That the notices, successors and outbox rows created earlier in the
+  // unit disappear with it is a transaction property, proven on real
+  // PostgreSQL (tests/pg/diaryAftermath.pg.test.js); this in-memory suite
+  // runs the non-atomic compatibility mode (ADR-0006).
+  it('status-transition failure: the decision is not recorded, status unchanged, failure documented', async () => {
     await supabase.from('claims').update({ status: 'closed' }).eq('id', CLAIM); // accept is invalid from closed
     const diaryId = await seedDiary('COMPENSABILITY_DECISION_DUE');
 
     await expect(svc.completeAction(diaryId, { action: 'accept', note: 'x' }, 'a@test'))
-      .rejects.toThrow(/rolled back/i);
+      .rejects.toThrow(/rolled back.*Invalid status transition: closed → accepted/i);
 
     const { data: diary } = await supabase.from('diaries').select('*').eq('id', diaryId).single();
     expect(diary.status).toBe('open');
+    expect(diary.decision_action).toBeFalsy();
 
     const { data: claim } = await supabase.from('claims').select('*').eq('id', CLAIM).single();
     expect(claim.status).toBe('closed');
 
-    // The claim_accepted notices generated earlier in the unit were compensated.
-    const { data: notices } = await supabase.from('benefit_notices').select('*').eq('claim_id', CLAIM);
-    expect(notices).toHaveLength(0);
-    const { data: diaries } = await supabase.from('diaries').select('*').eq('claim_id', CLAIM);
-    expect(diaries.filter(d => d.parent_diary_id === diaryId)).toHaveLength(0);
-
-    // The outbox rows enqueued inside the failed unit were removed too.
-    const { data: obx } = await supabase.from('integration_outbox').select('*');
-    expect(obx).toHaveLength(0);
+    const { data: events } = await supabase.from('claim_events').select('*').eq('claim_id', CLAIM);
+    expect(events.some(e => e.type === 'action_completed')).toBe(false);
+    expect(events.some(e => e.type === 'action_completion_failed')).toBe(true);
+    expect(mockFhAddNote).not.toHaveBeenCalled(); // nothing dispatched for the failed unit
   });
 });
 

@@ -88,7 +88,12 @@ async function enqueue(job, { tx } = {}) {
   const mode = tx ? tx.mode : (pool ? 'pg' : 'compat');
 
   if (mode === 'compat') {
-    const schedule = () => setImmediate(() => { _runInline(queue, body); });
+    // A delayed job waits for its time (unref'd: it never holds the
+    // process open); a due job runs on the next macrotask.
+    const delayMs = runAt ? Date.parse(runAt) - Date.now() : 0;
+    const schedule = delayMs > 0
+      ? () => { setTimeout(() => { _runInline(queue, body); }, delayMs).unref(); }
+      : () => setImmediate(() => { _runInline(queue, body); });
     if (tx) tx.afterCommit(schedule); else schedule();
     return { id: null, mode: 'compat' };
   }

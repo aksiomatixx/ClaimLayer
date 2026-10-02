@@ -31,7 +31,12 @@ beforeEach(async () => {
   });
 });
 
+// WCIS triggers are durable jobs (ADR-0006); in the in-memory suite a job
+// runs on the next macrotask, so let it run before reading the queue.
+const tick = () => new Promise(r => setImmediate(() => setImmediate(r)));
+
 async function queueRows() {
+  await tick();
   const { data } = await supabase.from('wcis_trigger_queue').select('*').eq('claim_id', CLAIM);
   return data || [];
 }

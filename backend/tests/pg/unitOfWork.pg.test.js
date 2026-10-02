@@ -20,7 +20,9 @@ async function count(sql, params) {
 }
 
 async function insertClaim(tx, id) {
-  return tx.insert('claims', { id, claim_number: `UOW-${id}`, status: 'new_claim', date_of_injury: '2026-05-01' });
+  // claim_number is VARCHAR(20): keep it short whatever the pid length.
+  const number = `UOW-${id.split('_').pop()}-${Date.now() % 1e6}`;
+  return tx.insert('claims', { id, claim_number: number, status: 'new_claim', date_of_injury: '2026-05-01' });
 }
 
 afterAll(closePool);
