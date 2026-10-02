@@ -504,7 +504,7 @@ async function _runAnalysis(claimId) {
 
     await supabase.from('claims').update({
       ai_analysis: analysis,
-      priority:    rawAnalysis.priority || analysis.priority,
+      priority:    analysis.priority,   // the validated value, never the raw model output
       updated_at:  updatedAt,
     }).eq('id', claimId);
 
@@ -640,66 +640,16 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
     created_at:  now,
   });
 
-  // Post to the immutable append-only reserve ledger (Phase 3)
-  try {
-    const reserveLedgerService = require('./reserveLedgerService');
-    const balances = await reserveLedgerService.getBalances(claimId);
-    const currentMed = balances.categories.medical.outstanding;
-    const currentInd = balances.categories.indemnity.outstanding;
-    const currentExp = balances.categories.expense.outstanding;
-
-    const targetMed = Number(reserves.medical   || 0);
-    const targetInd = Number(reserves.indemnity || 0);
-    const targetExp = Number(reserves.expense   || 0);
-
-    const deltaMed = Math.round((targetMed - currentMed) * 100) / 100;
-    const deltaInd = Math.round((targetInd - currentInd) * 100) / 100;
-    const deltaExp = Math.round((targetExp - currentExp) * 100) / 100;
-
-    if (deltaMed !== 0) {
-      await reserveLedgerService.postTransaction({
-        tenantId: claim.tenantId,
-        claimId,
-        category: 'medical',
-        amountDelta: deltaMed,
-        transactionType: currentMed === 0 ? 'initial_reserve' : 'reserve_revision',
-        reason,
-        source: 'ADJUSTER',
-        createdBy: adjusterEmail,
-        actionRequestId: opts.actionRequestId || null,
-      }, { tx, audit: false });
-    }
-
-    if (deltaInd !== 0) {
-      await reserveLedgerService.postTransaction({
-        tenantId: claim.tenantId,
-        claimId,
-        category: 'indemnity',
-        amountDelta: deltaInd,
-        transactionType: currentInd === 0 ? 'initial_reserve' : 'reserve_revision',
-        reason,
-        source: 'ADJUSTER',
-        createdBy: adjusterEmail,
-        actionRequestId: opts.actionRequestId || null,
-      }, { tx, audit: false });
-    }
-
-    if (deltaExp !== 0) {
-      await reserveLedgerService.postTransaction({
-        tenantId: claim.tenantId,
-        claimId,
-        category: 'expense',
-        amountDelta: deltaExp,
-        transactionType: currentExp === 0 ? 'initial_reserve' : 'reserve_revision',
-        reason,
-        source: 'ADJUSTER',
-        createdBy: adjusterEmail,
-        actionRequestId: opts.actionRequestId || null,
-      }, { tx, audit: false });
-    }
-  } catch (err) {
-    logger.warn({ msg: '_recordReserveApproval: reserve ledger post failed (non-fatal)', err: err.message, claimId });
-  }
+  // The immutable reserve ledger moves to the approved figures in the same
+  // unit (ADR-0006): if it cannot, the approval does not commit either.
+  await require('./reserveLedgerService').postToTargets({
+    tenantId:  claim.tenantId,
+    claimId,
+    targets:   { medical: reserves.medical || 0, indemnity: reserves.indemnity || 0, expense: reserves.expense || 0 },
+    reason,
+    createdBy: adjusterEmail,
+    actionRequestId: opts.actionRequestId || null,
+  }, { tx });
 
   await tx.insert('claim_events', {
     claim_id:  claimId,
@@ -754,6 +704,28 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
 }
 
 // ── Status update ─────────────────────────────────────────────────────────────
+/**
+ * The multi-axis claim state (migration 20261005000003) for a move to
+ * `newStatus`, derived in ONE place so every status writer (transitions,
+ * reopen, C&R, stipulated-award close) keeps the axes consistent.
+ *   admin_status          intake | open | reopened | closed  (a reopened claim
+ *                         stays 'reopened' until it closes again)
+ *   compensability_status set only by a status that decides it; closing
+ *                         leaves it as it was (a C&R may settle a denied claim)
+ *   litigation_status     set to application_filed on 'litigated'
+ */
+const ACCEPTED_STATUSES = ['accepted', 'active_medical', 'p_and_s', 'pd_evaluation', 'settlement_discussions'];
+function statusAxesPatch(newStatus, current = null, { reopened = false } = {}) {
+  const patch = { status: newStatus };
+  if (newStatus === 'closed' || newStatus === 'future_medical_only') patch.admin_status = 'closed';
+  else if (['new_claim', 'intake_complete'].includes(newStatus)) patch.admin_status = 'intake';
+  else patch.admin_status = (reopened || (current && current.admin_status === 'reopened')) ? 'reopened' : 'open';
+  if (newStatus === 'denied') patch.compensability_status = 'denied';
+  else if (ACCEPTED_STATUSES.includes(newStatus)) patch.compensability_status = 'accepted';
+  if (newStatus === 'litigated') patch.litigation_status = 'application_filed';
+  return patch;
+}
+
 const VALID_TRANSITIONS = {
   new_claim:              ['intake_complete', 'denied'],
   intake_complete:        ['under_investigation', 'accepted'],
@@ -786,24 +758,7 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
       throw new Error(`Invalid status transition: ${prev} → ${newStatus}`);
     }
 
-    const multiAxisPatch = { status: newStatus, updated_at: now };
-    if (newStatus === 'closed') {
-      multiAxisPatch.admin_status = 'closed';
-    } else if (['new_claim', 'intake_complete'].includes(newStatus)) {
-      multiAxisPatch.admin_status = 'intake';
-    } else {
-      multiAxisPatch.admin_status = 'open';
-    }
-
-    if (newStatus === 'denied') {
-      multiAxisPatch.compensability_status = 'denied';
-    } else if (['accepted', 'active_medical', 'p_and_s', 'pd_evaluation', 'settlement_discussions', 'closed'].includes(newStatus)) {
-      multiAxisPatch.compensability_status = 'accepted';
-    }
-
-    if (newStatus === 'litigated') {
-      multiAxisPatch.litigation_status = 'application_filed';
-    }
+    const multiAxisPatch = { ...statusAxesPatch(newStatus, row), updated_at: now };
 
     if (row) await tx.update('claims', multiAxisPatch, { id: claimId });
 
@@ -1053,6 +1008,12 @@ async function setAttorneyRepresentation(claimId, { represented, attorney }, cha
     const row = await tx.selectOne('claims', { id: claimId }, { forUpdate: true });
     const wasRepresented = !!(row && row.attorney_represented);
 
+    // litigation_status follows representation, but never steps back from a
+    // later stage (application filed, settlement, award).
+    const litigation = row && row.litigation_status;
+    if (nowRepresented && (!litigation || litigation === 'unrepresented')) update.litigation_status = 'represented';
+    if (!nowRepresented && litigation === 'represented') update.litigation_status = 'unrepresented';
+
     await tx.update('claims', update, { id: claimId });
     await tx.insert('claim_events', {
       claim_id: claimId,
@@ -1120,7 +1081,7 @@ async function reopenClaim(claimId, reason, changedBy, opts = {}) {
       throw new Error(`Only closed claims can be reopened (status: ${from})`);
     }
 
-    await tx.update('claims', { status: 'active_medical', updated_at: now }, { id: claimId });
+    await tx.update('claims', { ...statusAxesPatch('active_medical', row, { reopened: true }), updated_at: now }, { id: claimId });
     await tx.insert('claim_events', {
       claim_id: claimId,
       type: 'claim_reopened',
@@ -1159,6 +1120,7 @@ async function reopenClaim(claimId, reason, changedBy, opts = {}) {
 }
 
 module.exports = {
+  statusAxesPatch,
   createClaim,
   setAttorneyRepresentation,
   reopenClaim,

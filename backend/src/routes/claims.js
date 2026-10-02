@@ -13,6 +13,7 @@ const logger            = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { requireClaimScope } = require('../middleware/claimAccess');
 const { humanPrincipal }    = require('../policy/principal');
+const { toCents }           = require('../utils/money');
 const { CLAIM_STATUSES, SETTABLE_CLAIM_STATUSES } = require('../constants');
 
 const router = express.Router();
@@ -372,18 +373,27 @@ router.get(
       if (!data || data.claim_id !== req.params.id) {
         return res.status(404).json({ error: 'Document not found' });
       }
-      // Retrieve binary via enterprise storage adapter (verifying SHA-256 integrity),
-      // with fallback to inline rendition if text-only.
+      // A stored original is served only after its SHA-256 check passes. If
+      // the check fails, or the stored file cannot be read, the request fails:
+      // it never falls back to unverified bytes or a regenerated stand-in.
+      // Only a document that never had a stored file gets the rendition.
       let pdfBuffer = null;
       if (data.storage_key || data.pdf_buffer_b64) {
+        const storageAdapter = require('../services/storageAdapter');
         try {
-          const storageAdapter = require('../services/storageAdapter');
           pdfBuffer = await storageAdapter.retrieveDocument(data);
         } catch (storageErr) {
-          logger.warn({ msg: 'storageAdapter retrieval failed, using fallback', err: storageErr.message });
-          if (data.pdf_buffer_b64) {
-            pdfBuffer = Buffer.from(data.pdf_buffer_b64, 'base64');
-          }
+          const integrity = /integrity failure/i.test(storageErr.message);
+          logger.error({
+            msg: integrity ? 'document integrity check failed — not served' : 'stored document unavailable — not served',
+            claimId: req.params.id, docId: data.id, err: storageErr.message,
+          });
+          return res.status(integrity ? 409 : 503).json({
+            error: integrity
+              ? 'The stored document failed its integrity check and was not served'
+              : 'The stored document is temporarily unavailable',
+            code: integrity ? 'DOCUMENT_INTEGRITY_FAILURE' : 'DOCUMENT_UNAVAILABLE',
+          });
         }
       }
 
@@ -659,7 +669,11 @@ router.get(
   }
 );
 
-// ── POST /api/v1/claims/:id/ledger/payments — Issue Payment Directly ─────────
+// ── POST /api/v1/claims/:id/ledger/payments — request a payment ─────────────
+// A payment is consequential and irreversible once issued, so this route never
+// issues one: it proposes a payment.issue action request (ADR-0004). The
+// payment is issued, in the approval's unit of work, when a second human with
+// the authority for the amount (and MFA) approves it. 202 + the request.
 router.post(
   '/:id/ledger/payments',
   requireAuth,
@@ -671,33 +685,35 @@ router.post(
     body('category').isIn(['indemnity', 'medical', 'expense']).withMessage('category must be indemnity, medical, or expense'),
     body('paymentType').notEmpty().withMessage('paymentType is required'),
     body('method').optional().isIn(['check', 'ach', 'digital_card']),
+    body('rationale').optional().isString(),
+    body('idempotencyKey').optional().isString().isLength({ min: 8, max: 200 }),
   ],
   validate,
   async (req, res) => {
+    const approvals = require('../services/approvalService');
     try {
-      const claim = await claimService.getClaim(req.params.id);
-      if (!claim) return res.status(404).json({ error: 'Claim not found' });
-
-      const paymentLedger = require('../services/paymentLedgerService');
-      const row = await paymentLedger.issuePayment({
-        tenantId: req.user.tenantId || claim.tenantId,
-        claimId: req.params.id,
-        payeeId: req.body.payeeId,
-        category: req.body.category,
-        paymentType: req.body.paymentType,
-        amount: req.body.amount,
-        method: req.body.method || 'check',
-        checkNumber: req.body.checkNumber,
-        memo: req.body.memo,
-        periodStart: req.body.periodStart,
-        periodEnd: req.body.periodEnd,
-        createdBy: req.user.sub || req.user.email,
+      const { request, idempotent } = await approvals.propose({
+        actionType: 'payment.issue',
+        claimId:    req.params.id,
+        proposer:   humanPrincipal(req.user),
+        payload: {
+          amount_cents: toCents(Number(req.body.amount)),
+          category:     req.body.category,
+          payment_type: req.body.paymentType,
+          payee_id:     req.body.payeeId || null,
+          method:       req.body.method || 'check',
+          check_number: req.body.checkNumber || null,
+          memo:         req.body.memo || null,
+          period_start: req.body.periodStart || null,
+          period_end:   req.body.periodEnd || null,
+        },
+        rationale:      req.body.rationale || req.body.memo || 'Payment requested from the claim ledger',
+        idempotencyKey: req.body.idempotencyKey || null,
       });
-
-      res.status(201).json({ status: 'issued', payment: row });
+      res.status(idempotent ? 200 : 202).json({ status: 'pending_approval', request, idempotent });
     } catch (err) {
-      if (err.message.includes('DUPLICATE_PAYMENT_DETECTED')) {
-        return res.status(409).json({ error: err.message, code: 'DUPLICATE_PAYMENT' });
+      if (err instanceof approvals.ApprovalError) {
+        return res.status(err.status).json({ error: err.code, message: err.message });
       }
       res.status(500).json({ error: err.message });
     }

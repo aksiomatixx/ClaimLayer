@@ -91,7 +91,7 @@ const EXECUTORS = {
         periodEnd: payload.period_end,
         actionRequestId: request.id,
         createdBy: approver.id,
-      }, { tx });
+      }, { tx, actor: approver });
       return {
         payment_id: row.id,
         amount_cents: payload.amount_cents,

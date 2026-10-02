@@ -337,15 +337,18 @@ router.get('/dev-employer-session', (req, res) => {
     return res.status(403).json({ error: 'Not available in production' });
   }
 
+  // The demo dataset's BrightCare employer (UUID-keyed since D-10), so the
+  // dev employer portal sees the demo claims it owns.
+  const { EMPLOYER_BRIGHTCARE } = require('../scripts/demoData');
   const token = generateEmployerToken({
     sub:          'dev-employer',
     email:        'hr@brightcarehh.com',
-    employerId:   'employer-brightcare-001',
+    employerId:   EMPLOYER_BRIGHTCARE.id,
     employerName: 'BrightCare Home Health',
   });
 
   res.cookie('token', token, sessionCookieOptions());
-  res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare-001', employerName: 'BrightCare Home Health' });
+  res.json({ ok: true, role: 'employer', employerId: EMPLOYER_BRIGHTCARE.id, employerName: 'BrightCare Home Health' });
 });
 
 // ── GET /api/v1/auth/dev-supervisor-session — dev-only supervisor login ──────

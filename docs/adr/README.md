@@ -12,6 +12,7 @@ ADRs are immutable once accepted. A changed decision gets a new ADR that superse
 | [0005](0005-rules-engine.md) | Versioned, effective-dated rules engine | Proposed |
 | [0006](0006-transactional-core.md) | Transactional core — unit of work, durable job queue, outbox | Accepted — implemented for approvals, reserve and RFA approval, background work |
 | [0007](0007-claim-lifecycle-units-and-append-only-history.md) | Claim lifecycle as units of work; append-only claim history | Accepted — implemented |
+| [0008](0008-financial-ledgers-authorization-concurrency-isolation.md) | Financial ledgers: authorization, concurrency and isolation | Accepted — implemented |
 
 ## Template
 

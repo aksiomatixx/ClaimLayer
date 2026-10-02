@@ -48,6 +48,8 @@ const SEED_MODEL = 'claude-sonnet-4-6';
 // its RFA first (DEMO_RFA_DEPENDENTS). tests/pg/schemaGuards.pg.test.js
 // checks this list against the live foreign-key graph.
 const DEMO_CHILD_TABLES = [
+  // financial ledgers (loss fund → payments → disbursements / PD advances)
+  'loss_fund_transactions', 'payment_transactions', 'reserve_transactions', 'claim_body_parts',
   // settlement / permanent-disability chain (leaf → root)
   'award_disbursements', 'stipulations', 'settlement_offers', 'msa_screenings',
   'pd_advance_payments', 'pd_advances', 'pd_evaluations',
@@ -233,13 +235,9 @@ async function _seedCarriersAndPolicies() {
   });
 }
 
-async function seedDemo() {
-  await _seedCarriersAndPolicies();
-  await _seedTriageDocument();
-  await wipeDemo();
-
-  // Upsert employers so the FK is satisfied. Both rows are safe to
-  // re-upsert on re-run.
+async function _seedEmployers() {
+  // Upserted before the policies and claims that reference them. Both rows
+  // are safe to re-upsert on re-run.
   for (const e of [EMPLOYER_BRIGHTCARE, EMPLOYER_WESTSIDE]) {
     try {
       await supabase.from('employers').upsert({
@@ -248,6 +246,13 @@ async function seedDemo() {
       }, { onConflict: 'id' });
     } catch { /* employers table may have different shape in tests */ }
   }
+}
+
+async function seedDemo() {
+  await _seedEmployers();
+  await _seedCarriersAndPolicies();
+  await _seedTriageDocument();
+  await wipeDemo();
 
   const created = [];
   for (let i = 0; i < LIFECYCLE_PLANS.length; i++) {
@@ -592,7 +597,8 @@ async function _seedOneClaim(id, idx, plan, persona) {
       urgency:              'routine',
       decision:             plan.rfa.decision,
       decision_made_at:     plan.rfa.decision === 'auto_approved' ? isoDaysAgo(Math.max(0, plan.daysAgo - 4)) : null,
-      response_due_at:      pending ? isoDaysAgo(-3) : null,
+      // NOT NULL in the schema: the same statutory clock rfaService computes.
+      response_due_at:      require('../services/rfaService')._calcDeadline(received, 'routine'),
       created_at:           received,
     });
   }

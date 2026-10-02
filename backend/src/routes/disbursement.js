@@ -24,6 +24,7 @@
 const express = require('express');
 const { param, body, validationResult } = require('express-validator');
 const { requireAuth, requireRole }      = require('../middleware/auth');
+const { humanPrincipal }                = require('../policy/principal');
 const disbursementService               = require('../services/disbursementService');
 const awardExtractionService            = require('../services/awardExtractionService');
 const pdService                         = require('../services/pdService');
@@ -211,7 +212,7 @@ disbursementsRouter.patch(
       const row = await disbursementService.recordDisbursementPayment(req.params.id, {
         paidDate:  req.body.paidDate,
         reference: req.body.reference || null,
-      });
+      }, { actor: humanPrincipal(req.user) });
       res.json(row);
     } catch (err) {
       res.status(mapErrorStatus(err)).json({ error: err.message });
@@ -243,6 +244,7 @@ pdAdvancesRouter.post(
         amountPaid:    parseFloat(req.body.amountPaid),
         paidBy:        req.user && req.user.sub ? req.user.sub : null,
         reference:     req.body.reference || null,
+        actor:         humanPrincipal(req.user),
       });
       res.json(row);
     } catch (err) {

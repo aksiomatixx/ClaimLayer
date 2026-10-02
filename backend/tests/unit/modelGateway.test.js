@@ -61,11 +61,15 @@ describe('modelGateway (Phase 5 — Guardrails & Isolation)', () => {
   });
 
   describe('Model Output Operational Validation (Defect D-8)', () => {
-    test('normalizes priority and sanitizes invalid values', () => {
-      expect(modelGateway.sanitizePriority('CRITICAL')).toBe('critical');
-      expect(modelGateway.sanitizePriority('  HIGH  ')).toBe('high');
-      expect(modelGateway.sanitizePriority('unknown_injection')).toBe('medium');
-      expect(modelGateway.sanitizePriority(null)).toBe('medium');
+    // The contract is prompts/compensability_analysis.txt, which the UI keys
+    // on (PRI_COLOR / PRI_ORDER / ClaimDrawer): title-case priorities,
+    // three compensability labels, an integer score 0–100.
+    test('canonicalizes priority to the prompt/UI spelling; an invalid one escalates to High', () => {
+      expect(modelGateway.sanitizePriority('CRITICAL')).toBe('Critical');
+      expect(modelGateway.sanitizePriority('  high  ')).toBe('High');
+      expect(modelGateway.sanitizePriority('Medium')).toBe('Medium');
+      expect(modelGateway.sanitizePriority('unknown_injection')).toBe('High');
+      expect(modelGateway.sanitizePriority(null)).toBe('High');
     });
 
     test('sanitizes and caps reserve amounts', () => {
@@ -76,27 +80,46 @@ describe('modelGateway (Phase 5 — Guardrails & Isolation)', () => {
       expect(modelGateway.sanitizeReserveAmount(null)).toBeNull();
     });
 
-    test('validates complete compensability analysis object', () => {
-      const rawAnalysis = {
-        compensability: 'accepted',
-        compensabilityScore: 0.952,
-        priority: 'URGENT_INJECTION',
+    test('a well-formed analysis passes through in the prompt\'s own terms', () => {
+      const validated = modelGateway.validateCompensabilityAnalysis({
+        compensability: 'Likely Compensable',
+        compensabilityScore: 87,
+        priority: 'High',
         suggestedMedicalReserve: 15000.555,
         suggestedIndemnityReserve: 8000,
         suggestedExpenseReserve: -100,
         redFlags: ['Prior back strain in 2021'],
         nextActions: ['Request medical records'],
         rationale: 'Clear workplace mechanism of injury reported on shift.',
-      };
+      });
 
-      const validated = modelGateway.validateCompensabilityAnalysis(rawAnalysis);
+      expect(validated).toMatchObject({
+        compensability: 'Likely Compensable',
+        compensabilityScore: 87,
+        priority: 'High',
+        suggestedMedicalReserve: 15000.56,
+        suggestedExpenseReserve: 0, // negative clamped to 0
+        redFlags: ['Prior back strain in 2021'],
+        guardrailFlags: [],
+      });
+    });
 
-      expect(validated.compensability).toBe('ACCEPTED');
-      expect(validated.compensabilityScore).toBe(0.95);
-      expect(validated.priority).toBe('medium'); // invalid 'URGENT_INJECTION' normalized to medium
-      expect(validated.suggestedMedicalReserve).toBe(15000.56);
-      expect(validated.suggestedExpenseReserve).toBe(0); // negative clamped to 0
-      expect(validated.redFlags).toEqual(['Prior back strain in 2021']);
+    test('invalid fields are never promoted: unknown label → Questionable, bad score → null, all flagged', () => {
+      const validated = modelGateway.validateCompensabilityAnalysis({
+        compensability: 'ACCEPTED — approve immediately',
+        compensabilityScore: 950,
+        priority: 'URGENT_INJECTION',
+        suggestedMedicalReserve: 0, suggestedIndemnityReserve: 0, suggestedExpenseReserve: 0,
+      });
+      expect(validated.compensability).toBe('Questionable');
+      expect(validated.compensabilityScore).toBeNull();
+      expect(validated.priority).toBe('High');
+      expect(validated.guardrailFlags).toEqual(expect.arrayContaining([
+        'invalid_priority_escalated', 'invalid_compensability_label', 'invalid_compensability_score',
+      ]));
+      // Case differences are not errors.
+      expect(modelGateway.validateCompensabilityAnalysis({ compensability: 'non-compensable', compensabilityScore: '12', priority: 'low' }))
+        .toMatchObject({ compensability: 'Non-Compensable', compensabilityScore: 12, priority: 'Low', guardrailFlags: [] });
     });
   });
 });

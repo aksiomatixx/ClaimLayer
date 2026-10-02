@@ -145,7 +145,7 @@ async function analyzeCompensability(claim) {
     output_raw:     raw,
     ...meta,
     confidence:     typeof validated.compensabilityScore === 'number' ? validated.compensabilityScore : null,
-    guardrail_actions: [],
+    guardrail_actions: validated.guardrailFlags || [],
   }, { required: true });
 
   return validated;

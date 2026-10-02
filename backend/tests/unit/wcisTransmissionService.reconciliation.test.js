@@ -230,3 +230,35 @@ describe('997 ack', () => {
     expect(data.status).toBe('ack_997_received');
   });
 });
+
+describe('ingestRawAckFile — an ack reaches only its own claim\'s transaction', () => {
+  test('two claims with the same MTC awaiting acks: each record lands on its claim', async () => {
+    await supabase.from('claims').insert([
+      { id: 'cA', claim_number: 'HHW-2026-0A' },
+      { id: 'cB', claim_number: 'HHW-2026-0B' },
+    ]);
+    await seedTransmission('txA');
+    await seedTransaction('txnA', 'txA', { claim_id: 'cA', created_at: '2026-06-01T00:00:00Z' });
+    await seedTransaction('txnB', 'txA', { claim_id: 'cB', created_at: '2026-06-02T00:00:00Z' }); // newest
+
+    const out = await svc.ingestRawAckFile([
+      'HD|943210987|680282468|20261005|1430|3.1',
+      'TR|HHW-2026-0A|00|TR||028|DN0042|Invalid SSN',
+      'TR|1',
+    ].join('\n'), 'test');
+
+    expect(out.matchedTransactions).toBe(1);
+    const status = async (id) => (await supabase.from('wcis_transactions').select('status').eq('id', id).single()).data.status;
+    expect(await status('txnA')).toBe('rejected');          // claim A's transaction
+    expect(await status('txnB')).toBe('stub_transmitted');  // the newest same-MTC row is untouched
+  });
+
+  test('a record for a claim with nothing awaiting an ack is reported, not applied elsewhere', async () => {
+    await supabase.from('claims').insert({ id: 'cC', claim_number: 'HHW-2026-0C' });
+    await seedTransmission('txC');
+    await seedTransaction('txnC', 'txC', { claim_id: 'cC', status: 'accepted' });
+    const out = await svc.ingestRawAckFile(['TA|HHW-2026-0C|00|TA|JCN1|||', 'TA|NO-SUCH-CLAIM|00|TA|JCN2|||'].join('\n'), 'test');
+    expect(out.matchedTransactions).toBe(0);
+    expect(out.unmatched.map(u => u.reason)).toEqual(['NO_TRANSACTION_AWAITING_ACK', 'NO_TRANSACTION_AWAITING_ACK']);
+  });
+});

@@ -1263,3 +1263,53 @@ Totals:
 - convert the benefit-calculation services (TD periods, PD, C&R, disbursements) to units of work;
 - re-key the demo dataset (D-10).
 
+## Review of the direct pushes `4009cbe` and `b6b59e7` — financial ledgers (remediated)
+
+Two commits went straight to `main` outside the PR flow. They added:
+
+- reserve and payment ledgers;
+- a payee vault;
+- loss-fund escrow;
+- the staffing hierarchy;
+- per-body-part compensability;
+- document storage metadata;
+- tenant-wide `tenant_id`.
+
+The direction matches roadmap phases 2–7. The implementation did not meet
+the binding rules. Design of the fix: ADR-0008.
+
+| # | Finding | Fix | Verification |
+|---|---|---|---|
+| 1 | `20261004000001` and `20261005000003` could not apply. One also updated append-only `claim_events` | Rewritten before first application (no database had them) | Contract test (96 assertions, including re-apply) |
+| 2 | Financial tables were readable and writable by `anon` (PERMISSIVE PUBLIC policies with a NULL bypass); `current_tenant_id()` fell back to the default tenant | Deny-by-default, RESTRICTIVE tenant policies, `anon` revoked, strict tenant function | Contract test under Supabase default grants |
+| 3 | The claim-ledger route issued payments with no approval, authority or MFA | It now proposes `payment.issue`; every ledger payment needs its authorization | `tests/integration/ledger-routes.test.js` |
+| 4 | Balance and duplicate races; future-dated timestamps | Per-claim advisory lock; balance = sum of deltas | `tests/pg/financialLedgers.pg.test.js` (fails with the lock removed) |
+| 5 | Swallowed ledger failures inside transactions (disbursement, PD, reserve approval) | Removed: the ledger is part of the unit. Recorded payments cover a shortfall with an explicit deficiency entry and a review diary | pg and in-memory suites |
+| 6 | PD advance ledger rows referenced the advance, not the payment row (FK violation) | Links this week's row | pg test |
+| 7 | Audit entries lost their claim id; `audit_log.tenant_id` does not exist (C&R, disbursement and PD failed on PostgreSQL) | `benefitAudit.recordAudit`, in the unit | Schema write audit (0 problems), pg test |
+| 8 | Void left paid-to-date unchanged, raised incurred, and could run twice | `payment_void` entry; conditional flip under a row lock | pg race test |
+| 9 | Request bodies overrode tenant, actor and claim; employers could read other employers' escrow and loss runs | Explicit fields from the session; staff-only staffing routes; claim scope on body parts | Route tests |
+| 10 | Loss-fund balance read outside the transaction; deposits reactivated frozen accounts; reconciliation not tenant-scoped | Locked re-read; status preserved; tenant-scoped, audited clears | `tests/unit/financialControls.test.js` |
+| 11 | Model output validator expected a 0–1 score and ACCEPTED-style labels; raw priority written to claims | Validator matches the prompt and UI contract; invalid fields flagged, never promoted | `tests/unit/modelGateway.test.js` |
+| 12 | WCIS acks matched by MTC alone (another claim's transaction); short rejections parsed as the trailer | Matched by claim-admin claim number and awaiting-ack status; trailer recognized by its shape | WCIS unit tests |
+| 13 | A document failing its SHA-256 check was still served; storage keys could collide or traverse | 409 with no fallback; keys include the document id and are validated | Route and unit tests |
+| 14 | `admin_status` went stale on reopen, C&R and stip close; litigation status ignored representation | `statusAxesPatch`, used by every status writer | Unit tests |
+| 15 | §5402 QA clock measured from the date of injury; TD schedule year read in local time; out-of-table DOIs priced with another year | Measured from claim form receipt; year read from the date itself; out-of-table DOIs refused | Unit tests |
+| 16 | Demo seed still rejected 3 statements on PostgreSQL (D-10 claimed fixed) | Employers seeded before policies; RFA due date from the statutory helper | `tests/pg/demoReset.pg.test.js` |
+
+New validation requirements (REGULATORY-PENDING):
+
+- **TD min/max for 2020–2025:** each row must be checked against the DWC's
+  published table and committed under `docs/regulatory/`. Results say
+  `statutoryScheduleVerified: false` until then.
+- **LC §5402 receipt-date anchor:** carried from existing copy, still pending
+  verification.
+
+Totals after remediation:
+
+- in-memory suite: 98 suites, 1,482 tests;
+- **real-PostgreSQL suite: 11 suites, 89 tests**;
+- schema contract: 96 assertions;
+- write audit: 326 sites;
+- all passing.
+

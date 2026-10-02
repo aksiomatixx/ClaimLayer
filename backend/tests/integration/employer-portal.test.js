@@ -137,7 +137,8 @@ describe('GET /api/v1/auth/dev-employer-session', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.role).toBe('employer');
-    expect(res.body.employerId).toBe('employer-brightcare-001');
+    // The demo dataset's BrightCare employer (UUID-keyed since D-10).
+    expect(res.body.employerId).toBe('e0000000-0000-0000-0000-000000000001');
     expect(res.body.employerName).toBe('BrightCare Home Health');
     expect(res.headers['set-cookie']).toBeDefined();
   });

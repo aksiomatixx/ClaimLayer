@@ -5,7 +5,10 @@
 
 BEGIN;
 
--- 1. Add storage metadata columns to claim_documents
+-- 1. Add storage metadata columns to claim_documents.
+-- Existing documents were never scanned: they are 'not_scanned' with no scan
+-- time, rather than attested 'clean' by a column default. (Revised before
+-- first application.)
 ALTER TABLE claim_documents
     ADD COLUMN IF NOT EXISTS storage_provider  TEXT NOT NULL DEFAULT 'inline',
     ADD COLUMN IF NOT EXISTS storage_bucket    TEXT DEFAULT 'claim-documents',
@@ -13,8 +16,8 @@ ALTER TABLE claim_documents
     ADD COLUMN IF NOT EXISTS sha256_checksum   TEXT,
     ADD COLUMN IF NOT EXISTS file_size_bytes   BIGINT,
     ADD COLUMN IF NOT EXISTS mime_type         TEXT DEFAULT 'application/pdf',
-    ADD COLUMN IF NOT EXISTS av_scan_status    TEXT NOT NULL DEFAULT 'clean',
-    ADD COLUMN IF NOT EXISTS av_scanned_at     TIMESTAMPTZ DEFAULT now();
+    ADD COLUMN IF NOT EXISTS av_scan_status    TEXT NOT NULL DEFAULT 'not_scanned',
+    ADD COLUMN IF NOT EXISTS av_scanned_at     TIMESTAMPTZ;
 
 -- 2. Constraints for storage providers and AV statuses
 ALTER TABLE claim_documents DROP CONSTRAINT IF EXISTS claim_documents_storage_provider_chk;
@@ -23,7 +26,7 @@ ALTER TABLE claim_documents ADD CONSTRAINT claim_documents_storage_provider_chk
 
 ALTER TABLE claim_documents DROP CONSTRAINT IF EXISTS claim_documents_av_scan_status_chk;
 ALTER TABLE claim_documents ADD CONSTRAINT claim_documents_av_scan_status_chk
-    CHECK (av_scan_status IN ('pending', 'clean', 'infected', 'quarantined'));
+    CHECK (av_scan_status IN ('not_scanned', 'pending', 'clean', 'infected', 'quarantined'));
 
 -- 3. Indexes for rapid storage key resolution
 CREATE INDEX IF NOT EXISTS idx_claim_documents_storage_key

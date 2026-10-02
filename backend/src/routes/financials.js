@@ -8,6 +8,7 @@ const express = require('express');
 const { body, param } = require('express-validator');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const validate = require('../middleware/validate');
+const { humanPrincipal } = require('../policy/principal');
 const lossFundService = require('../services/lossFundService');
 const fileQaSupervisor = require('../services/fileQaSupervisor');
 
@@ -27,11 +28,18 @@ router.post(
   validate,
   async (req, res) => {
     try {
+      // Only the documented fields: the tenant and the actor come from the
+      // session, never from the request body.
+      const actor = humanPrincipal(req.user);
       const account = await lossFundService.createAccount({
-        tenantId: req.user.tenantId,
-        actor: { id: req.user.sub || req.user.email, role: req.user.role },
-        ...req.body,
-      });
+        tenantId:                  actor.tenantId,
+        employerId:                req.body.employerId,
+        accountNumber:             req.body.accountNumber,
+        bankName:                  req.body.bankName,
+        initialDeposit:            req.body.initialDeposit,
+        minimumThreshold:          req.body.minimumThreshold,
+        targetReplenishmentAmount: req.body.targetReplenishmentAmount,
+      }, { actor });
       res.status(201).json({ loss_fund_account: account });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -47,7 +55,14 @@ router.get(
   validate,
   async (req, res) => {
     try {
-      const account = await lossFundService.getAccountByEmployer(req.params.employerId);
+      // An employer user sees only its own employer's account; staff only
+      // their own tenant's.
+      if (req.user.role === 'employer' && req.params.employerId !== (req.user.employerId || req.user.sub)) {
+        return res.status(404).json({ error: 'Loss fund account not found for employer' });
+      }
+      const account = await lossFundService.getAccountByEmployer(req.params.employerId, {
+        tenantId: humanPrincipal(req.user).tenantId,
+      });
       if (!account) return res.status(404).json({ error: 'Loss fund account not found for employer' });
       res.json({ loss_fund_account: account });
     } catch (err) {
@@ -68,13 +83,16 @@ router.post(
   validate,
   async (req, res) => {
     try {
+      const actor = humanPrincipal(req.user);
       const result = await lossFundService.recordDeposit(req.params.id, req.body.amount, {
         reference: req.body.reference,
         notes: req.body.notes,
-        actor: { id: req.user.sub || req.user.email, role: req.user.role },
-      });
+        actor,
+      }, { tenantId: actor.tenantId });
       res.json(result);
     } catch (err) {
+      if (/not found/.test(err.message)) return res.status(404).json({ error: err.message });
+      if (/is closed/.test(err.message)) return res.status(409).json({ error: err.message });
       res.status(500).json({ error: err.message });
     }
   }
@@ -91,9 +109,10 @@ router.post(
   validate,
   async (req, res) => {
     try {
+      const actor = humanPrincipal(req.user);
       const reconciliation = await lossFundService.reconcileClearedPayments(req.body.clearedFeed, {
-        actor: { id: req.user.sub || req.user.email, role: req.user.role },
-      });
+        actor,
+      }, { tenantId: actor.tenantId });
       res.json(reconciliation);
     } catch (err) {
       res.status(500).json({ error: err.message });

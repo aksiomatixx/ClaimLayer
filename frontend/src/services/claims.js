@@ -170,6 +170,9 @@ export async function fetchPaymentLedger(claimId) {
   return _json(await fetch(`${BASE}/claims/${claimId}/ledger/payments`, _opts()));
 }
 
+// Requests a payment: the server records a payment.issue action request
+// (202, pending approval). The payment is issued only when a second person
+// with the authority for the amount approves it in the approval queue.
 export async function issueClaimPayment(claimId, payment) {
   return _json(await fetch(`${BASE}/claims/${claimId}/ledger/payments`, _opts('POST', payment)));
 }

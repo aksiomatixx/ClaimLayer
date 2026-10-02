@@ -24,6 +24,12 @@
 
 const { assertCents } = require('../utils/money');
 
+// Mirrors paymentLedgerService (and the payment_transactions CHECKs), kept
+// here so the policy layer has no service dependency.
+const PAYMENT_TYPES = Object.freeze(['td_temporary_disability', 'pd_advance', 'stip_award',
+  'cnr_settlement', 'medical_treatment', 'legal_expense', 'bill_review_fee']);
+const PAYMENT_METHODS = Object.freeze(['check', 'ach', 'digital_card']);
+
 const AUTONOMY = Object.freeze({
   AUTONOMOUS:           'autonomous',
   PREPARE_FOR_APPROVAL: 'prepare_for_approval',
@@ -137,8 +143,16 @@ const ACTIONS = {
       if (!['indemnity', 'medical', 'expense'].includes(p.category)) {
         throw new PayloadError('category must be indemnity, medical, or expense');
       }
-      if (!p.payment_type || typeof p.payment_type !== 'string') {
-        throw new PayloadError('payment_type is required');
+      if (!PAYMENT_TYPES.includes(p.payment_type)) {
+        throw new PayloadError(`payment_type must be one of: ${PAYMENT_TYPES.join(', ')}`);
+      }
+      if (p.method != null && !PAYMENT_METHODS.includes(p.method)) {
+        throw new PayloadError(`method must be one of: ${PAYMENT_METHODS.join(', ')}`);
+      }
+      for (const k of ['period_start', 'period_end']) {
+        if (p[k] != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(p[k]))) {
+          throw new PayloadError(`${k} must be YYYY-MM-DD`);
+        }
       }
       out.amount_cents = p.amount_cents;
       out.category = p.category;

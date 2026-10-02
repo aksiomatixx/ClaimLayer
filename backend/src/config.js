@@ -76,6 +76,13 @@ const config = {
     inProcessPoller: process.env.JOBS_IN_PROCESS_POLLER !== 'false',
   },
 
+  vault: {
+    // AES-256-GCM key for payee tax ids and bank accounts (any string; it is
+    // hashed to 32 bytes). Required in production before a payee with a tax
+    // id or bank account can be stored — never derived from JWT_SECRET.
+    payeeKey: process.env.PAYEE_VAULT_KEY,
+  },
+
   tenancy: {
     // The well-known default tenant created by the multi-tenancy foundation
     // migration. Sessions that aren't yet tied to a provisioned tenant (dev
