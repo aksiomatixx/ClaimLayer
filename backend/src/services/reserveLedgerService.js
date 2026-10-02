@@ -15,8 +15,14 @@
  *   - 'initial_reserve': Initial baseline allocation (incurred_delta = amount_delta)
  *   - 'reserve_revision': Upward or downward adjustment (incurred_delta = amount_delta)
  *   - 'payment_reduction': Disbursement against reserves (incurred_delta = 0)
+ *   - 'payment_void': Reversal of a payment_reduction (incurred_delta = 0; paid goes down)
  *   - 'recovery_subrogation': Third-party subrogation recovery (incurred_delta = -amount_delta)
  *   - 'closing_reduction': Final reserve zero-out at closure (incurred_delta = amount_delta)
+ *
+ * A category's balance is the SUM of its amount_delta — independent of row
+ * order or timestamps — read under a per-claim transaction lock
+ * (lockClaimLedger), so two concurrent postings cannot both start from the
+ * same balance. resulting_balance is a stored snapshot of that sum.
  */
 
 const crypto        = require('crypto');
@@ -26,13 +32,12 @@ const auditLedger   = require('./auditLedgerService');
 const { runInTransaction } = require('../db/unitOfWork');
 const config        = require('../config');
 
-let _reserveTxSeq = 0;
-
 const CATEGORIES = Object.freeze(['medical', 'indemnity', 'expense']);
 const TRANSACTION_TYPES = Object.freeze([
   'initial_reserve',
   'reserve_revision',
   'payment_reduction',
+  'payment_void',
   'recovery_subrogation',
   'closing_reduction',
 ]);
@@ -40,30 +45,43 @@ const TRANSACTION_TYPES = Object.freeze([
 const _round2 = (n) => Math.round(Number(n) * 100) / 100;
 
 /**
- * Fetch the latest balance for a specific category on a claim.
+ * Serialize every ledger posting on one claim for the rest of the
+ * transaction (pg mode). Payment issuance takes it before its duplicate check,
+ * so the check and the insert are one critical section. Reentrant within a
+ * transaction. Compatibility mode has no transactions and no lock.
  */
+async function lockClaimLedger(tx, claimId) {
+  if (tx && tx.mode === 'pg') {
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`claim-ledger:${claimId}`]);
+  }
+}
+
+/** A category's balance: the sum of its deltas (order-independent). */
 async function _getCategoryBalance(claimId, category, tx = null) {
-  if (tx) {
-    const rows = await tx.select('reserve_transactions', {
-      claim_id: claimId,
-      category,
-    }, { orderBy: ['created_at', 'desc'], limit: 1 });
-    return rows && rows.length ? Number(rows[0].resulting_balance) : 0;
+  if (tx && tx.mode === 'pg') {
+    const rows = await tx.query(
+      `SELECT coalesce(sum(amount_delta), 0)::float8 AS balance, count(*)::int AS n
+         FROM reserve_transactions WHERE claim_id = $1 AND category = $2`, [claimId, category]);
+    return { balance: _round2(rows[0].balance), entries: rows[0].n };
   }
+  const rows = tx
+    ? await tx.select('reserve_transactions', { claim_id: claimId, category })
+    : await _selectLedger(claimId, { category });
+  return {
+    balance: _round2(rows.reduce((sum, r) => sum + Number(r.amount_delta), 0)),
+    entries: rows.length,
+  };
+}
 
-  const { data, error } = await supabase
-    .from('reserve_transactions')
-    .select('resulting_balance')
-    .eq('claim_id', claimId)
-    .eq('category', category)
-    .order('created_at', { ascending: false })
-    .limit(1);
-
+async function _selectLedger(claimId, { category } = {}) {
+  let query = supabase.from('reserve_transactions').select('*').eq('claim_id', claimId);
+  if (category) query = query.eq('category', category);
+  const { data, error } = await query;
   if (error) {
-    logger.error({ msg: 'reserveLedgerService._getCategoryBalance failed', err: error.message, claimId, category });
-    throw new Error(`Failed to read reserve balance: ${error.message}`);
+    logger.error({ msg: 'reserveLedgerService: ledger read failed', err: error.message, claimId });
+    throw new Error(`Failed to read reserve ledger: ${error.message}`);
   }
-  return data && data.length ? Number(data[0].resulting_balance) : 0;
+  return data || [];
 }
 
 /**
@@ -97,7 +115,8 @@ async function postTransaction({
   const effectiveTenantId = tenantId || opts.tenantId || config.tenancy.defaultTenantId;
 
   const run = async (tx) => {
-    const currentBalance = await _getCategoryBalance(claimId, category, tx);
+    await lockClaimLedger(tx, claimId);
+    const { balance: currentBalance } = await _getCategoryBalance(claimId, category, tx);
     const resultingBalance = _round2(currentBalance + delta);
 
     if (resultingBalance < 0) {
@@ -109,8 +128,9 @@ async function postTransaction({
 
     // Incurred calculation
     let incurredDelta = 0;
-    if (transactionType === 'payment_reduction') {
-      // Payment moves dollars from reserve to paid; total incurred is unchanged
+    if (transactionType === 'payment_reduction' || transactionType === 'payment_void') {
+      // A payment (or its void) moves dollars between reserve and paid;
+      // total incurred is unchanged.
       incurredDelta = 0;
     } else if (transactionType === 'recovery_subrogation') {
       // Recovery reduces incurred
@@ -120,7 +140,7 @@ async function postTransaction({
       incurredDelta = delta;
     }
 
-    const now = new Date(Date.now() + (++_reserveTxSeq)).toISOString();
+    const now = new Date().toISOString();
     const row = {
       id: crypto.randomUUID(),
       tenant_id: effectiveTenantId,
@@ -144,10 +164,13 @@ async function postTransaction({
       if (insErr) throw new Error(`reserveLedger: insert failed — ${insErr.message}`);
     }
 
-    // Audit ledger event
+    // Audit ledger event. A caller that records the business action in the
+    // ledger itself (reserve approval, payment issue/void) passes audit: false.
     if (opts.audit !== false) {
       await auditLedger.append({
-        actor: { type: 'human', id: createdBy || 'adjuster', role: 'adjuster' },
+        actor: opts.actor || (createdBy
+          ? { type: 'human', id: createdBy, role: 'adjuster' }
+          : { type: 'system', id: 'system', role: 'system' }),
         action: 'reserve.transaction_posted',
         entity: { type: 'claim', id: claimId },
         claimId,
@@ -165,7 +188,8 @@ async function postTransaction({
       }, { tx });
     }
 
-    // Claim event for UI timeline
+    // Claim event for the UI timeline (the caller's own event may stand in).
+    if (opts.event === false) return row;
     const eventRow = {
       claim_id: claimId,
       type: 'reserve_transaction_posted',
@@ -202,16 +226,11 @@ async function postTransaction({
  *   - total incurred per category & total
  */
 async function getBalances(claimId, opts = {}) {
-  const { data: rows, error } = await supabase
-    .from('reserve_transactions')
-    .select('*')
-    .eq('claim_id', claimId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    logger.error({ msg: 'reserveLedgerService.getBalances failed', err: error.message, claimId });
-    throw new Error(`Failed to load reserve ledger: ${error.message}`);
-  }
+  const rows = opts.tx
+    ? (opts.tx.mode === 'pg'
+      ? await opts.tx.query('SELECT * FROM reserve_transactions WHERE claim_id = $1', [claimId])
+      : await opts.tx.select('reserve_transactions', { claim_id: claimId }))
+    : await _selectLedger(claimId);
 
   const txs = rows || [];
   const categories = {};
@@ -230,12 +249,14 @@ async function getBalances(claimId, opts = {}) {
     const delta = Number(t.amount_delta);
     const incDelta = Number(t.incurred_delta);
 
-    // Latest resulting balance
-    categories[cat].outstanding = Number(t.resulting_balance);
+    categories[cat].outstanding = _round2(categories[cat].outstanding + delta);
 
     if (t.transaction_type === 'payment_reduction') {
-      // Reductions from payments contribute to paid-to-date (delta is negative)
-      categories[cat].paid_to_date = _round2(categories[cat].paid_to_date + Math.abs(delta));
+      // A payment moves its amount into paid-to-date (delta is negative)
+      categories[cat].paid_to_date = _round2(categories[cat].paid_to_date - delta);
+    } else if (t.transaction_type === 'payment_void') {
+      // Its void moves it back out (delta is positive)
+      categories[cat].paid_to_date = _round2(categories[cat].paid_to_date - delta);
     }
 
     categories[cat].total_incurred = _round2(categories[cat].total_incurred + incDelta);
@@ -280,9 +301,37 @@ async function getTransactions(claimId, filters = {}) {
   return data || [];
 }
 
+/**
+ * Move each category's outstanding reserve to an approved target, posting
+ * only the differences — inside the caller's unit of work, under the claim
+ * ledger lock. Used by reserve approval (claimService), which records the
+ * approval itself in the audit ledger and the claim timeline.
+ */
+async function postToTargets({ tenantId, claimId, targets, reason, createdBy, actionRequestId = null }, opts = {}) {
+  if (!opts.tx) throw new Error('postToTargets requires the caller\'s unit of work (opts.tx)');
+  await lockClaimLedger(opts.tx, claimId);
+  const posted = [];
+  for (const category of CATEGORIES) {
+    if (targets[category] === undefined || targets[category] === null) continue;
+    const target = _round2(targets[category]);
+    if (!Number.isFinite(target) || target < 0) throw new Error(`${category} reserve target must be a non-negative number`);
+    const { balance, entries } = await _getCategoryBalance(claimId, category, opts.tx);
+    const delta = _round2(target - balance);
+    if (delta === 0) continue;
+    posted.push(await postTransaction({
+      tenantId, claimId, category, amountDelta: delta,
+      transactionType: entries === 0 ? 'initial_reserve' : 'reserve_revision',
+      reason, source: 'ADJUSTER', createdBy, actionRequestId,
+    }, { ...opts, audit: false, event: false }));
+  }
+  return posted;
+}
+
 module.exports = {
   CATEGORIES,
   TRANSACTION_TYPES,
+  lockClaimLedger,
+  postToTargets,
   postTransaction,
   getBalances,
   getTransactions,

@@ -30,7 +30,6 @@ const config = require('../config');
 const logger       = require('../logger');
 const jobQueue     = require('./jobQueue');
 const { runInTransaction } = require('../db/unitOfWork');
-const auditLedger          = require('./auditLedgerService');
 
 // Lazy requires to break cycles.
 function _getPdService()         { return require('./pdService'); }
@@ -545,26 +544,24 @@ async function recordDisbursementPayment(disbursementId, { paidDate, reference }
         .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
     }
 
-    // Phase 3: Authoritative Payment Ledger Recording
-    try {
-      const paymentLedger = require('./paymentLedgerService');
-      const paymentAmount = Number(row.net_to_worker_now || row.total_award || 0);
-      if (paymentAmount > 0) {
-        await paymentLedger.issuePayment({
-          tenantId,
-          claimId: row.claim_id,
-          category: 'indemnity',
-          paymentType: row.award_type === 'stip_f_and_a' ? 'stip_award' : 'cnr_settlement',
-          amount: paymentAmount,
-          method: 'check',
-          checkNumber: reference || null,
-          memo: `Disbursement payout for ${row.award_type} (Disbursement ${disbursementId})`,
-          disbursementId,
-          createdBy: opts.actor?.id || 'adjuster',
-        }, { tx });
-      }
-    } catch (payErr) {
-      logger.warn({ msg: 'disbursementService: payment ledger recording warning (non-fatal)', err: payErr.message, disbursementId });
+    // The authoritative payment ledger records the payout in this unit and
+    // draws the indemnity reserve down. The disbursement was approved before
+    // it could be paid (status 'approved' above); if the ledger cannot record
+    // it (e.g. the reserve is too low), the payment is not recorded at all.
+    const paymentAmount = Number(row.net_to_worker_now || row.total_award || 0);
+    if (paymentAmount > 0) {
+      await require('./paymentLedgerService').issuePayment({
+        tenantId,
+        claimId: row.claim_id,
+        category: 'indemnity',
+        paymentType: row.award_type === 'stip_f_and_a' ? 'stip_award' : 'cnr_settlement',
+        amount: paymentAmount,
+        method: 'check',
+        checkNumber: reference || null,
+        memo: `Disbursement payout for ${row.award_type} (Disbursement ${disbursementId})`,
+        disbursementId,
+        createdBy: opts.actor?.id || null,
+      }, { tx, actor: opts.actor || { type: 'system', id: 'system', role: 'system' }, recorded: true });
     }
 
     if (interestOwed > 0) {
@@ -615,12 +612,11 @@ async function recordDisbursementPayment(disbursementId, { paidDate, reference }
         claim = res.data;
       }
       const priorStatus = claim ? claim.status : null;
+      const statusPatch = { ...require('./claimService').statusAxesPatch(newClaimStatus, claim), updated_at: now };
       if (tx) {
-        await tx.update('claims', { status: newClaimStatus, updated_at: now }, { id: row.claim_id });
+        await tx.update('claims', statusPatch, { id: row.claim_id });
       } else {
-        await supabase.from('claims')
-          .update({ status: newClaimStatus, updated_at: now })
-          .eq('id', row.claim_id);
+        await supabase.from('claims').update(statusPatch).eq('id', row.claim_id);
       }
 
       await _writeAuditLog(
@@ -836,38 +832,15 @@ function _computeStatutoryPayBy(awardType, awardServiceDate) {
 }
 
 async function _writeAuditLog(action, resourceId, description, newValue, tx = null, actor = null, claimId = null) {
-  try {
-    await auditLedger.append({
-      tenant_id: tx?.tenantId || config.tenancy.defaultTenantId,
-      claim_id: claimId,
-      actor: actor || { type: 'system', id: 'system', role: 'system' },
-      action: `disbursement.${action.replace(/^disbursement_/, '')}`,
-      entity: { type: 'award_disbursement', id: resourceId },
-      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
-    }, { tx });
-  } catch (err) {
-    logger.warn({ msg: 'disbursementService: auditLedger append failed', err: err.message, action });
-  }
-
-  try {
-    const row = {
-      tenant_id:     tx?.tenantId || config.tenancy.defaultTenantId,
-      action,
-      resource_type: 'award_disbursement',
-      resource_id:   resourceId,
-      description,
-      new_value:     newValue,
-      user_role:     'system',
-      created_at:    new Date().toISOString(),
-    };
-    if (tx) {
-      await tx.insert('audit_log', row).catch(() => null);
-    } else {
-      await supabase.from('audit_log').insert(row);
-    }
-  } catch (err) {
-    logger.error({ msg: 'disbursementService: audit_log write failed', err: err.message, action, resourceId });
-  }
+  await require('./benefitAudit').recordAudit({
+    tx, actor, claimId,
+    action:       `disbursement.${action.replace(/^disbursement_/, '')}`,
+    entityType:   'award_disbursement',
+    entityId:     resourceId,
+    legacyAction: action,
+    description,
+    newValue,
+  });
 }
 
 // Job handler (wcis.disbursement_paid): SROI PY with the stip breakdown; if

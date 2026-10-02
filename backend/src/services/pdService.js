@@ -25,7 +25,6 @@ const config               = require('../config');
 const logger               = require('../logger');
 const jobQueue             = require('./jobQueue');
 const { runInTransaction } = require('../db/unitOfWork');
-const auditLedger          = require('./auditLedgerService');
 
 // ── Lazy requires ────────────────────────────────────────────────────────────
 function _getClaimService() { return require('./claimService'); }
@@ -138,33 +137,23 @@ function _drawIABlock(page, y, fonts) {
   return y - 6;
 }
 
+// The principal a recorded payment is attributed to when the route did not
+// pass one: the staff member who recorded it, else the system.
+function _paymentActor(paidBy) {
+  return paidBy ? { type: 'human', id: paidBy, role: 'admin' } : { type: 'system', id: 'system', role: 'system' };
+}
+
 // ── Audit log ────────────────────────────────────────────────────────────────
 async function _writeAuditLog(action, resourceType, resourceId, description, newValue, tx = null, actor = null) {
-  try {
-    await auditLedger.append({
-      actor: actor || { type: 'system', id: 'system', role: 'system' },
-      action: `pd.${action.replace(/^pd_/, '')}`,
-      entity: { type: resourceType, id: resourceId },
-      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
-    }, { tx });
-  } catch (err) {
-    logger.warn({ msg: 'pdService: auditLedger append failed', err: err.message, action });
-  }
-
-  try {
-    const row = {
-      action, resource_type: resourceType, resource_id: resourceId,
-      description, new_value: newValue, user_role: 'system',
-      created_at: new Date().toISOString(),
-    };
-    if (tx) {
-      await tx.insert('audit_log', row).catch(() => null);
-    } else {
-      await supabase.from('audit_log').insert(row);
-    }
-  } catch {
-    // legacy dual-write non-fatal
-  }
+  await require('./benefitAudit').recordAudit({
+    tx, actor,
+    action:       `pd.${action.replace(/^pd_/, '')}`,
+    entityType:   resourceType,
+    entityId:     resourceId,
+    legacyAction: action,
+    description,
+    newValue,
+  });
 }
 
 // ── Diary helper ─────────────────────────────────────────────────────────────
@@ -473,8 +462,10 @@ async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
   const now = new Date().toISOString();
 
   const run = async (tx) => {
-    await tx.insert('pd_advance_payments', {
-      tenant_id:       tx.tenantId || adv.tenant_id || config.tenancy.defaultTenantId,
+    const tenantId = tx.tenantId || adv.tenant_id || config.tenancy.defaultTenantId;
+    const paymentRow = await tx.insert('pd_advance_payments', {
+      id:              require('crypto').randomUUID(),
+      tenant_id:       tenantId,
       pd_advance_id:   pdAdvanceId,
       claim_id:        adv.claim_id,
       week_start_date: weekStartDate,
@@ -487,26 +478,24 @@ async function recordPDAdvancePayment(pdAdvanceId, opts = {}) {
       created_at:      now,
     });
 
-    // Phase 3: Authoritative Payment Ledger Recording
-    try {
-      const paymentLedger = require('./paymentLedgerService');
-      await paymentLedger.issuePayment({
-        tenantId: tx.tenantId || adv.tenant_id || config.tenancy.defaultTenantId,
-        claimId: adv.claim_id,
-        category: 'indemnity',
-        paymentType: 'pd_advance',
-        amount,
-        method: 'check',
-        checkNumber: reference || null,
-        memo: `PD advance payment for week ${weekStartDate} to ${weekEndDate}`,
-        periodStart: weekStartDate,
-        periodEnd: weekEndDate,
-        pdAdvancePaymentId: pdAdvanceId,
-        createdBy: paidBy || null,
-      }, { tx });
-    } catch (payErr) {
-      logger.warn({ msg: 'pdService: payment ledger write warning (non-fatal)', err: payErr.message, pdAdvanceId });
-    }
+    // The authoritative payment ledger records the same payment in this unit,
+    // linked to THIS week's payment row (not the advance), and draws the
+    // indemnity reserve down. If it cannot (e.g. the reserve is too low), the
+    // payment is not recorded at all.
+    await require('./paymentLedgerService').issuePayment({
+      tenantId,
+      claimId: adv.claim_id,
+      category: 'indemnity',
+      paymentType: 'pd_advance',
+      amount,
+      method: 'check',
+      checkNumber: reference || null,
+      memo: `PD advance payment for week ${weekStartDate} to ${weekEndDate}`,
+      periodStart: weekStartDate,
+      periodEnd: weekEndDate,
+      pdAdvancePaymentId: paymentRow.id,
+      createdBy: paidBy || null,
+    }, { tx, actor: opts.actor || _paymentActor(paidBy), recorded: true });
 
     const advUpdate = {};
     if (!adv.first_payment_at) advUpdate.first_payment_at = now;

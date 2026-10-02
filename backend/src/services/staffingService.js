@@ -176,7 +176,9 @@ async function getClientLossRun({ hostEmployerId, startDate = null, endDate = nu
   if (!hostEmployerId) throw new Error('hostEmployerId is required');
 
   const hostEmployer = await getHostEmployer(hostEmployerId);
-  if (!hostEmployer) throw new Error(`Host employer not found: ${hostEmployerId}`);
+  if (!hostEmployer || (tenantId && hostEmployer.tenant_id !== tenantId)) {
+    throw new Error(`Host employer not found: ${hostEmployerId}`);
+  }
 
   let query = supabase
     .from('claims')

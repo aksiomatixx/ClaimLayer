@@ -385,26 +385,51 @@ async function ingestRawAckFile(rawContent, environment = 'production') {
   const nowIso = new Date().toISOString();
 
   const perTransaction = [];
+  const unmatched = [];
+  const used = new Set();
   let matchedCount = 0;
 
+  // An ack record names its claim by the claim-administrator claim number it
+  // was filed under (DN15 — claims.claim_number, or the claim id when there is
+  // none: wcisPayloadService). It matches only that claim's transaction with
+  // the same MTC awaiting an ack in this environment — never another claim's
+  // transaction that happens to share the MTC.
+  const AWAITING_ACK = ['transmitted', 'stub_transmitted', 'batched'];
   for (const rec of parsed.records) {
+    const claimNumber = String(rec.claimAdminClaimNumber || '').trim();
+    if (!claimNumber) {
+      unmatched.push({ claimAdminClaimNumber: null, mtcCode: rec.mtcCode, reason: 'NO_CLAIM_NUMBER' });
+      continue;
+    }
+    const { data: claims } = await supabase
+      .from('claims').select('id').eq('claim_number', claimNumber);
+    const claimIds = [...new Set([...(claims || []).map(c => c.id), claimNumber])];
+
     const { data: txns } = await supabase
       .from('wcis_transactions')
-      .select('id, transmission_id, claim_id, mtc_code')
+      .select('id, transmission_id, claim_id, mtc_code, status')
       .eq('environment', environment)
       .eq('mtc_code', rec.mtcCode)
-      .order('created_at', { ascending: false })
-      .limit(1);
+      .in('claim_id', claimIds)
+      .in('status', AWAITING_ACK)
+      .order('created_at', { ascending: false });
 
-    if (txns && txns.length > 0) {
-      matchedCount++;
-      perTransaction.push({
-        transaction_id: txns[0].id,
-        result:         rec.result,
-        jcn:            rec.jcn,
-        errors:         rec.errors,
-      });
+    const txn = (txns || []).find(t => !used.has(t.id));
+    if (!txn) {
+      unmatched.push({ claimAdminClaimNumber: claimNumber, mtcCode: rec.mtcCode, reason: 'NO_TRANSACTION_AWAITING_ACK' });
+      continue;
     }
+    used.add(txn.id);
+    matchedCount++;
+    perTransaction.push({
+      transaction_id: txn.id,
+      result:         rec.result,
+      jcn:            rec.jcn,
+      errors:         rec.errors,
+    });
+  }
+  if (unmatched.length) {
+    logger.warn({ msg: 'wcis: ack records with no matching transaction', environment, unmatched });
   }
 
   const batch = {
@@ -422,6 +447,7 @@ async function ingestRawAckFile(rawContent, environment = 'production') {
   return {
     parsedRecords: parsed.records.length,
     matchedTransactions: matchedCount,
+    unmatched,
     summary: parsed.summary,
   };
 }

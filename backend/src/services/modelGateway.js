@@ -150,14 +150,23 @@ function verifyClaimCorroboration(extracted, claim) {
 
 // ── Model Output Validation & Operational Guardrails (Defect D-8) ────────────
 
-const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'];
-const VALID_COMPENSABILITIES = ['ACCEPTED', 'DENIED', 'DELAYED', 'PENDING'];
+// The output contract of prompts/compensability_analysis.txt — and what the
+// UI keys on (theme.js PRI_COLOR, AdminDashboard PRI_ORDER, ClaimDrawer).
+const VALID_PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
+const VALID_COMPENSABILITIES = ['Likely Compensable', 'Questionable', 'Non-Compensable'];
 const MAX_SUGGESTED_RESERVE = 5_000_000; // $5M sanity limit
 
+// Canonical spelling for a case-insensitive match, or null.
+function _canonical(value, allowed) {
+  if (typeof value !== 'string') return null;
+  const want = value.trim().toLowerCase();
+  return allowed.find(a => a.toLowerCase() === want) || null;
+}
+
+// An unrecognized priority is escalated, not defaulted down: an invalid model
+// answer gets a human's attention sooner, never later.
 function sanitizePriority(priority) {
-  if (!priority || typeof priority !== 'string') return 'medium';
-  const clean = priority.trim().toLowerCase();
-  return VALID_PRIORITIES.includes(clean) ? clean : 'medium';
+  return _canonical(priority, VALID_PRIORITIES) || 'High';
 }
 
 function sanitizeReserveAmount(amount) {
@@ -176,22 +185,32 @@ function validateCompensabilityAnalysis(rawAnalysis) {
   if (!rawAnalysis || typeof rawAnalysis !== 'object') {
     throw new Error('Analysis output must be an object');
   }
+  const guardrailFlags = [];
 
-  const priority = sanitizePriority(rawAnalysis.priority);
-  const cleanComp = String(rawAnalysis.compensability || 'Pending').trim();
-  const upperComp = cleanComp.toUpperCase();
-  const compensability = VALID_COMPENSABILITIES.includes(upperComp) ? upperComp : cleanComp;
+  const priority = _canonical(rawAnalysis.priority, VALID_PRIORITIES);
+  if (!priority) guardrailFlags.push('invalid_priority_escalated');
 
-  let compensabilityScore = parseFloat(rawAnalysis.compensabilityScore);
-  if (isNaN(compensabilityScore) || compensabilityScore < 0) {
-    compensabilityScore = 50;
+  // An unrecognized label is never promoted to a determination: it becomes
+  // 'Questionable', which routes the claim to the adjuster's judgment.
+  const compensability = _canonical(rawAnalysis.compensability, VALID_COMPENSABILITIES);
+  if (!compensability) guardrailFlags.push('invalid_compensability_label');
+
+  // The prompt's scale is an integer 0–100. Anything else is unknown (null),
+  // not a made-up midpoint.
+  let compensabilityScore = Number(rawAnalysis.compensabilityScore);
+  if (rawAnalysis.compensabilityScore === null || rawAnalysis.compensabilityScore === ''
+      || !Number.isFinite(compensabilityScore) || compensabilityScore < 0 || compensabilityScore > 100) {
+    compensabilityScore = null;
+    guardrailFlags.push('invalid_compensability_score');
+  } else {
+    compensabilityScore = Math.round(compensabilityScore);
   }
 
   const validated = {
     ...rawAnalysis,
-    priority,
-    compensability,
-    compensabilityScore: Math.round(compensabilityScore * 100) / 100,
+    priority:       priority || 'High',
+    compensability: compensability || 'Questionable',
+    compensabilityScore,
     suggestedMedicalReserve: sanitizeReserveAmount(rawAnalysis.suggestedMedicalReserve),
     suggestedIndemnityReserve: sanitizeReserveAmount(rawAnalysis.suggestedIndemnityReserve),
     suggestedExpenseReserve: sanitizeReserveAmount(rawAnalysis.suggestedExpenseReserve),
@@ -204,6 +223,7 @@ function validateCompensabilityAnalysis(rawAnalysis) {
     rationale: typeof rawAnalysis.rationale === 'string'
       ? rawAnalysis.rationale.slice(0, 2000)
       : '',
+    guardrailFlags,
   };
 
   return validated;

@@ -21,6 +21,14 @@ const _round2 = (n) => Math.round(Number(n) * 100) / 100;
 
 // ── 1. California Statutory TD Min/Max Rate Schedule by DOI ───────────────────
 // Labor Code §4453(a)
+//
+// REGULATORY-PENDING (validation requirement, not a verified rule): only the
+// 2026 row is corroborated elsewhere in the repo (docs/integrations.md,
+// adp.js). The 2020–2025 rows arrived without a committed source, and 2023
+// and 2024 are identical, which the annual adjustment makes unlikely. Results
+// computed from an unverified row say so (statutoryScheduleVerified: false)
+// until each row is checked against the DWC's published table and committed
+// under docs/regulatory/.
 const CA_TD_STATUTORY_SCHEDULE = Object.freeze({
   2020: { min: 194.91, max: 1299.43 },
   2021: { min: 203.44, max: 1356.31 },
@@ -30,22 +38,39 @@ const CA_TD_STATUTORY_SCHEDULE = Object.freeze({
   2025: { min: 245.98, max: 1639.87 },
   2026: { min: 252.03, max: 1680.29 },
 });
+const VERIFIED_SCHEDULE_YEARS = Object.freeze([2026]);
 
 const DEFAULT_SCHEDULE_YEAR = 2026;
 
+// The calendar year of a date-of-injury, read from the date itself — never
+// through the server's local time zone (new Date('2025-01-01').getFullYear()
+// is 2024 west of UTC).
+function _doiYear(dateOfInjury) {
+  const m = /^(\d{4})-\d{2}-\d{2}/.exec(String(dateOfInjury));
+  if (m) return Number(m[1]);
+  const t = new Date(dateOfInjury);
+  return Number.isNaN(t.getTime()) ? null : t.getUTCFullYear();
+}
+
+/**
+ * The TD min/max for a date of injury. No DOI means the current schedule
+ * (intake estimates). A DOI outside the table is refused rather than priced
+ * with another year's limits.
+ */
 function getTDSchedule(dateOfInjury) {
   let year = DEFAULT_SCHEDULE_YEAR;
   if (dateOfInjury) {
-    const parsed = new Date(dateOfInjury).getFullYear();
-    if (parsed >= 2020 && parsed <= 2026) {
-      year = parsed;
-    } else if (parsed < 2020) {
-      year = 2020;
+    year = _doiYear(dateOfInjury);
+    if (!year || !CA_TD_STATUTORY_SCHEDULE[year]) {
+      const e = new Error(`TD_SCHEDULE_UNAVAILABLE: no statutory TD min/max on file for a ${year || 'invalid'} date of injury`);
+      e.code = 'TD_SCHEDULE_UNAVAILABLE';
+      throw e;
     }
   }
   return {
     year,
     ...CA_TD_STATUTORY_SCHEDULE[year],
+    verified: VERIFIED_SCHEDULE_YEARS.includes(year),
   };
 }
 
@@ -165,6 +190,7 @@ function calculateTDRate({ aww, dateOfInjury = null, payStatements = null, payFr
     statutoryMin:    schedule.min,
     statutoryMax:    schedule.max,
     statutoryYear:   schedule.year,
+    statutoryScheduleVerified: schedule.verified,
     weeksCalculated: awwMeta?.weeksCounted || 1,
     totalGross:      awwMeta?.totalGross || effectiveAWW,
   };

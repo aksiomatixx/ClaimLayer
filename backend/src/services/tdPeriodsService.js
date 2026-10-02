@@ -31,7 +31,6 @@ const { supabase }         = require('./supabase');
 const config               = require('../config');
 const logger               = require('../logger');
 const { runInTransaction } = require('../db/unitOfWork');
-const auditLedger          = require('./auditLedgerService');
 const jobQueue             = require('./jobQueue');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -91,37 +90,17 @@ function _resolveActor(actorEmail, opts = {}) {
 }
 
 async function _writeAudit(action, resourceId, description, newValue, actorEmail, opts = {}, tx = null) {
-  const actor = _resolveActor(actorEmail, opts);
-  const auditAction = `td.${action.replace(/^td_/, '')}`;
-  try {
-    await auditLedger.append({
-      actor,
-      action: auditAction,
-      entity: { type: 'td_period', id: resourceId },
-      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
-    }, { tx });
-  } catch (err) {
-    logger.warn({ msg: 'tdPeriodsService: auditLedger append failed', err: err.message, action });
-  }
-
-  try {
-    const row = {
-      action,
-      resource_type: 'td_period',
-      resource_id:   resourceId,
-      description,
-      new_value:     newValue,
-      user_role:     'admin',
-      created_at:    new Date().toISOString(),
-    };
-    if (tx) {
-      await tx.insert('audit_log', row).catch(() => null);
-    } else {
-      await supabase.from('audit_log').insert(row);
-    }
-  } catch {
-    // legacy dual-write non-fatal
-  }
+  await require('./benefitAudit').recordAudit({
+    tx,
+    actor:        _resolveActor(actorEmail, opts),
+    action:       `td.${action.replace(/^td_/, '')}`,
+    entityType:   'td_period',
+    entityId:     resourceId,
+    legacyAction: action,
+    description,
+    newValue,
+    userRole:     'admin',
+  });
 }
 
 async function _writeClaimEvent(claimId, type, data, tx = null) {
@@ -140,22 +119,29 @@ async function _writeClaimEvent(claimId, type, data, tx = null) {
 // ── Read operations ──────────────────────────────────────────────────────────
 
 /**
- * WCIS trigger enqueue inside the unit of work.
+ * WCIS trigger for a TD change. wcisTriggerService reads the claim and the
+ * period through its own connection, so inside a unit of work it runs AFTER
+ * commit: it sees the committed period, and a rolled-back change never
+ * reaches WCIS. Best-effort, as before: a failure is logged and the benefit
+ * change stands (making it a durable job is the TD-units follow-up, ADR-0007).
  */
 async function _enqueueWcis(claimId, triggerEvent, sourceRecordId, eventDate, payloadContext, tx = null) {
-  try {
-    const wcis = require('./wcisTriggerService');
-    await wcis.enqueueIfReportable({
-      claim_id:         claimId,
-      trigger_event:    triggerEvent,
-      source_service:   'tdPeriodsService',
-      source_record_id: sourceRecordId,
-      event_date:       eventDate,
-      payload_context:  payloadContext || {},
-    });
-  } catch (e) {
-    logger.error({ msg: 'tdPeriodsService: WCIS enqueue failed (non-fatal)', triggerEvent, claimId, err: e.message });
-  }
+  const fire = async () => {
+    try {
+      const wcis = require('./wcisTriggerService');
+      await wcis.enqueueIfReportable({
+        claim_id:         claimId,
+        trigger_event:    triggerEvent,
+        source_service:   'tdPeriodsService',
+        source_record_id: sourceRecordId,
+        event_date:       eventDate,
+        payload_context:  payloadContext || {},
+      });
+    } catch (e) {
+      logger.error({ msg: 'tdPeriodsService: WCIS enqueue failed (non-fatal)', triggerEvent, claimId, err: e.message });
+    }
+  };
+  if (tx) tx.afterCommit(fire); else await fire();
 }
 
 async function listForClaim(claimId) {

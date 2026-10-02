@@ -6,7 +6,12 @@
  * Scans open claims to detect compliance exceptions, statutory deadlines,
  * and reserve adequacy anomalies:
  *   1. Labor Code §5402 90-Day Compensability Presumption:
- *      Alerts adjuster when 90-day investigation clock is within 15 days of expiring.
+ *      Alerts the adjuster when the presumption date — 90 calendar days from
+ *      claim form receipt (claims.filed_at, the same anchor the
+ *      COMPENSABILITY_DECISION_DUE diary uses) — is within 15 days or has
+ *      passed on an undecided claim. REGULATORY-PENDING: LC §5402 is carried
+ *      from existing repo copy and remains pending verification under
+ *      docs/regulatory/.
  *   2. Reserve Adequacy Anomaly:
  *      Flags claims open > 30 days with $0 reserves across all categories.
  *   3. Overdue PR-2 Progress Reports (CCR §9785):
@@ -33,7 +38,7 @@ async function runFileQASweep({ tenantId = null } = {}) {
 
   let query = supabase
     .from('claims')
-    .select('id, claim_number, date_of_injury, status, admin_status, compensability_status, litigation_status, attorney_represented, created_at, tenant_id')
+    .select('id, claim_number, date_of_injury, filed_at, status, admin_status, compensability_status, litigation_status, attorney_represented, created_at, tenant_id')
     .neq('status', 'closed');
 
   if (tenantId) query = query.eq('tenant_id', tenantId);
@@ -49,30 +54,55 @@ async function runFileQASweep({ tenantId = null } = {}) {
 
   for (const c of claimList) {
     const claimId = c.id;
-    const doi = c.date_of_injury ? new Date(c.date_of_injury) : null;
     const createdAt = new Date(c.created_at || nowIso);
-    const daysSinceDoi = doi ? Math.floor((now.getTime() - doi.getTime()) / MS_PER_DAY) : 0;
     const daysSinceCreated = Math.floor((now.getTime() - createdAt.getTime()) / MS_PER_DAY);
 
-    // ── Exception 1: LC §5402 90-Day Compensability Clock ────────────────────
-    if (c.compensability_status === 'pending_investigation' && daysSinceDoi >= 75 && daysSinceDoi < 90) {
-      const daysRemaining = 90 - daysSinceDoi;
-      findings.push({
-        claimId,
-        claimNumber: c.claim_number,
-        exceptionType: 'LC_5402_APPROACHING_DEADLINE',
-        severity: 'CRITICAL',
-        description: `Labor Code §5402: 90-day compensability investigation expires in ${daysRemaining} days. Compensability will be legally presumed accepted if not delayed or denied.`,
-      });
+    // ── Exception 1: LC §5402 presumption date (claim form receipt + 90 days) ─
+    // Measured from claim form receipt, never from the date of injury (a claim
+    // reported weeks after the injury would otherwise be flagged — or missed —
+    // on the wrong date). Open while compensability is undecided or delayed.
+    if (['pending_investigation', 'delayed'].includes(c.compensability_status || 'pending_investigation')) {
+      const presumption = _presumptionDate(c.filed_at);
+      if (!presumption) {
+        findings.push({
+          claimId,
+          claimNumber: c.claim_number,
+          exceptionType: 'LC_5402_RECEIPT_DATE_MISSING',
+          severity: 'HIGH',
+          description: 'Claim form receipt date is missing: the LC §5402 presumption date cannot be computed. Record the receipt date.',
+        });
+      } else {
+        const today = nowIso.slice(0, 10);
+        const daysRemaining = Math.round((Date.parse(`${presumption}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / MS_PER_DAY);
+        if (daysRemaining < 0) {
+          findings.push({
+            claimId,
+            claimNumber: c.claim_number,
+            exceptionType: 'LC_5402_PRESUMPTION_DATE_PASSED',
+            severity: 'CRITICAL',
+            presumptionDate: presumption,
+            description: `Labor Code §5402: the presumption date (${presumption}, 90 days from claim form receipt) has passed with compensability undecided. Escalate to the supervisor.`,
+          });
+        } else if (daysRemaining <= 15) {
+          findings.push({
+            claimId,
+            claimNumber: c.claim_number,
+            exceptionType: 'LC_5402_APPROACHING_DEADLINE',
+            severity: 'CRITICAL',
+            presumptionDate: presumption,
+            description: `Labor Code §5402: ${daysRemaining} day(s) to the presumption date (${presumption}). An undenied claim is presumed compensable after it.`,
+          });
 
-      // Ensure a high-priority diary exists
-      await _ensureDiary(claimId, {
-        tenantId: c.tenant_id,
-        diaryType: 'LC_5402_COMPENSABILITY_DECISION',
-        priority: 'critical',
-        notes: `Urgent statutory deadline: ${daysRemaining} days until LC §5402 presumption of compensability applies. Complete investigation and issue determination notice.`,
-        daysFromNow: Math.max(1, daysRemaining - 3),
-      });
+          // Ensure a high-priority diary exists
+          await _ensureDiary(claimId, {
+            tenantId: c.tenant_id,
+            diaryType: 'LC_5402_COMPENSABILITY_DECISION',
+            priority: 'CRITICAL',
+            notes: `Statutory date ${presumption}: ${daysRemaining} day(s) until the LC §5402 presumption of compensability applies. Complete the investigation and issue the determination notice.`,
+            daysFromNow: Math.max(0, daysRemaining - 3),
+          });
+        }
+      }
     }
 
     // ── Exception 2: Zero Reserve Adequacy Anomaly ────────────────────────────
@@ -81,7 +111,8 @@ async function runFileQASweep({ tenantId = null } = {}) {
       try {
         balances = await reserveLedger.getBalances(claimId);
       } catch (e) {
-        // Non-fatal
+        // A read failure skips this one check for this claim; it is logged, not hidden.
+        logger.warn({ msg: 'fileQaSupervisor: reserve balance read failed', claimId, err: e.message });
       }
 
       if (balances && balances.totals.outstanding_reserves === 0 && balances.totals.paid_to_date === 0) {
@@ -96,7 +127,7 @@ async function runFileQASweep({ tenantId = null } = {}) {
         await _ensureDiary(claimId, {
           tenantId: c.tenant_id,
           diaryType: 'RESERVE_ADEQUACY_REVIEW',
-          priority: 'high',
+          priority: 'HIGH',
           notes: `File audit exception: Claim open ${daysSinceCreated} days with zero reserves. Itemize worksheet and establish initial reserves.`,
           daysFromNow: 5,
         });
@@ -133,6 +164,14 @@ async function runFileQASweep({ tenantId = null } = {}) {
   };
 }
 
+// Claim form receipt + 90 calendar days, as a YYYY-MM-DD (UTC) date, or null.
+function _presumptionDate(filedAt) {
+  if (!filedAt) return null;
+  const t = Date.parse(filedAt);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t + 90 * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
 async function _ensureDiary(claimId, { tenantId, diaryType, priority, notes, daysFromNow }) {
   const { data: existing } = await supabase
     .from('diaries')
@@ -161,4 +200,5 @@ async function _ensureDiary(claimId, { tenantId, diaryType, priority, notes, day
 
 module.exports = {
   runFileQASweep,
+  _presumptionDate,
 };

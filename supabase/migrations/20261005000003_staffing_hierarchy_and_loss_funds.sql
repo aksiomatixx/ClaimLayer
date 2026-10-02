@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS client_assignments (
   tenant_id         UUID NOT NULL REFERENCES tenants(id),
   agency_id         UUID NOT NULL REFERENCES staffing_agencies(id),
   host_employer_id  UUID NOT NULL REFERENCES host_employers(id),
-  employee_id       VARCHAR(60) NOT NULL REFERENCES employees(id),
+  employee_id       UUID NOT NULL REFERENCES employees(id),
   job_title         VARCHAR(100),
   class_code        VARCHAR(20),
   hourly_wage       NUMERIC(8,2),
@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_body_parts_claim
 CREATE TABLE IF NOT EXISTS loss_fund_accounts (
   id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id                   UUID NOT NULL REFERENCES tenants(id),
-  employer_id                 VARCHAR(60) NOT NULL REFERENCES employers(id),
+  employer_id                 UUID NOT NULL REFERENCES employers(id),
   account_number              VARCHAR(50) NOT NULL,
   bank_name                   VARCHAR(100),
   escrow_balance              NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -213,6 +213,12 @@ ALTER TABLE loss_fund_accounts FORCE ROW LEVEL SECURITY;
 ALTER TABLE loss_fund_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE loss_fund_transactions FORCE ROW LEVEL SECURITY;
 
+-- Deny by default: no permissive policy, so anon and authenticated read and
+-- write nothing; the backend (service role / owner connection) bypasses RLS.
+-- The RESTRICTIVE tenant policy keeps any future permissive grant
+-- tenant-bound. (Revised before first application: the original policy text
+-- did not parse, and was PERMISSIVE, TO PUBLIC, passing whenever
+-- app.tenant_id was unset.)
 DO $$
 DECLARE
   tbl TEXT;
@@ -226,23 +232,26 @@ BEGIN
     'loss_fund_transactions'
   ]
   LOOP
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_policies
-      WHERE tablename = tbl AND policyname = tbl || '_tenant_isolation'
-    ) THEN
-      EXECUTE format(
-        'CREATE POLICY %I ON %I FOR ALL USING (
-          tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''信::UUID
-          OR current_setting(''app.tenant_id'', true) IS NULL
-        ) WITH CHECK (
-          tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''信::UUID
-          OR current_setting(''app.tenant_id'', true) IS NULL
-        );',
-        tbl || '_tenant_isolation',
-        tbl
-      );
-    END IF;
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I', tbl || '_tenant_isolation', tbl);
+    EXECUTE format(
+      'CREATE POLICY %I ON %I AS RESTRICTIVE FOR ALL TO authenticated
+         USING (tenant_id = app.current_tenant_id())
+         WITH CHECK (tenant_id = app.current_tenant_id())',
+      tbl || '_tenant_isolation', tbl);
+    EXECUTE format('REVOKE ALL ON %I FROM anon', tbl);
   END LOOP;
 END $$;
+
+-- loss_fund_transactions is the escrow ledger: append-only, like
+-- reserve_transactions.
+DROP TRIGGER IF EXISTS trg_loss_fund_transactions_append_only ON loss_fund_transactions;
+CREATE TRIGGER trg_loss_fund_transactions_append_only
+  BEFORE UPDATE OR DELETE ON loss_fund_transactions
+  FOR EACH ROW EXECUTE FUNCTION trg_reserve_transactions_append_only();
+DROP TRIGGER IF EXISTS trg_loss_fund_transactions_no_truncate ON loss_fund_transactions;
+CREATE TRIGGER trg_loss_fund_transactions_no_truncate
+  BEFORE TRUNCATE ON loss_fund_transactions
+  FOR EACH STATEMENT EXECUTE FUNCTION trg_reserve_transactions_append_only();
+REVOKE UPDATE, DELETE, TRUNCATE ON loss_fund_transactions FROM authenticated, service_role;
 
 COMMIT;

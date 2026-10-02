@@ -79,4 +79,21 @@ describe('wcisAckParser (Phase 7 — WCIS Release 3.1 EDI Ingestion)', () => {
   test('throws error on empty content', () => {
     expect(() => parseAckFlatFile('')).toThrow(/parseAckFlatFile requires raw text content/);
   });
+
+  test('a short rejection record is a rejection, not the trailer (both use record type TR)', () => {
+    const parsed = parseAckFlatFile([
+      'HD|943210987|680282468|20261005|1430|3.1',
+      'TR|C1|00|TR|||',            // 16 characters: once mistaken for the trailer
+      'TR|7|04',                  // numeric claim number, still a detail record
+      'TR|2',
+    ].join('\n'));
+    expect(parsed.records.map(r => [r.claimAdminClaimNumber, r.result])).toEqual([['C1', 'rejected'], ['7', 'rejected']]);
+    expect(parsed.trailer).toEqual({ recordType: 'TR', recordCount: 2 });
+    expect(parsed.summary.rejected).toBe(2);
+
+    const fixed = parseAckFlatFile(['HD943210987680282468202610051430', 'TRTRC1                  00', 'TR000001'].join('\n'));
+    expect(fixed.records).toHaveLength(1);
+    expect(fixed.records[0]).toMatchObject({ claimAdminClaimNumber: 'C1', result: 'rejected' });
+    expect(fixed.trailer.recordCount).toBe(1);
+  });
 });

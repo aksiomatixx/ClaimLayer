@@ -1,9 +1,10 @@
 'use strict';
 
 /**
- * Static guard: claim_events is append-only in the database (migration
- * 20261003000001), so no code path may update or delete it — a correction
- * is a new event. The in-memory test double does not enforce this; this
+ * Static guard: claim_events (migration 20261003000001) and the financial
+ * ledgers reserve_transactions and loss_fund_transactions (20261005000001 /
+ * 20261005000003) are append-only in the database, so no code path may
+ * update or delete them — a correction is a new entry. The in-memory test double does not enforce this; this
  * scan does. The demo reset (scripts/seedDemo.js) is the one exemption and
  * runs under the database's narrow demo-purge rule.
  */
@@ -21,12 +22,14 @@ function jsFiles(dir) {
   });
 }
 
-test('no source file updates or deletes claim_events (or audit_ledger)', () => {
+const LEDGERS = 'claim_events|audit_ledger|reserve_transactions|loss_fund_transactions';
+
+test('no source file updates or deletes claim_events, audit_ledger or a financial ledger', () => {
   const offenders = [];
   const patterns = [
-    /from\(\s*'(claim_events|audit_ledger)'\s*\)\s*\.\s*(update|delete|upsert)\s*\(/g,
-    /tx\.update\(\s*'(claim_events|audit_ledger)'/g,
-    /(UPDATE|DELETE\s+FROM|TRUNCATE)\s+"?(claim_events|audit_ledger)\b/gi,
+    new RegExp(`from\\(\\s*'(${LEDGERS})'\\s*\\)\\s*\\.\\s*(update|delete|upsert)\\s*\\(`, 'g'),
+    new RegExp(`tx\\.(update|upsert)\\(\\s*'(${LEDGERS})'`, 'g'),
+    new RegExp(`(UPDATE|DELETE\\s+FROM|TRUNCATE)\\s+"?(${LEDGERS})\\b`, 'gi'),
   ];
   for (const file of jsFiles(SRC)) {
     if (EXEMPT.has(file)) continue;

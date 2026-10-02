@@ -45,6 +45,14 @@ const IAIABC_DN_NAMES = {
   'DN0086': 'Weekly Benefit Amount',
 };
 
+function _isTrailer(line, fields) {
+  if (fields) {
+    return fields[0] === 'TR' && /^\d+$/.test((fields[1] || '').trim())
+      && fields.slice(2).every(f => f.trim() === '');
+  }
+  return /^TR\d{1,6}\s*$/.test(line);
+}
+
 /**
  * Parse an IAIABC 3.1 flat-file acknowledgment string.
  * Supports line-oriented fixed records and pipe-delimited records.
@@ -85,8 +93,10 @@ function parseAckFlatFile(rawContent) {
         transTime: line.slice(28, 34).trim(),
         version: line.slice(34, 37).trim() || '3.1',
       };
-    } else if (recordType === 'TR' && (fields?.length <= 4 || line.length <= 40)) {
-      // Trailer record
+    } else if (_isTrailer(line, fields)) {
+      // Trailer record. 'TR' is also the record type of a REJECTED transaction,
+      // so the trailer is recognized by its shape — TR + a record count and
+      // nothing else — never by length (a short rejection is still a rejection).
       trailer = isPipeDelimited ? {
         recordType: 'TR',
         recordCount: parseInt(fields[1] || '0', 10),

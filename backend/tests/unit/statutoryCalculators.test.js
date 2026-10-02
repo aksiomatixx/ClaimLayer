@@ -86,6 +86,27 @@ describe('statutoryCalculators (Phase 4 — D-3 & D-4 Fixes)', () => {
       expect(res.tdRate).toBe(1539.71);
     });
 
+    test('reads the DOI year from the date itself, not the server time zone', () => {
+      const tz = process.env.TZ;
+      process.env.TZ = 'America/Los_Angeles';
+      try {
+        expect(statutory.getTDSchedule('2026-01-01').year).toBe(2026);
+        expect(statutory.getTDSchedule('2026-01-01T00:00:00Z').year).toBe(2026);
+      } finally {
+        process.env.TZ = tz;
+      }
+    });
+
+    test('a DOI outside the table is refused, not priced with another year', () => {
+      expect(() => statutory.getTDSchedule('2018-06-01')).toThrow(/TD_SCHEDULE_UNAVAILABLE/);
+      expect(() => statutory.calculateTDRate({ aww: 1000, dateOfInjury: '2031-02-01' })).toThrow(/TD_SCHEDULE_UNAVAILABLE/);
+    });
+
+    test('only the corroborated year is reported as verified (REGULATORY-PENDING rows say so)', () => {
+      expect(statutory.calculateTDRate({ aww: 1200, dateOfInjury: '2026-03-15' }).statutoryScheduleVerified).toBe(true);
+      expect(statutory.calculateTDRate({ aww: 1200, dateOfInjury: '2022-05-10' }).statutoryScheduleVerified).toBe(false);
+    });
+
     test('awards 100% of actual earnings if below statutory minimum (LC §4453(a))', () => {
       const res = statutory.calculateTDRate({
         aww: 180.00,

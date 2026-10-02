@@ -131,39 +131,30 @@ ALTER TABLE payees FORCE ROW LEVEL SECURITY;
 ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_transactions FORCE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'payees' AND policyname = 'payees_tenant_isolation'
-  ) THEN
-    CREATE POLICY payees_tenant_isolation ON payees
-      FOR ALL
-      USING (
-        tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::UUID
-        OR current_setting('app.tenant_id', true) IS NULL
-      )
-      WITH CHECK (
-        tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::UUID
-        OR current_setting('app.tenant_id', true) IS NULL
-      );
-  END IF;
+-- Deny by default: no permissive policy, so anon and authenticated read and
+-- write nothing (payees hold encrypted tax ids and bank accounts). The backend
+-- (service role / owner connection) bypasses RLS. The RESTRICTIVE tenant
+-- policy keeps any future permissive grant tenant-bound. (Revised before
+-- first application: the original policies were PERMISSIVE, TO PUBLIC, and
+-- passed whenever app.tenant_id was unset — always, on the PostgREST path.)
+DROP POLICY IF EXISTS payees_tenant_isolation ON payees;
+CREATE POLICY payees_tenant_isolation ON payees
+  AS RESTRICTIVE
+  FOR ALL
+  TO authenticated
+  USING (tenant_id = app.current_tenant_id())
+  WITH CHECK (tenant_id = app.current_tenant_id());
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'payment_transactions' AND policyname = 'payment_transactions_tenant_isolation'
-  ) THEN
-    CREATE POLICY payment_transactions_tenant_isolation ON payment_transactions
-      FOR ALL
-      USING (
-        tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::UUID
-        OR current_setting('app.tenant_id', true) IS NULL
-      )
-      WITH CHECK (
-        tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::UUID
-        OR current_setting('app.tenant_id', true) IS NULL
-      );
-  END IF;
-END $$;
+DROP POLICY IF EXISTS payment_transactions_tenant_isolation ON payment_transactions;
+CREATE POLICY payment_transactions_tenant_isolation ON payment_transactions
+  AS RESTRICTIVE
+  FOR ALL
+  TO authenticated
+  USING (tenant_id = app.current_tenant_id())
+  WITH CHECK (tenant_id = app.current_tenant_id());
+
+REVOKE ALL ON payees, payment_transactions FROM anon;
+-- Payments are voided, never deleted.
+REVOKE DELETE, TRUNCATE ON payment_transactions FROM authenticated, service_role;
 
 COMMIT;

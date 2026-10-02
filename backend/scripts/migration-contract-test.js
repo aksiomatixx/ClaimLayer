@@ -89,8 +89,8 @@ async function main() {
     }
   }
 
-  console.log('── Re-applying the hardening-era + trust-foundation + transactional-core migrations (idempotency)');
-  const hardening = files.filter(f => /^(20260611|20261001|20261002|20261003)/.test(f));
+  console.log('── Re-applying the hardening-era + trust-foundation + transactional-core + ledger migrations (idempotency)');
+  const hardening = files.filter(f => /^(20260611|20261001|20261002|20261003|20261004|20261005)/.test(f));
   for (const f of hardening) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8');
     await client.query(sql);
@@ -823,6 +823,148 @@ async function main() {
               has_table_privilege('service_role', 'claim_events', 'TRUNCATE') AS sr_truncate`);
     const p = rows[0];
     if (!p.sr_insert || p.sr_update || p.sr_delete || p.sr_truncate) throw new Error('unexpected privileges: ' + JSON.stringify(p));
+  });
+
+  // ── Tenancy everywhere + financial ledgers (20261004–20261005) ─────────────
+  console.log('── Tenancy everywhere + financial ledgers');
+  const NEW_TABLES = ['reserve_transactions', 'payees', 'payment_transactions', 'staffing_agencies',
+    'host_employers', 'client_assignments', 'claim_body_parts', 'loss_fund_accounts', 'loss_fund_transactions'];
+
+  await check('every claim-bound table carries a NOT NULL tenant_id (msa_screenings and claim_events included)', async () => {
+    const { rows } = await client.query(
+      `SELECT c.table_name FROM information_schema.columns c
+         JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+        WHERE c.table_schema = 'public' AND c.column_name = 'claim_id' AND t.table_type = 'BASE TABLE'
+          AND NOT EXISTS (SELECT 1 FROM information_schema.columns x
+                           WHERE x.table_schema = 'public' AND x.table_name = c.table_name
+                             AND x.column_name = 'tenant_id' AND x.is_nullable = 'NO')`);
+    if (rows.length) throw new Error('no tenant_id: ' + rows.map(r => r.table_name).join(', '));
+  });
+
+  await check('app.current_tenant_id(): a signed-in user gets their own tenant; nobody falls back to the default', async () => {
+    const q = async (uid, guc) => {
+      await client.query('BEGIN');
+      await client.query(`SELECT set_config('app.test_uid', $1, true), set_config('app.tenant_id', $2, true)`, [uid, guc]);
+      const { rows } = await client.query('SELECT app.current_tenant_id() AS t');
+      await client.query('ROLLBACK');
+      return rows[0].t;
+    };
+    const cases = [
+      [['', ''], null],                                                    // anon, no setting
+      [['', TENANT_B], TENANT_B],                                          // backend connection names its tenant
+      [['00000000-0000-0000-0000-0000000000b1', TENANT_A], TENANT_B],      // a user cannot borrow another tenant
+      [['00000000-0000-0000-0000-00000000dead', TENANT_A], null],          // signed in, no users row
+    ];
+    for (const [[uid, guc], want] of cases) {
+      const got = await q(uid, guc);
+      if (got !== want) throw new Error(`uid=${uid || '∅'} setting=${guc || '∅'}: expected ${want}, got ${got}`);
+    }
+  });
+
+  await check('claim_events of a non-default-tenant claim are stamped with its tenant; the table stays append-only', async () => {
+    await client.query(`INSERT INTO claim_events (id, claim_id, type, data) VALUES ('evt_tb_1', 'claim_tb_1', 'x', '{}')`);
+    await client.query(fs.readFileSync(path.join(MIGRATIONS_DIR, '20261004000001_tenant_id_everywhere.sql'), 'utf8'));
+    const { rows } = await client.query(`SELECT tenant_id FROM claim_events WHERE id = 'evt_tb_1'`);
+    if (rows[0].tenant_id !== TENANT_B) throw new Error('event not stamped: ' + rows[0].tenant_id);
+    try {
+      await client.query(`UPDATE claim_events SET type = 'y' WHERE id = 'evt_tb_1'`);
+    } catch (e) {
+      if (/append-only/.test(e.message)) return;
+      throw e;
+    }
+    throw new Error('UPDATE succeeded: the trigger was left disabled');
+  });
+
+  await check('financial + staffing tables: RLS on, no permissive policy, every policy restrictive', async () => {
+    const { rows } = await client.query(
+      `SELECT c.relname, c.relrowsecurity,
+              (SELECT count(*) FROM pg_policies p WHERE p.tablename = c.relname AND p.permissive = 'PERMISSIVE')::int AS permissive
+         FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY($1)`, [NEW_TABLES]);
+    if (rows.length !== NEW_TABLES.length) throw new Error('missing tables');
+    const bad = rows.filter(r => !r.relrowsecurity || r.permissive > 0);
+    if (bad.length) throw new Error(JSON.stringify(bad));
+  });
+
+  await check('anon and authenticated see no payee or payment, even with Supabase default grants', async () => {
+    await client.query(
+      `INSERT INTO payees (id, tenant_id, payee_type, name) VALUES
+         ('00000000-0000-0000-0000-00000000ee01', $1, 'injured_worker', 'CT Payee')`, [TENANT_A]);
+    await client.query(
+      `INSERT INTO payment_transactions (tenant_id, claim_id, payee_id, category, payment_type, amount)
+       VALUES ($1, 'claim_ct_1', '00000000-0000-0000-0000-00000000ee01', 'indemnity', 'td_temporary_disability', 10)`, [TENANT_A]);
+    await client.query('GRANT ALL ON payees, payment_transactions TO anon, authenticated');
+    try {
+      for (const [role, uid] of [['anon', ''], ['authenticated', '00000000-0000-0000-0000-00000000a001']]) {
+        await client.query(`SELECT set_config('app.test_uid', $1, false)`, [uid]);
+        await client.query(`SET ROLE ${role}`);
+        const n = (await client.query('SELECT (SELECT count(*) FROM payees) + (SELECT count(*) FROM payment_transactions) AS n')).rows[0].n;
+        await client.query('RESET ROLE');
+        if (Number(n) !== 0) throw new Error(`${role} saw ${n} rows`);
+      }
+    } finally {
+      await client.query('RESET ROLE');
+      await client.query(`SELECT set_config('app.test_uid', '', false)`);
+    }
+    // Re-applying the migration takes anon's privileges away again.
+    await client.query(fs.readFileSync(path.join(MIGRATIONS_DIR, '20261005000002_payment_ledger_and_payees.sql'), 'utf8'));
+    const { rows } = await client.query(`SELECT has_table_privilege('anon', 'payees', 'SELECT') AS a`);
+    if (rows[0].a) throw new Error('anon kept SELECT on payees');
+  });
+
+  await check('reserve_transactions and loss_fund_transactions are append-only (demo purge excepted)', async () => {
+    await client.query(
+      `INSERT INTO reserve_transactions (tenant_id, claim_id, category, transaction_type, amount_delta, resulting_balance, incurred_delta)
+       VALUES ($1, 'claim_ct_1', 'medical', 'payment_void', 5, 5, 0)`, [TENANT_A]);
+    for (const sql of ['UPDATE reserve_transactions SET reason = $$x$$', 'DELETE FROM reserve_transactions', 'TRUNCATE reserve_transactions']) {
+      try { await client.query(sql); throw new Error(`${sql} succeeded`); } catch (e) {
+        if (!/immutable financial ledger/.test(e.message)) throw e;
+      }
+    }
+    await client.query(
+      `INSERT INTO reserve_transactions (tenant_id, claim_id, category, transaction_type, amount_delta, resulting_balance, incurred_delta)
+       VALUES ($1, 'claim_ct_demo', 'medical', 'initial_reserve', 5, 5, 5)`, [TENANT_A]);
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.history_purge', 'demo', true)`);
+    const { rowCount } = await client.query(`DELETE FROM reserve_transactions WHERE claim_id = 'claim_ct_demo'`);
+    await client.query('COMMIT');
+    if (rowCount !== 1) throw new Error(`expected 1 purged demo row, got ${rowCount}`);
+    const { rows } = await client.query(
+      `SELECT has_table_privilege('service_role', 'reserve_transactions', 'UPDATE') AS u,
+              has_table_privilege('service_role', 'loss_fund_transactions', 'DELETE') AS d`);
+    if (rows[0].u || rows[0].d) throw new Error('service_role can mutate a ledger: ' + JSON.stringify(rows[0]));
+  });
+
+  await check('the reserve ledger opens at the newest approved snapshot only', async () => {
+    await client.query(
+      `INSERT INTO claims (id, claim_number, status, date_of_injury) VALUES ('claim_ct_rsv', 'HHW-2026-RSV', 'accepted', '2026-05-05')`);
+    await client.query(
+      `INSERT INTO reserves (claim_id, medical, indemnity, expense, source, created_at) VALUES
+         ('claim_ct_rsv', 1000, 500, 0, 'ADJUSTER', now() - interval '2 days'),
+         ('claim_ct_rsv', 9999, 9999, 9999, 'AI_ENGINE', now() - interval '1 day'),
+         ('claim_ct_rsv', 4000, 800, 0, 'ADJUSTER', now())`);
+    await client.query(fs.readFileSync(path.join(MIGRATIONS_DIR, '20261005000001_reserve_ledger.sql'), 'utf8'));
+    const { rows } = await client.query(
+      `SELECT category, sum(amount_delta)::float AS bal, sum(incurred_delta)::float AS inc
+         FROM reserve_transactions WHERE claim_id = 'claim_ct_rsv' GROUP BY category ORDER BY category`);
+    const got = JSON.stringify(rows);
+    const want = JSON.stringify([{ category: 'indemnity', bal: 800, inc: 800 }, { category: 'medical', bal: 4000, inc: 4000 }]);
+    if (got !== want) throw new Error(got);
+  });
+
+  await check('staffing foreign keys match the UUID keys they reference', async () => {
+    const { rows } = await client.query(
+      `SELECT table_name, column_name, data_type FROM information_schema.columns
+        WHERE (table_name, column_name) IN (('client_assignments', 'employee_id'), ('loss_fund_accounts', 'employer_id'))`);
+    if (rows.length !== 2 || rows.some(r => r.data_type !== 'uuid')) throw new Error(JSON.stringify(rows));
+  });
+
+  await check('documents are not attested virus-scanned by a column default', async () => {
+    const { rows } = await client.query(
+      `SELECT column_name, column_default FROM information_schema.columns
+        WHERE table_name = 'claim_documents' AND column_name IN ('av_scan_status', 'av_scanned_at')
+        ORDER BY column_name`);
+    const got = Object.fromEntries(rows.map(r => [r.column_name, r.column_default]));
+    if (!/not_scanned/.test(got.av_scan_status || '') || got.av_scanned_at !== null) throw new Error(JSON.stringify(got));
   });
 
   await check('jobs has row-level security enabled', async () => {

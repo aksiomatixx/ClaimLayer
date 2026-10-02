@@ -25,6 +25,7 @@ try {
 const DEFAULT_BUCKET = process.env.STORAGE_BUCKET || 'claim-documents';
 const STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || (process.env.NODE_ENV === 'test' ? 'inline' : (supabase?.storage ? 'supabase' : 'inline'));
 const LOCAL_STORAGE_DIR = path.join(__dirname, '../../storage_vault');
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]{1,128}$/;
 
 /**
  * Calculate SHA-256 hex digest of a binary buffer.
@@ -37,8 +38,10 @@ function computeSha256(buffer) {
 }
 
 /**
- * Pre-flight anti-malware and magic-bytes validator.
- * Detects PE executable signatures (MZ) and ensures file header matches declared MIME.
+ * Pre-flight file-signature check: refuses executable headers (MZ / ELF) and
+ * warns on a PDF without a PDF header. This is NOT an antivirus scan — a
+ * stored document is recorded as av_scan_status 'not_scanned' until a real
+ * scanner reports on it.
  */
 function scanDocument(buffer, mimeType = 'application/pdf') {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
@@ -91,8 +94,14 @@ async function storeDocument({
     throw new Error(`Security validation failed: ${scan.reason}`);
   }
 
-  const cleanFilename = filename ? path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_') : `${docId}.pdf`;
-  const storageKey = `tenants/${tenantId}/claims/${claimId}/${cleanFilename}`;
+  // Every path segment is a validated id, and the document id is part of the
+  // key: two uploads with the same filename never overwrite each other, and
+  // no id can climb out of the tenant's prefix (or the local vault directory).
+  for (const [name, value] of [['tenantId', tenantId], ['claimId', claimId], ['docId', docId]]) {
+    if (!SAFE_SEGMENT.test(String(value || ''))) throw new Error(`storeDocument: invalid ${name}`);
+  }
+  const cleanFilename = filename ? path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_') : 'document.pdf';
+  const storageKey = `tenants/${tenantId}/claims/${claimId}/${docId}-${cleanFilename}`;
 
   let providerUsed = STORAGE_PROVIDER;
   let inlineB64 = null;
@@ -104,7 +113,7 @@ async function storeDocument({
         .from(DEFAULT_BUCKET)
         .upload(storageKey, buffer, {
           contentType: mimeType,
-          upsert: true,
+          upsert: false,   // a stored original is never replaced in place
         });
 
       if (error) {
@@ -120,9 +129,9 @@ async function storeDocument({
   // 2. Local disk fallback
   if (providerUsed === 'local') {
     try {
-      const targetDir = path.join(LOCAL_STORAGE_DIR, `tenants/${tenantId}/claims/${claimId}`);
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, cleanFilename), buffer);
+      const target = path.join(LOCAL_STORAGE_DIR, storageKey);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, buffer, { flag: 'wx' });
     } catch (err) {
       logger.error({ msg: 'storeDocument: local file write failed', err: err.message });
       providerUsed = 'inline';
@@ -142,8 +151,8 @@ async function storeDocument({
     sha256_checksum:   checksum,
     file_size_bytes:   sizeBytes,
     mime_type:         mimeType,
-    av_scan_status:    scan.status,
-    av_scanned_at:     new Date().toISOString(),
+    av_scan_status:    'not_scanned',   // the pre-flight check is not a scan
+    av_scanned_at:     null,
     pdf_buffer_b64:    inlineB64,
   };
 }
@@ -175,7 +184,10 @@ async function retrieveDocument(docRecord) {
 
   // 2. Try Local disk
   if (!buffer && docRecord.storage_provider === 'local' && docRecord.storage_key) {
-    const localPath = path.join(LOCAL_STORAGE_DIR, docRecord.storage_key);
+    const localPath = path.resolve(LOCAL_STORAGE_DIR, docRecord.storage_key);
+    if (!localPath.startsWith(path.resolve(LOCAL_STORAGE_DIR) + path.sep)) {
+      throw new Error('retrieveDocument: storage key escapes the vault');
+    }
     if (fs.existsSync(localPath)) {
       buffer = fs.readFileSync(localPath);
     }

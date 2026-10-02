@@ -34,7 +34,6 @@ const logger       = require('../logger');
 const jobQueue     = require('./jobQueue');
 const { isRepresented } = require('../utils/representation');
 const { runInTransaction } = require('../db/unitOfWork');
-const auditLedger          = require('./auditLedgerService');
 
 // ── Lazy requires (avoid cycles) ─────────────────────────────────────────────
 function _getClaimService() { return require('./claimService'); }
@@ -92,38 +91,15 @@ async function _writeEvent(claimId, type, data, tx = null) {
 }
 
 async function _writeAuditLog(action, offerId, description, newValue, tx = null, actor = null, claimId = null) {
-  try {
-    await auditLedger.append({
-      tenant_id: tx?.tenantId || config.tenancy.defaultTenantId,
-      claim_id: claimId,
-      actor: actor || { type: 'system', id: 'system', role: 'system' },
-      action: `cnr.${action.replace(/^cnr_/, '')}`,
-      entity: { type: 'settlement_offer', id: offerId },
-      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
-    }, { tx });
-  } catch (err) {
-    logger.warn({ msg: 'cnrService: auditLedger append failed', err: err.message, action });
-  }
-
-  try {
-    const row = {
-      tenant_id:     tx?.tenantId || config.tenancy.defaultTenantId,
-      action,
-      resource_type: 'settlement_offer',
-      resource_id:   offerId,
-      description,
-      new_value:     newValue,
-      user_role:     'system',
-      created_at:    new Date().toISOString(),
-    };
-    if (tx) {
-      await tx.insert('audit_log', row).catch(() => null);
-    } else {
-      await supabase.from('audit_log').insert(row);
-    }
-  } catch (err) {
-    logger.error({ msg: 'cnrService: audit_log write failed', err: err.message, action, offerId });
-  }
+  await require('./benefitAudit').recordAudit({
+    tx, actor, claimId,
+    action:       `cnr.${action.replace(/^cnr_/, '')}`,
+    entityType:   'settlement_offer',
+    entityId:     offerId,
+    legacyAction: action,
+    description,
+    newValue,
+  });
 }
 
 async function _createDiary(claimId, diaryType, dueDate, priority, notes, opts = {}, tx = null) {
@@ -202,11 +178,11 @@ async function _transitionClaimStatus(claimId, expectedFrom, newStatus, reason, 
     });
   }
   const now = new Date().toISOString();
+  const patch = { ...require('./claimService').statusAxesPatch(newStatus, claim), updated_at: now };
   if (tx) {
-    await tx.update('claims', { status: newStatus, updated_at: now }, { id: claimId });
+    await tx.update('claims', patch, { id: claimId });
   } else {
-    await supabase.from('claims')
-      .update({ status: newStatus, updated_at: now }).eq('id', claimId);
+    await supabase.from('claims').update(patch).eq('id', claimId);
   }
   await _writeEvent(claimId, 'status_changed', {
     from: claim.status, to: newStatus, changedBy: 'system', reason,

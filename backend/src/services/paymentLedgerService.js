@@ -45,15 +45,22 @@ const PAYMENT_METHODS = Object.freeze(['check', 'ach', 'digital_card']);
 
 const _round2 = (n) => Math.round(Number(n) * 100) / 100;
 
-// Simple deterministic vault encryption/masking for local environments
+// The vault key is its own secret (PAYEE_VAULT_KEY), never the JWT signing
+// secret. Production refuses to store a tax id or bank account without it;
+// development and tests use a fixed, clearly non-production key.
+function _vaultKey() {
+  const key = config.vault && config.vault.payeeKey;
+  if (key) return crypto.createHash('sha256').update(String(key)).digest();
+  if (config.nodeEnv === 'production') {
+    throw new Error('PAYEE_VAULT_KEY is not configured: refusing to store payee tax ids or bank accounts');
+  }
+  return crypto.createHash('sha256').update('claimlayer-dev-only-payee-vault-key').digest();
+}
+
 function _encryptSecret(plainText) {
   if (!plainText) return null;
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(
-    'aes-256-gcm',
-    crypto.createHash('sha256').update(config.jwtSecret || 'claimlayer-secret-key-32-bytes!').digest(),
-    iv
-  );
+  const cipher = crypto.createCipheriv('aes-256-gcm', _vaultKey(), iv);
   let encrypted = cipher.update(String(plainText), 'utf8', 'hex');
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
@@ -165,7 +172,9 @@ async function listPayees(filters = {}) {
 // ── Payment Issuance & Duplicate Detection ───────────────────────────────────
 
 /**
- * Check for duplicate payment within the 90-day window.
+ * Check for duplicate payment within the 90-day window. issuePayment calls it
+ * under the claim's ledger lock, so the check and the insert that follows are
+ * one critical section — two identical requests cannot both pass.
  */
 async function _checkDuplicate(tenantId, duplicateHash, tx = null) {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
@@ -222,6 +231,18 @@ async function issuePayment(input, opts = {}) {
     createdBy = null,
   } = input || {};
 
+  // A payment is consequential and irreversible once a check is cut: it is
+  // recorded only inside the unit of work that carries its authorization
+  // (ADR-0004 / ADR-0006), attributed to the human who authorized it.
+  if (!opts.tx || !opts.actor) {
+    throw new Error('issuePayment runs only inside its authorizing unit of work (opts.tx + opts.actor)');
+  }
+  // Every ledger payment traces to the human decision that authorized it: an
+  // approved payment.issue request, an approved award disbursement, or a
+  // recorded statutory PD advance payment.
+  if (!input.actionRequestId && !input.disbursementId && !input.pdAdvancePaymentId) {
+    throw new Error('a payment must reference its authorization (actionRequestId, disbursementId or pdAdvancePaymentId)');
+  }
   if (!claimId) throw new Error('claimId is required');
   if (!PAYMENT_CATEGORIES.includes(category)) {
     throw new Error(`category must be one of: ${PAYMENT_CATEGORIES.join(', ')}`);
@@ -246,7 +267,8 @@ async function issuePayment(input, opts = {}) {
   });
 
   const run = async (tx) => {
-    // 1. Guard against duplicate payment
+    // 1. Guard against duplicate payment, under the claim ledger lock
+    await reserveLedger.lockClaimLedger(tx, claimId);
     const duplicate = await _checkDuplicate(effectiveTenantId, duplicateHash, tx);
     if (duplicate) {
       throw new Error(
@@ -281,14 +303,47 @@ async function issuePayment(input, opts = {}) {
       updated_at:            now,
     };
 
-    if (tx) {
-      await tx.insert('payment_transactions', row);
-    } else {
-      const { error } = await supabase.from('payment_transactions').insert(row);
-      if (error) throw new Error(`paymentLedger: insert failed — ${error.message}`);
+    await tx.insert('payment_transactions', row);
+
+    // 2. Double-entry reserve offset: Reduce the reserve bucket in the same transaction.
+    //
+    // A NEW payment (payment.issue) needs the reserve first: a shortfall
+    // refuses it, and the adjuster raises the reserve through its own
+    // approval. A RECORDED payment (opts.recorded — an approved disbursement
+    // or a statutory PD advance already paid out) is a fact the ledger must
+    // hold, so a shortfall is covered by an explicit, system-attributed
+    // reserve increase, and a RESERVE_ADEQUACY_REVIEW diary puts the reserve
+    // in front of the adjuster.
+    let reserveDeficiency = 0;
+    if (opts.recorded) {
+      const { categories } = await reserveLedger.getBalances(claimId, { tx });
+      reserveDeficiency = _round2(Math.max(0, amt - categories[category].outstanding));
+      if (reserveDeficiency > 0) {
+        await reserveLedger.postTransaction({
+          tenantId: effectiveTenantId,
+          claimId,
+          category,
+          amountDelta: reserveDeficiency,
+          transactionType: 'reserve_revision',
+          reason: `Reserve deficiency: recorded ${paymentType} payment ${paymentId} exceeded the outstanding ${category} reserve`,
+          source: 'SYSTEM',
+          createdBy: 'system:payment-ledger',
+          actionRequestId,
+        }, { tx, audit: false, event: false });
+        await tx.insert('diaries', {
+          tenant_id:      effectiveTenantId,
+          claim_id:       claimId,
+          diary_type:     'RESERVE_ADEQUACY_REVIEW',
+          due_date:       now.slice(0, 10),
+          priority:       'HIGH',
+          notes:          `A recorded ${paymentType} payment of $${amt.toFixed(2)} exceeded the outstanding ${category} reserve by $${reserveDeficiency.toFixed(2)}; the reserve was raised to cover it. Review the ${category} reserve.`,
+          status:         'open',
+          auto_generated: true,
+          created_at:     now,
+        });
+      }
     }
 
-    // 2. Double-entry reserve offset: Reduce the reserve bucket in the same transaction
     await reserveLedger.postTransaction({
       tenantId: effectiveTenantId,
       claimId,
@@ -299,11 +354,11 @@ async function issuePayment(input, opts = {}) {
       source: 'ADJUSTER',
       createdBy,
       actionRequestId,
-    }, { tx });
+    }, { tx, audit: false, event: false });
 
-    // 3. Cryptographic audit ledger
+    // 3. Cryptographic audit ledger, attributed to the approving human
     await auditLedger.append({
-      actor: { type: 'human', id: createdBy || 'adjuster', role: 'adjuster' },
+      actor: opts.actor,
       action: 'payment.issued',
       entity: { type: 'claim', id: claimId },
       claimId,
@@ -314,6 +369,7 @@ async function issuePayment(input, opts = {}) {
         category,
         payment_type: paymentType,
         amount_cents: toCents(amt),
+        reserve_deficiency_cents: toCents(reserveDeficiency),
         method,
         check_number: checkNumber,
         period_start: periodStart,
@@ -338,26 +394,22 @@ async function issuePayment(input, opts = {}) {
         amount: amt,
         method,
         checkNumber,
+        reserveDeficiency,
       },
     };
-    if (tx) {
-      await tx.insert('claim_events', eventRow);
-    } else {
-      await supabase.from('claim_events').insert(eventRow);
-    }
+    await tx.insert('claim_events', eventRow);
 
-    return row;
+    return { ...row, reserve_deficiency: reserveDeficiency };
   };
 
-  return opts.tx
-    ? run(opts.tx)
-    : runInTransaction({ tenantId: effectiveTenantId, label: 'payment.issue' }, run);
+  return run(opts.tx);
 }
 
 // ── Payment Voiding & Reserve Restoration ─────────────────────────────────────
 
 async function voidPayment(paymentId, { reason, actor = null } = {}, opts = {}) {
   if (!reason || !String(reason).trim()) throw new Error('Void reason is required');
+  if (!actor || !actor.id) throw new Error('voidPayment requires the acting principal');
 
   const { data: payment, error } = await supabase
     .from('payment_transactions')
@@ -366,80 +418,72 @@ async function voidPayment(paymentId, { reason, actor = null } = {}, opts = {}) 
     .single();
 
   if (error || !payment) throw new Error(`Payment not found: ${paymentId}`);
-  if (payment.status === 'voided') throw new Error(`Payment ${paymentId} is already voided`);
+  if (opts.tenantId && payment.tenant_id && payment.tenant_id !== opts.tenantId) {
+    throw new Error(`Payment not found: ${paymentId}`);
+  }
 
-  const now = new Date().toISOString();
   const effectiveTenantId = payment.tenant_id || opts.tenantId || config.tenancy.defaultTenantId;
-  const actorId = actor?.id || 'adjuster';
 
   const run = async (tx) => {
-    // 1. Update payment status to voided
-    if (tx) {
-      await tx.update('payment_transactions', {
-        status:      'voided',
-        void_reason: reason,
-        voided_at:   now,
-        updated_at:  now,
-      }, { id: paymentId });
-    } else {
-      const { error: updErr } = await supabase
-        .from('payment_transactions')
-        .update({
-          status:      'voided',
-          void_reason: reason,
-          voided_at:   now,
-          updated_at:  now,
-        })
-        .eq('id', paymentId);
-      if (updErr) throw new Error(`voidPayment update failed: ${updErr.message}`);
+    // Re-read under the claim ledger lock and flip the status conditionally:
+    // of two concurrent voids exactly one restores the reserve.
+    await reserveLedger.lockClaimLedger(tx, payment.claim_id);
+    const now = new Date().toISOString();
+    const current = await tx.selectOne('payment_transactions', { id: paymentId }, { forUpdate: true });
+    if (!current) throw new Error(`Payment not found: ${paymentId}`);
+    if (current.status === 'voided' || current.status === 'rejected') {
+      throw new Error(`Payment ${paymentId} is already ${current.status}`);
     }
 
-    // 2. Restore reserve bucket (reverse the negative delta)
+    const flipped = await tx.update('payment_transactions', {
+      status:      'voided',
+      void_reason: reason,
+      voided_at:   now,
+      updated_at:  now,
+    }, { id: paymentId, status: current.status });
+    if (!flipped.length) throw new Error(`Payment ${paymentId} changed while voiding; retry`);
+
+    // 2. Reverse the payment: paid-to-date down, reserve back up, incurred unchanged
     await reserveLedger.postTransaction({
       tenantId: effectiveTenantId,
-      claimId: payment.claim_id,
-      category: payment.category,
-      amountDelta: Number(payment.amount), // Positive delta restores reserve
-      transactionType: 'reserve_revision',
-      reason: `Reserve restored after voiding payment ${paymentId}: ${reason}`,
+      claimId: current.claim_id,
+      category: current.category,
+      amountDelta: Number(current.amount),
+      transactionType: 'payment_void',
+      reason: `Payment ${paymentId} voided: ${reason}`,
       source: 'ADJUSTER',
-      createdBy: actorId,
-    }, { tx });
+      createdBy: actor.id,
+    }, { tx, audit: false, event: false });
 
     // 3. Audit ledger entry
     await auditLedger.append({
-      actor: { type: 'human', id: actorId, role: actor?.role || 'adjuster' },
+      actor,
       action: 'payment.voided',
-      entity: { type: 'claim', id: payment.claim_id },
-      claimId: payment.claim_id,
+      entity: { type: 'claim', id: current.claim_id },
+      claimId: current.claim_id,
       tenantId: effectiveTenantId,
       payload: {
         payment_id: paymentId,
-        amount_cents: toCents(Number(payment.amount)),
-        category: payment.category,
+        amount_cents: toCents(Number(current.amount)),
+        category: current.category,
         void_reason: reason,
       },
     }, { tx });
 
     // 4. Claim event
-    const eventRow = {
-      claim_id:  payment.claim_id,
+    await tx.insert('claim_events', {
+      claim_id:  current.claim_id,
       type:      'payment_voided',
       timestamp: now,
-      data:      { paymentId, amount: Number(payment.amount), reason, voidedBy: actorId },
-    };
-    if (tx) {
-      await tx.insert('claim_events', eventRow);
-    } else {
-      await supabase.from('claim_events').insert(eventRow);
-    }
+      data:      { paymentId, amount: Number(current.amount), reason, voidedBy: actor.id },
+    });
 
-    return { ...payment, status: 'voided', void_reason: reason, voided_at: now };
+    return { ...current, status: 'voided', void_reason: reason, voided_at: now };
   };
 
   return opts.tx
     ? run(opts.tx)
-    : runInTransaction({ tenantId: effectiveTenantId, label: 'payment.void' }, run);
+    : runInTransaction({ tenantId: effectiveTenantId, actorId: actor.id, label: 'payment.void' }, run);
 }
 
 // ── Read Operations ───────────────────────────────────────────────────────────

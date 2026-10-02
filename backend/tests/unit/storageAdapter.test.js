@@ -38,9 +38,27 @@ describe('storageAdapter (Phase 7 — Enterprise Document Architecture)', () => 
     expect(result.doc_id).toBe('doc_test_123');
     expect(result.sha256_checksum).toHaveLength(64);
     expect(result.file_size_bytes).toBe(samplePdf.length);
-    expect(result.av_scan_status).toBe('clean');
-    expect(result.storage_key).toContain('tenants/00000000-0000-0000-0000-000000000001/claims/CLM-2026-0099');
+    // The signature pre-flight is not an antivirus scan, and is not recorded as one.
+    expect(result.av_scan_status).toBe('not_scanned');
+    expect(result.av_scanned_at).toBeNull();
+    expect(result.storage_key).toBe('tenants/00000000-0000-0000-0000-000000000001/claims/CLM-2026-0099/doc_test_123-sample_dwc1.pdf');
     expect(result.pdf_buffer_b64).toBeTruthy();
+  });
+
+  test('two uploads with the same filename get distinct keys (no overwrite)', async () => {
+    const base = { claimId: 'CLM-1', tenantId: 't1', buffer: samplePdf, filename: 'dwc1.pdf' };
+    const a = await storageAdapter.storeDocument({ ...base, docId: 'doc_a' });
+    const b = await storageAdapter.storeDocument({ ...base, docId: 'doc_b' });
+    expect(a.storage_key).not.toBe(b.storage_key);
+  });
+
+  test('an id that could climb out of the tenant prefix is refused', async () => {
+    await expect(storageAdapter.storeDocument({
+      claimId: '../../other-tenant', tenantId: 't1', docId: 'd1', buffer: samplePdf,
+    })).rejects.toThrow(/invalid claimId/);
+    await expect(storageAdapter.retrieveDocument({
+      storage_provider: 'local', storage_key: '../../../etc/passwd',
+    })).rejects.toThrow(/escapes the vault/);
   });
 
   test('retrieves document and verifies SHA-256 integrity', async () => {
