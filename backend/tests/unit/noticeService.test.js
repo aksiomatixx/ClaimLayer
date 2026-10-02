@@ -204,12 +204,22 @@ describe('Trigger wiring — rfaService', () => {
     });
   });
 
-  it('an AI approval recommendation does not send a determination', async () => {
-    // Default mock already returns auto_approve
+  it('an AI approval recommendation does not send a determination (S-5)', async () => {
+    // Default mock returns auto_approve — a recommendation queued for a
+    // human, so no determination letter exists yet.
     await rfaService.evaluateRFA(MOCK_RFA.id);
     await drainSetImmediates();
 
     expect(rfaLtrSpy).not.toHaveBeenCalled();
+    expect(imrSpy).not.toHaveBeenCalled();
+  });
+
+  it('generateRfaLetter is called once a human approves the RFA', async () => {
+    await rfaService.evaluateRFA(MOCK_RFA.id);
+    await rfaService.adjusterApproveRFA(MOCK_RFA.id, 'adjuster@tpa.test');
+    await drainSetImmediates();
+
+    expect(rfaLtrSpy).toHaveBeenCalledWith(MOCK_RFA.id);
     expect(imrSpy).not.toHaveBeenCalled();
   });
 

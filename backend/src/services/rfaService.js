@@ -12,6 +12,10 @@
  * Decision routing (_resolveDecision):
  *   - Surgical CPT codes (10000–69999 or Category III /^\d{4}T$/) → route_to_uro
  *   - AI recommends approval, MTUS-consistent                    → adjuster_review
+ *       plus an agent-proposed action request ('medical.rfa.approve',
+ *       actionRegistry) carrying the recommendation, so the adjuster
+ *       approves a prepared decision (finding S-5, ADR-0004). Nothing is
+ *       approved until a human does it.
  *   - AI MTUS-inconsistent                                        → route_to_uro
  *   - Otherwise (AI says physician_review, MTUS-consistent)       → adjuster_review
  *
@@ -172,6 +176,30 @@ async function _completeRFADiary(claimId, rfaId) {
 }
 
 // ── Outcome writers ───────────────────────────────────────────────────────────
+
+/**
+ * The agent's approval recommendation, as a prepared decision in the human
+ * approval queue. Idempotent per RFA. A failure here leaves the RFA in
+ * pending_adjuster_review — still a human decision, never an approval.
+ */
+async function _proposeApprovalForHuman(rfa, claim, aiResult) {
+  try {
+    const approvals = require('./approvalService');
+    const { agentPrincipal } = require('../policy/principal');
+    await approvals.propose({
+      actionType:     'medical.rfa.approve',
+      claimId:        rfa.claim_id,
+      proposer:       agentPrincipal('rfa_mtus_evaluation', claim.tenantId),
+      payload:        { rfa_id: rfa.id },
+      rationale:      aiResult.rationale || 'Model assessed the request as MTUS-consistent and recommends approval.',
+      evidence:       [{ type: 'rfa', id: rfa.id }],
+      aiDecisionId:   aiResult.aiDecisionId || null,
+      idempotencyKey: `medical.rfa.approve:${rfa.id}`,
+    });
+  } catch (err) {
+    logger.error({ msg: 'rfaService: agent approval proposal failed — RFA remains in adjuster review', rfaId: rfa.id, err: err.message });
+  }
+}
 
 async function _queueForAdjusterReview(rfaId, claimId, aiResult) {
   const now = new Date().toISOString();
@@ -381,7 +409,12 @@ async function evaluateRFA(rfaId) {
 
   if (decision === 'adjuster_review') {
     await _queueForAdjusterReview(rfaId, rfa.claim_id, aiResult);
-    // No notice yet — pending human decision
+    // No notice yet — pending human decision. When the agent recommended
+    // approval, attach it as a prepared, evidence-linked action request;
+    // the approval letter issues only when a human approves.
+    if (aiResult.recommendedAction === 'auto_approve') {
+      await _proposeApprovalForHuman(rfa, claim, aiResult);
+    }
   } else if (decision === 'route_to_uro') {
     const reason = _isSurgical(rfa.cpt_codes || [])
       ? 'Surgical procedure — URO required per CCR §9792.6.1'
@@ -417,11 +450,21 @@ async function adjusterApproveRFA(rfaId, adjusterEmail) {
 
   await _completeRFADiary(rfa.claim_id, rfaId);
   _fireNotice(_getNoticeService().generateRfaLetter, rfaId);
+
+  // A direct approval makes any queued agent proposal for this RFA moot.
+  await require('./approvalService').supersedePending({
+    actionType: 'medical.rfa.approve',
+    matches:    (proposal) => proposal.rfa_id === rfaId,
+    actor:      { type: 'human', id: adjusterEmail || 'unattributed', role: null },
+    reason:     'rfa_decided_directly',
+  });
+
   // Link the adjuster's action back to the most recent ai_decisions
   // row so the audit trail shows model rec → human override pairing.
   try {
     await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
       human_reviewer_id: null, human_decision: `adjuster_approved by ${adjusterEmail}`,
+      human_decision_by: adjusterEmail,
     });
   } catch { /* non-fatal */ }
   logger.info({ msg: 'rfaService.adjusterApproveRFA: approved', rfaId, adjusterEmail });
@@ -448,9 +491,16 @@ async function adjusterRouteToURO(rfaId, adjusterEmail, reason) {
   }).eq('id', rfaId);
 
   // Referral alone does not trigger determination or IMR notices.
+  await require('./approvalService').supersedePending({
+    actionType: 'medical.rfa.approve',
+    matches:    (proposal) => proposal.rfa_id === rfaId,
+    actor:      { type: 'human', id: adjusterEmail || 'unattributed', role: null },
+    reason:     'rfa_routed_to_uro',
+  });
   try {
     await require('./aiDecisionsService').linkHumanDecision(rfa.claim_id, 'rfa_mtus', {
       human_reviewer_id: null, human_decision: `routed_to_uro by ${adjusterEmail}`,
+      human_decision_by: adjusterEmail,
     });
   } catch { /* non-fatal */ }
   logger.info({ msg: 'rfaService.adjusterRouteToURO', rfaId, adjusterEmail });

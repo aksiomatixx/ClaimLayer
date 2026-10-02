@@ -137,7 +137,7 @@ async function seedRFAInStore(overrides = {}) {
 
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 beforeEach(() => {
-  supabase._resetStore(['rfas', 'rfa_evaluations', 'diaries', 'claim_events']);
+  supabase._resetStore(['rfas', 'rfa_evaluations', 'diaries', 'claim_events', 'action_requests', 'audit_ledger']);
   aiService.evaluateRFA.mockResolvedValue(AI_AUTO_APPROVE);
   seedClaim();
 });
@@ -516,25 +516,54 @@ describe('POST /api/v1/rfas/:id/route-to-uro', () => {
 // ── 9. evaluateRFA — AI pipeline paths ───────────────────────────────────────
 // =============================================================================
 
-describe('rfaService.evaluateRFA — auto_approve path', () => {
-  test('requires human approval when AI recommends it and codes are not surgical', async () => {
-    aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
+describe('rfaService.evaluateRFA — auto_approve recommendation (human approval required, S-5)', () => {
+  const approvals = require('../../src/services/approvalService');
+  const { humanPrincipal } = require('../../src/policy/principal');
+  const ADJUSTER = humanPrincipal({ email: 'adjuster@tpa.test', role: 'adjuster', mfa: true });
 
-    const rfa = await seedRFAInStore({
-      id:        'rfa_eval_auto',
-      cpt_codes: ['97110', '97014'],
-    });
+  async function pendingProposals(rfaId) {
+    const { data } = await supabase.from('action_requests').select('*').eq('action_type', 'medical.rfa.approve');
+    return (data || []).filter(r => r.proposal.rfa_id === rfaId);
+  }
+
+  test('an AI auto_approve recommendation does NOT approve the RFA — it queues it for a human', async () => {
+    aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
+    await seedRFAInStore({ id: 'rfa_eval_auto', cpt_codes: ['97110', '97014'] });
 
     await rfaService.evaluateRFA('rfa_eval_auto');
 
     const { data: updated } = await supabase
       .from('rfas').select('*').eq('id', 'rfa_eval_auto').single();
-
     expect(updated.decision).toBe('pending_adjuster_review');
-    expect(updated.decision_made_by).toBe('ai_system');
+    expect(updated.decision).not.toBe('auto_approved');
+    expect(updated.decision_made_by).toBe('ai_system');   // the routing, not an approval
   });
 
-  test('creates rfa_evaluation row after auto-approve', async () => {
+  test('the recommendation becomes an agent-proposed action request citing the RFA', async () => {
+    aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
+    await seedRFAInStore({ id: 'rfa_eval_prop', cpt_codes: ['97110'] });
+
+    await rfaService.evaluateRFA('rfa_eval_prop');
+
+    const [req] = await pendingProposals('rfa_eval_prop');
+    expect(req).toMatchObject({
+      status: 'pending_approval', proposed_by_type: 'agent',
+      proposed_by: 'agent:rfa_mtus_evaluation', claim_id: CLAIM_ID,
+      required_approver_role: 'adjuster',
+    });
+    expect(req.evidence).toEqual([{ type: 'rfa', id: 'rfa_eval_prop' }]);
+  });
+
+  test('re-evaluating the same RFA does not queue a duplicate proposal', async () => {
+    aiService.evaluateRFA.mockResolvedValue(AI_AUTO_APPROVE);
+    await seedRFAInStore({ id: 'rfa_eval_twice', cpt_codes: ['97110'] });
+    await rfaService.evaluateRFA('rfa_eval_twice');
+    await supabase.from('rfas').update({ decision: null }).eq('id', 'rfa_eval_twice');
+    await rfaService.evaluateRFA('rfa_eval_twice');
+    expect(await pendingProposals('rfa_eval_twice')).toHaveLength(1);
+  });
+
+  test('creates rfa_evaluation row recording the model recommendation', async () => {
     aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
     await seedRFAInStore({ id: 'rfa_eval_auto2', cpt_codes: ['97110'] });
 
@@ -551,8 +580,6 @@ describe('rfaService.evaluateRFA — auto_approve path', () => {
   test('keeps the RFA_RESPONSE_DUE diary open until human approval', async () => {
     aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
     await seedRFAInStore({ id: 'rfa_eval_diary', cpt_codes: ['97110'] });
-
-    // Seed a diary to be completed
     await supabase.from('diaries').insert({
       id:         'diary_rfa_001',
       claim_id:   CLAIM_ID,
@@ -565,8 +592,36 @@ describe('rfaService.evaluateRFA — auto_approve path', () => {
 
     const { data: diary } = await supabase
       .from('diaries').select('*').eq('id', 'diary_rfa_001').single();
-
     expect(diary.status).toBe('open');
+  });
+
+  test('a human approving the proposal executes the approval as that human', async () => {
+    aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
+    await seedRFAInStore({ id: 'rfa_eval_human', cpt_codes: ['97110'] });
+    await rfaService.evaluateRFA('rfa_eval_human');
+    const [req] = await pendingProposals('rfa_eval_human');
+
+    const { request } = await approvals.decide(req.id, {
+      decision: 'approve', decider: ADJUSTER,
+      rationale: 'PT request is consistent with the treating plan and MTUS.',
+    });
+
+    expect(request.status).toBe('executed');
+    const { data: rfa } = await supabase.from('rfas').select('*').eq('id', 'rfa_eval_human').single();
+    expect(rfa.decision).toBe('adjuster_approved');
+    expect(rfa.decision_made_by).toBe('adjuster@tpa.test');
+  });
+
+  test('a direct adjuster approval supersedes the pending agent proposal', async () => {
+    aiService.evaluateRFA.mockResolvedValueOnce(AI_AUTO_APPROVE);
+    await seedRFAInStore({ id: 'rfa_eval_direct', cpt_codes: ['97110'] });
+    await rfaService.evaluateRFA('rfa_eval_direct');
+
+    await rfaService.adjusterApproveRFA('rfa_eval_direct', 'adjuster@tpa.test');
+
+    const [req] = await pendingProposals('rfa_eval_direct');
+    expect(req.status).toBe('cancelled');
+    expect(req.cancelled_reason).toBe('rfa_decided_directly');
   });
 });
 

@@ -1,5 +1,11 @@
 # Data Model
 
+> **Out of date.** This document predates most migrations and does not match the actual schema
+> (for example, `claim_events` has columns `type/timestamp/data`, not
+> `event_type/triggered_by`). The migrations in `supabase/migrations/` are the source of truth.
+> The target model for the TPA platform is in `CLAIMLAYER_TPA_PRODUCTION_READINESS.md`,
+> Section D.
+
 PostgreSQL via Supabase. All tables use UUID primary keys. Row-level security (RLS) enforced at the database layer.
 
 Every claim is a structured data object and a state machine. Financial data mirrors FileHandler (FileHandler is authoritative). Every AI decision is logged. Schema decisions here determine ML capability in year 3 — favor structured fields over free text everywhere.

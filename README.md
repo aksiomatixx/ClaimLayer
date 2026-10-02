@@ -10,7 +10,7 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,352 tests · 92 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,483 tests · 98 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
 
@@ -70,6 +70,9 @@ The system is a layer, not a replacement: it runs agentic workflows on top of a 
 These are the choices that show, in code, where the model is and isn't trusted. Guardrails live in the [service layer, not the prompts](backend/src/services/documentIngestionService.js) — the model cannot reach past them regardless of what it returns:
 
 - **No auto-deny pathway exists anywhere in the system.** On treatment authorizations, an agent may only return `auto_approve` or `physician_review` — never a denial ([`rfaService.js`](backend/src/services/rfaService.js)). Denials are a licensed-human-only action by construction.
+- **No autonomous approvals either.** An agent's `auto_approve` is a recommendation: it becomes an evidence-linked action request that an adjuster approves, modifies, or rejects, and only then does the system execute it ([ADR-0004](docs/adr/0004-action-registry-and-approvals.md)).
+- **Agents propose, authorized humans approve, the system executes.** A frozen [action registry](backend/src/policy/actionRegistry.js) declares what agents may do autonomously, may only prepare for approval, or may only analyze. A deterministic [authority policy](backend/src/policy/authorityPolicy.js) enforces monetary limits, claim-based escalation, no self-approval, and MFA step-up for financial actions.
+- **An immutable audit ledger.** Consequential actions are written to an append-only, hash-chained `audit_ledger` whose integrity is enforced by the database ([ADR-0003](docs/adr/0003-audit-ledger.md)).
 - **Reserve changes require a licensed adjuster's approval.** The AI may suggest reserves; nothing is written to the financial system of record until an adjuster approves it.
 - **A deterministic MSA screen gates every settlement** — Medicare-interest screening is not left to the model's discretion.
 - **Statutory values are never model-generated.** Rating schedules, fee schedules, and caps are sourced from authoritative DWC publications and version-controlled; the model reasons over them but never invents them.
@@ -78,7 +81,7 @@ These are the choices that show, in code, where the model is and isn't trusted. 
 
 ## Testing
 
-1,352 automated tests across 92 suites: 1,268 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
+1,483 automated tests across 98 suites: 1,399 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 Worth a reviewer's eye specifically:
 
@@ -93,6 +96,10 @@ Node.js / Express · React / Vite · PostgreSQL (Supabase) · Anthropic Claude A
 ## How this was built
 
 Built solo: I owned the domain model, architecture, agent boundaries, guardrails, eval design, acceptance criteria, review, and delivery (see [What I designed and own](#what-i-designed-and-own)); Claude Code accelerated the implementation. ClaimLayer is what a decade of claims domain expertise plus AI-assisted development produces when the architecture and the regulatory constraints come from someone who has lived inside the workflow.
+
+## Production readiness
+
+[`CLAIMLAYER_TPA_PRODUCTION_READINESS.md`](CLAIMLAYER_TPA_PRODUCTION_READINESS.md) assesses what it takes to run ClaimLayer as the system of record for a live California WC TPA: gap inventory, target architecture, data model, agent operating model, security findings, and a 12-month roadmap. Architecture decisions are recorded in [`docs/adr/`](docs/adr/). Setup: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) and [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 
 ## Status & scope
 

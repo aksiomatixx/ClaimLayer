@@ -17,6 +17,31 @@
 
 const { supabase } = require('./supabase');
 const logger       = require('../logger');
+const auditLedger  = require('./auditLedgerService');
+const { agentPrincipal } = require('../policy/principal');
+
+// The ledger records the FACT of a model recommendation — type, prompt,
+// model, confidence and which guardrails fired — never the raw model text
+// or document content (that stays in ai_decisions, under its own access
+// controls).
+async function _ledgerRecommendation(row, { required }) {
+  const triggered = (row.guardrail_actions || [])
+    .filter(g => g && g.triggered === true)
+    .map(g => g.rule);
+  return auditLedger.append({
+    actor:   agentPrincipal(row.prompt_name || row.decision_type),
+    action:  'agent.recommendation_recorded',
+    entity:  { type: 'ai_decision', id: row.id },
+    claimId: row.claim_id || null,
+    payload: {
+      decision_type:        row.decision_type,
+      prompt_name:          row.prompt_name || null,
+      model:                row.model || null,
+      confidence:           row.confidence ?? null,
+      guardrails_triggered: triggered,
+    },
+  }, { required });
+}
 
 // ── logDecision ───────────────────────────────────────────────────────────────
 
@@ -44,6 +69,7 @@ async function logDecision(input, { required = false } = {}) {
       .select()
       .single();
     if (error) throw new Error(error.message);
+    await _ledgerRecommendation({ ...row, id: data?.id || null }, { required });
     return data;
   } catch (err) {
     if (required) {
@@ -97,6 +123,20 @@ async function linkHumanDecision(claimId, decisionType, fields) {
   };
   const { data: updated } = await supabase
     .from('ai_decisions').update(update).eq('id', recent.id).select().single();
+
+  // The ai_decisions update above keeps the Agents console working; the
+  // ledger entry is the append-only record of the human review. Callers
+  // that hold a verified session pass fields.actor (a principal).
+  await auditLedger.append({
+    actor:    fields.actor
+      || (fields.human_decision_by ? { type: 'human', id: fields.human_decision_by, role: null } : null)
+      || { type: 'human', id: 'unattributed', role: null },
+    action:   'agent.recommendation_reviewed',
+    entity:   { type: 'ai_decision', id: recent.id },
+    claimId,
+    payload:  { decision_type: decisionType, human_decision: fields.human_decision || null },
+    evidence: [{ type: 'ai_decision', id: recent.id }],
+  });
   return updated || null;
 }
 

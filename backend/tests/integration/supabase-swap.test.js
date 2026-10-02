@@ -45,7 +45,7 @@ const request      = require('supertest');
 const app          = require('../../src/index');
 const claimService = require('../../src/services/claimService');
 const db           = require('../../src/services/db');
-const { supabase, supabaseAuth, _resetStore } = require('../__mocks__/supabaseClient');
+const { supabase, supabaseAuth, _resetStore, _provisionAuthUsers } = require('../__mocks__/supabaseClient');
 const { generateAdminToken } = require('../../src/middleware/auth');
 
 const adminToken = generateAdminToken({ sub: 'sw-admin', email: 'admin@homecaretpa.com' });
@@ -55,6 +55,8 @@ const AUTH       = `Bearer ${adminToken}`;
 beforeEach(() => {
   _resetStore();
   claimService._resetClaims();
+  // Login resolves role/employer from provisioned public.users rows (S-1).
+  _provisionAuthUsers();
 });
 
 afterEach(() => {

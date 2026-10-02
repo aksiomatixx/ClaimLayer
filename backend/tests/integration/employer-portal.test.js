@@ -85,6 +85,8 @@ const employeeToken = generateMagicToken({
 beforeEach(() => {
   claimService._resetClaims();
   db._reset();
+  // Login resolves role/employer from provisioned public.users rows (S-1).
+  require('../__mocks__/supabaseClient')._provisionAuthUsers();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

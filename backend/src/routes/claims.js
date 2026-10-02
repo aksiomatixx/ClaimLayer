@@ -11,6 +11,7 @@ const db                = require('../services/db');
 const logger            = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { requireClaimScope } = require('../middleware/claimAccess');
+const { humanPrincipal }    = require('../policy/principal');
 const { CLAIM_STATUSES, SETTABLE_CLAIM_STATUSES } = require('../constants');
 
 const router = express.Router();
@@ -149,7 +150,8 @@ router.patch(
           expense:   parseFloat(req.body.expense),
           reason:    req.body.reason,
         },
-        req.user.email
+        req.user.email,
+        { actor: humanPrincipal(req.user) }
       );
       res.json(claim);
     } catch (err) {
@@ -176,7 +178,8 @@ router.patch(
       const claim = await claimService.updateStatus(
         req.params.id,
         req.body.status,
-        req.user.email
+        req.user.email,
+        { actor: humanPrincipal(req.user) }
       );
       res.json(claim);
     } catch (err) {
@@ -290,7 +293,8 @@ router.post(
       const claim = await claimService.setAttorneyRepresentation(
         req.params.id,
         { represented: req.body.represented, attorney: req.body.attorney },
-        req.user?.email
+        req.user?.email,
+        { actor: humanPrincipal(req.user) }
       );
       res.json({ claim });
     } catch (err) {
@@ -309,7 +313,8 @@ router.post(
   validate,
   async (req, res) => {
     try {
-      const claim = await claimService.reopenClaim(req.params.id, req.body.reason, req.user?.email);
+      const claim = await claimService.reopenClaim(req.params.id, req.body.reason, req.user?.email,
+        { actor: humanPrincipal(req.user) });
       res.json({ claim });
     } catch (err) {
       const status = err.message.includes('not found') ? 404 : 400;
@@ -390,6 +395,24 @@ router.get(
       res.json({ links: await claimLinks.listLinks(req.params.id) });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/ledger — immutable audit history (ADR-0003) ──────
+router.get(
+  '/:id/ledger',
+  requireAuth,
+  requireRole(['admin', 'supervisor']), // read-only oversight
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const auditLedger = require('../services/auditLedgerService');
+      res.json({ entries: await auditLedger.listForClaim(req.params.id) });
+    } catch (err) {
+      logger.error({ msg: 'claims/ledger: read failed', claimId: req.params.id, requestId: req.id, err: err.message });
+      res.status(500).json({ error: 'ledger_read_failed', requestId: req.id });
     }
   }
 );

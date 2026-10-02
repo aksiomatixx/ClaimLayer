@@ -53,7 +53,7 @@ Each section labels what is real versus deferred:
 └───────────────────────────────┬──────────────────────────────────────┘
                                  │
 ┌───────────────────────────────▼──────────────────────────────────────┐
-│  DATA — PostgreSQL (Supabase) · 29 migrations · RLS policies            │
+│  DATA — PostgreSQL (Supabase) · 35 migrations · RLS policies            │
 │  claims (state machine) · claim_events · ai_decisions · diaries ·       │
 │  documents · rfas · reserves · td_periods · pd_evaluations ·            │
 │  settlement_offers · audit_log · legacy_* (adapter round trip)          │
@@ -80,7 +80,7 @@ recommend, and a human disposes.**
 | Agent | Model | Invoked when | Returns |
 |---|---|---|---|
 | Compensability Analyst | Claude | Claim reaches `intake_complete` | score, priority, suggested reserves, red flags — never a status |
-| RFA / MTUS Evaluator | Claude | New RFA received | `auto_approve` or `physician_review` only — **no deny path** |
+| RFA / MTUS Evaluator | Claude | New RFA received | `auto_approve` or `physician_review` only — **no deny path**; `auto_approve` queues an action request a human must approve |
 | C&R Pricing Engine | Claude | After MSA screen passes | a value *range*; recommendation hardcoded to `adjuster_review` |
 | MSA Screening Gate | **Deterministic** | Before any C&R offer | `medicare_eligible`, `msa_required` from pure threshold logic |
 | Voice Intake Extractor | Claude | Employee submits a voice transcript | structured intake fields; never overwrites adjuster-entered values |
@@ -140,6 +140,24 @@ C&R acceptance (worker + adjuster signature) · EAMS filing · stipulation filin
 adjuster commits; edits are audited and penalty diaries refuse to move.
 
 ---
+
+## Trust foundation (Sprint 1)
+
+Three mechanisms now sit under every consequential action. Details are in the ADRs.
+
+- **Server-authoritative identity** ([ADR-0002](adr/0002-server-authoritative-identity.md)).
+  Login reads role, tenant, and employer from the provisioned `public.users` row, never from
+  Supabase `user_metadata`.
+- **Immutable audit ledger** ([ADR-0003](adr/0003-audit-ledger.md)). `audit_ledger` is
+  append-only, hash-chained per tenant, and verifiable with `app.audit_ledger_verify(tenant)`.
+  Claim status changes, reopenings, representation changes, reserve approvals, AI
+  recommendations, human reviews, diary decisions, and the whole approval lifecycle write to it.
+  `GET /api/v1/claims/:id/ledger` returns a claim's history.
+- **Action registry, authority policy, approval lifecycle**
+  ([ADR-0004](adr/0004-action-registry-and-approvals.md)). Agents propose, authorized humans
+  approve, modify, or reject with a rationale, and the system executes. The routes are under
+  `/api/v1/action-requests` and `/api/v1/claims/:id/action-requests`; the catalog is at
+  `/api/v1/action-registry`.
 
 ## Audit logging
 
@@ -224,7 +242,7 @@ procedural step — no EAMS API exists.
 
 ## Database
 
-PostgreSQL via Supabase. 29 migrations in `supabase/migrations/`, applied in filename
+PostgreSQL via Supabase. 35 migrations in `supabase/migrations/`, applied in filename
 order; **migrations are never auto-applied** — each is staged for review because schema
 changes can touch regulated data. Row-level-security policies ship in the migrations.
 
@@ -259,14 +277,14 @@ Core tables: `claims`, `claim_events`, `ai_decisions`, `documents`, `diaries`, `
 
 ## Testing & CI
 
-**1,352 automated tests across 92 suites** — 1,268 backend (Jest), 84 frontend
+**1,483 automated tests across 98 suites** — 1,399 backend (Jest), 84 frontend
 (Vitest + Testing Library). Coverage spans benefits math, statutory-deadline logic,
 state-machine transitions, atomic decision workflows, the document-to-action e2e path, and
 adversarial guardrail tests.
 
 CI (`.github/workflows/`):
 
-- **ci.yml** — backend + frontend suites; all 29 migrations apply to a clean PostgreSQL 16,
+- **ci.yml** — backend + frontend suites; all 35 migrations apply to a clean PostgreSQL 16,
   the hardening migration re-applies idempotently, and the schema contract is asserted.
 - **live-ingestion-test.yml** — the live-model eval gate: 13 golden PDFs through the real
   classifier, asserting category, claim match, and routing.

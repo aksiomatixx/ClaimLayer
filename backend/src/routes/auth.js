@@ -18,6 +18,7 @@ const { body, validationResult } = require('express-validator');
 const db             = require('../services/db');
 const { supabaseAuth } = require('../services/supabase');
 const adp            = require('../services/adp');
+const { resolveIdentity } = require('../services/identityService');
 const logger         = require('../logger');
 const config         = require('../config');
 const {
@@ -28,6 +29,7 @@ const {
   generateEmployerToken,
   generateStaffToken,
   STAFF_ROLES,
+  sessionCookieOptions,
 } = require('../middleware/auth');
 
 const router = express.Router();
@@ -197,30 +199,30 @@ router.post(
       return res.status(401).json({ error: 'invalid_credentials' });
     }
 
-    const supaUser = authData.user;
-    const meta     = supaUser.user_metadata || {};
-
-    // Verify role is employer
-    if (meta.role && meta.role !== 'employer') {
+    // Role, employer and tenant come from the provisioned users row — never
+    // from user_metadata, which the user can write (finding S-1). Every
+    // failure is the same 401 so the endpoint does not reveal which accounts
+    // exist or how they are provisioned.
+    const resolved = await resolveIdentity(authData.user);
+    if (!resolved.ok || resolved.identity.role !== 'employer' || !resolved.identity.employerId) {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
+    const { identity } = resolved;
+    const employer = await db.employers.findById(identity.employerId).catch(() => null);
+    const employerName = employer?.name || null;
 
     const token = generateEmployerToken({
-      sub:          supaUser.id,
-      email:        supaUser.email,
-      employerId:   meta.employer_id,
-      employerName: meta.employer_name,
-      tenantId:     meta.tenant_id || config.tenancy.defaultTenantId,
+      sub:          identity.id,
+      email:        identity.email,
+      employerId:   identity.employerId,
+      employerName,
+      tenantId:     identity.tenantId,
     });
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge:   8 * 60 * 60 * 1000, // 8 hours
-    });
+    res.cookie('token', token, sessionCookieOptions());
 
-    logger.info({ msg: 'employer/login: success', email, employerId: meta.employer_id });
-    res.json({ ok: true, employer_id: meta.employer_id, employer_name: meta.employer_name, email: supaUser.email });
+    logger.info({ msg: 'employer/login: success', authUserId: identity.id, employerId: identity.employerId });
+    res.json({ ok: true, employer_id: identity.employerId, employer_name: employerName, email: identity.email });
   }
 );
 
@@ -245,8 +247,12 @@ router.post(
     }
 
     const supaUser = data.user;
-    const meta     = supaUser.user_metadata || {};
-    if (!STAFF_ROLES.includes(meta.role)) {
+    const resolved = await resolveIdentity(supaUser);
+    if (!resolved.ok) {
+      return res.status(403).json({ error: resolved.reason === 'inactive' ? 'account_inactive' : 'not_provisioned' });
+    }
+    const { identity } = resolved;
+    if (!STAFF_ROLES.includes(identity.role)) {
       return res.status(403).json({ error: 'not_staff' });
     }
 
@@ -256,13 +262,12 @@ router.post(
       return res.status(401).json({ error: 'mfa_required', factor_id: verifiedFactor.id });
     }
 
-    const tenantId = meta.tenant_id || config.tenancy.defaultTenantId;
     const token = generateStaffToken({
-      role: meta.role, sub: supaUser.id, email: supaUser.email, tenantId, mfa: false,
+      role: identity.role, sub: identity.id, email: identity.email, tenantId: identity.tenantId, mfa: false,
     });
-    res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
-    logger.info({ msg: 'staff/login: success', email, role: meta.role, mfa: false });
-    res.json({ ok: true, role: meta.role, tenant_id: tenantId, email: supaUser.email, mfa: false });
+    res.cookie('token', token, sessionCookieOptions());
+    logger.info({ msg: 'staff/login: success', authUserId: identity.id, role: identity.role, mfa: false });
+    res.json({ ok: true, role: identity.role, tenant_id: identity.tenantId, email: identity.email, mfa: false });
   }
 );
 
@@ -287,19 +292,21 @@ router.post(
       return res.status(401).json({ error: 'mfa_incomplete' });
     }
 
-    const supaUser = data.user;
-    const meta     = supaUser.user_metadata || {};
-    if (!STAFF_ROLES.includes(meta.role)) {
+    const resolved = await resolveIdentity(data.user);
+    if (!resolved.ok) {
+      return res.status(403).json({ error: resolved.reason === 'inactive' ? 'account_inactive' : 'not_provisioned' });
+    }
+    const { identity } = resolved;
+    if (!STAFF_ROLES.includes(identity.role)) {
       return res.status(403).json({ error: 'not_staff' });
     }
 
-    const tenantId = meta.tenant_id || config.tenancy.defaultTenantId;
     const token = generateStaffToken({
-      role: meta.role, sub: supaUser.id, email: supaUser.email, tenantId, mfa: true,
+      role: identity.role, sub: identity.id, email: identity.email, tenantId: identity.tenantId, mfa: true,
     });
-    res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
-    logger.info({ msg: 'staff/login: success', email: supaUser.email, role: meta.role, mfa: true });
-    res.json({ ok: true, role: meta.role, tenant_id: tenantId, email: supaUser.email, mfa: true });
+    res.cookie('token', token, sessionCookieOptions());
+    logger.info({ msg: 'staff/login: success', authUserId: identity.id, role: identity.role, mfa: true });
+    res.json({ ok: true, role: identity.role, tenant_id: identity.tenantId, email: identity.email, mfa: true });
   }
 );
 
@@ -318,7 +325,7 @@ router.get('/dev-session', (req, res) => {
     name:  'Dev Admin',
   });
 
-  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+  res.cookie('token', token, sessionCookieOptions());
   res.json({ ok: true, role: 'admin', expiresIn: '8h' });
 });
 
@@ -337,7 +344,7 @@ router.get('/dev-employer-session', (req, res) => {
     employerName: 'BrightCare Home Health',
   });
 
-  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+  res.cookie('token', token, sessionCookieOptions());
   res.json({ ok: true, role: 'employer', employerId: 'employer-brightcare-001', employerName: 'BrightCare Home Health' });
 });
 
@@ -353,7 +360,7 @@ router.get('/dev-supervisor-session', (req, res) => {
     email: 'supervisor@homecaretpa.com',
     name:  'Dev Supervisor',
   });
-  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 8 * 60 * 60 * 1000 });
+  res.cookie('token', token, sessionCookieOptions());
   res.json({ ok: true, role: 'supervisor', expiresIn: '8h' });
 });
 
