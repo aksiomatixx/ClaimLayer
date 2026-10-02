@@ -53,7 +53,7 @@ Each section labels what is real versus deferred:
 └───────────────────────────────┬──────────────────────────────────────┘
                                  │
 ┌───────────────────────────────▼──────────────────────────────────────┐
-│  DATA — PostgreSQL (Supabase) · 33 migrations · RLS policies            │
+│  DATA — PostgreSQL (Supabase) · 34 migrations · RLS policies            │
 │  claims (state machine) · claim_events · ai_decisions · diaries ·       │
 │  documents · rfas · reserves · td_periods · pd_evaluations ·            │
 │  settlement_offers · audit_log · legacy_* (adapter round trip)          │
@@ -242,7 +242,7 @@ procedural step — no EAMS API exists.
 
 ## Database
 
-PostgreSQL via Supabase. 33 migrations in `supabase/migrations/`, applied in filename
+PostgreSQL via Supabase. 34 migrations in `supabase/migrations/`, applied in filename
 order; **migrations are never auto-applied** — each is staged for review because schema
 changes can touch regulated data. Row-level-security policies ship in the migrations.
 
@@ -284,7 +284,7 @@ adversarial guardrail tests.
 
 CI (`.github/workflows/`):
 
-- **ci.yml** — backend + frontend suites; all 33 migrations apply to a clean PostgreSQL 16,
+- **ci.yml** — backend + frontend suites; all 34 migrations apply to a clean PostgreSQL 16,
   the hardening migration re-applies idempotently, and the schema contract is asserted.
 - **live-ingestion-test.yml** — the live-model eval gate: 13 golden PDFs through the real
   classifier, asserting category, claim match, and routing.

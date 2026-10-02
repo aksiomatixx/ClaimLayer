@@ -421,6 +421,20 @@ async function main() {
     if (rows.length) throw new Error('RLS disabled on: ' + rows.map(r => r.relname).join(', '));
   });
 
+  await check('every app-schema function and next_claim_number pin their search_path (advisor lint 0011)', async () => {
+    const { rows } = await client.query(
+      `SELECT n.nspname || '.' || p.proname AS fn
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE (n.nspname = 'app' OR (n.nspname = 'public' AND p.proname = 'next_claim_number'))
+          AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c LIKE 'search_path=%')`);
+    if (rows.length) throw new Error('mutable search_path: ' + rows.map(r => r.fn).join(', '));
+  });
+
+  await check('next_claim_number still resolves its sequence with the pinned path', async () => {
+    const { rows } = await client.query(`SELECT next_claim_number() AS n`);
+    if (!/^HHW-\d{4}-\d+$/.test(rows[0].n)) throw new Error(`unexpected claim number ${rows[0].n}`);
+  });
+
   await check('users.active exists and defaults to TRUE', async () => {
     const { rows } = await client.query(
       `SELECT active FROM users WHERE id = '00000000-0000-0000-0000-00000000a001'`);

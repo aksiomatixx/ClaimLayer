@@ -80,7 +80,7 @@ Required before any live data:
 
 - [ ] `NODE_ENV=production`, served over HTTPS only (session cookies are `Secure`).
 - [ ] Migrations applied in order, *before* the matching backend (`migrate → deploy`),
-  including `20261001000001`–`20261001000003`.
+  including `20261001000001`–`20261001000004`.
 - [ ] Public sign-ups disabled; every user provisioned in `public.users`; staff enrolled in MFA.
 - [ ] Webhook secrets and `EMAIL_INBOUND_TOKEN` set.
 - [ ] Secrets in a secrets manager; per-environment credentials; key rotation documented.

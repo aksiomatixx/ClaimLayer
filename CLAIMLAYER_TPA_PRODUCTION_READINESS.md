@@ -1161,7 +1161,7 @@ ledger, payments, rules engine, agents) plugs into them.
 Totals after the sprint:
 
 - backend: **86 suites, 1,396 tests** (from 81 / 1,278);
-- schema contract on PostgreSQL 16: **63 assertions** (from 33);
+- schema contract on PostgreSQL 16: **65 assertions** (from 33);
 - frontend: 84 tests;
 - all passing.
 
