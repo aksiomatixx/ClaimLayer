@@ -10,9 +10,15 @@ A regulatory-aware execution layer that runs AI agents on top of existing claims
 
 **[claimlayer.org](https://claimlayer.org)** — product site, narrated tour, and the interactive demo
 
-`1,480 tests · 98 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
+`1,483 tests · 98 suites` · Node.js / Express · React / Vite · PostgreSQL · Anthropic Claude API
 
 </div>
+
+## Production readiness
+
+HIPAA readiness and an independent SOC 2 examination are production launch requirements, not current certifications. The public demo remains synthetic. See [pilot readiness](docs/pilot-readiness.md) for deployment prerequisites and unresolved controls.
+
+RFA approval recommendations now require human disposition. Referral submission does not generate determination or IMR notices. Apply `20260904000001_rfa_diary_scope.sql` before deploying this backend; unmatched historical RFA diaries stay open for manual reconciliation.
 
 ## What this is
 
@@ -75,7 +81,7 @@ These are the choices that show, in code, where the model is and isn't trusted. 
 
 ## Testing
 
-1,480 automated tests across 98 suites: 1,396 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
+1,483 automated tests across 98 suites: 1,399 backend tests (Jest) covering benefits-calculation math, statutory-deadline logic, state-machine transitions, atomic decision workflows, and adversarial guardrail tests that attempt to push agents past their bounds and assert that the guardrails hold — plus 84 frontend tests (Vitest + Testing Library) covering the drawer tabs, decision-loop services, and a full-app smoke render.
 
 Worth a reviewer's eye specifically:
 

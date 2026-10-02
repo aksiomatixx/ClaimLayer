@@ -204,8 +204,8 @@ describe('Trigger wiring — rfaService', () => {
     });
   });
 
-  it('no approval letter issues on an AI auto_approve recommendation alone (S-5)', async () => {
-    // Default mock returns auto_approve — now a recommendation queued for a
+  it('an AI approval recommendation does not send a determination (S-5)', async () => {
+    // Default mock returns auto_approve — a recommendation queued for a
     // human, so no determination letter exists yet.
     await rfaService.evaluateRFA(MOCK_RFA.id);
     await drainSetImmediates();
@@ -223,7 +223,7 @@ describe('Trigger wiring — rfaService', () => {
     expect(imrSpy).not.toHaveBeenCalled();
   });
 
-  it('generateRfaLetter is called after a sent_to_uro decision', async () => {
+  it('a referral does not send a determination', async () => {
     aiService.evaluateRFA.mockResolvedValue({
       mtusConsistency:   false,
       recommendedAction: 'physician_review',
@@ -233,10 +233,10 @@ describe('Trigger wiring — rfaService', () => {
     await rfaService.evaluateRFA(MOCK_RFA.id);
     await drainSetImmediates();
 
-    expect(rfaLtrSpy).toHaveBeenCalledWith(MOCK_RFA.id);
+    expect(rfaLtrSpy).not.toHaveBeenCalled();
   });
 
-  it('generateImrRightsNotice is called on a sent_to_uro (URO denial) decision', async () => {
+  it('a referral does not send IMR rights before a physician determination', async () => {
     aiService.evaluateRFA.mockResolvedValue({
       mtusConsistency:   false,
       recommendedAction: 'physician_review',
@@ -246,7 +246,7 @@ describe('Trigger wiring — rfaService', () => {
     await rfaService.evaluateRFA(MOCK_RFA.id);
     await drainSetImmediates();
 
-    expect(imrSpy).toHaveBeenCalledWith(MOCK_RFA.id);
+    expect(imrSpy).not.toHaveBeenCalled();
   });
 
   it('generateImrRightsNotice is NOT called on an auto_approve decision', async () => {
