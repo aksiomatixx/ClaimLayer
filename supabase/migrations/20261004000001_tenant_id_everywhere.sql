@@ -103,7 +103,7 @@ BEGIN
         FROM information_schema.columns
         WHERE table_schema = 'public'
           AND column_name = 'claim_id'
-          AND table_name <> 'claims'
+          AND table_name NOT IN ('claims', 'claim_events')
     LOOP
         EXECUTE format('
             UPDATE %I t

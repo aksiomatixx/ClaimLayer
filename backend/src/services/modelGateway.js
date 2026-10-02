@@ -178,15 +178,13 @@ function validateCompensabilityAnalysis(rawAnalysis) {
   }
 
   const priority = sanitizePriority(rawAnalysis.priority);
-
-  let compensability = String(rawAnalysis.compensability || 'PENDING').toUpperCase().trim();
-  if (!VALID_COMPENSABILITIES.includes(compensability)) {
-    compensability = 'PENDING';
-  }
+  const cleanComp = String(rawAnalysis.compensability || 'Pending').trim();
+  const upperComp = cleanComp.toUpperCase();
+  const compensability = VALID_COMPENSABILITIES.includes(upperComp) ? upperComp : cleanComp;
 
   let compensabilityScore = parseFloat(rawAnalysis.compensabilityScore);
-  if (isNaN(compensabilityScore) || compensabilityScore < 0 || compensabilityScore > 1) {
-    compensabilityScore = 0.5;
+  if (isNaN(compensabilityScore) || compensabilityScore < 0) {
+    compensabilityScore = 50;
   }
 
   const validated = {

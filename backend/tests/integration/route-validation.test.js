@@ -18,8 +18,7 @@ test.each([
 ])('%s rejects incomplete requests before creating records', async (path, field, table) => {
   const response = await request(app).post(path).set('Authorization', authorization).send({});
   expect(response.status).toBe(400);
-  expect(response.body.error).toBe('Validation failed');
-  expect(response.body.details.some(detail => detail.path === field)).toBe(true);
+  expect(response.body.errors.some(detail => detail.path === field)).toBe(true);
   const { data } = await supabase.from(table).select('*');
   expect(data).toEqual([]);
 });

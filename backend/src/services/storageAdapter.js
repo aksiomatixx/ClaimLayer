@@ -23,7 +23,7 @@ try {
 }
 
 const DEFAULT_BUCKET = process.env.STORAGE_BUCKET || 'claim-documents';
-const STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || (supabase?.storage ? 'supabase' : 'inline');
+const STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || (process.env.NODE_ENV === 'test' ? 'inline' : (supabase?.storage ? 'supabase' : 'inline'));
 const LOCAL_STORAGE_DIR = path.join(__dirname, '../../storage_vault');
 
 /**

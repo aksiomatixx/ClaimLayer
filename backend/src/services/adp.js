@@ -177,7 +177,7 @@ function calculateTDRate(payStatements, opts = {}) {
   return {
     aww:             res.aww,
     tdRate:          res.tdRate,
-    weeksCalculated: res.weeksCalculated,
+    weeksCalculated: payStatements.length,
     totalGross:      res.totalGross,
   };
 }

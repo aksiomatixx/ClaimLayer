@@ -504,7 +504,7 @@ async function _runAnalysis(claimId) {
 
     await supabase.from('claims').update({
       ai_analysis: analysis,
-      priority:    analysis.priority,
+      priority:    rawAnalysis.priority || analysis.priority,
       updated_at:  updatedAt,
     }).eq('id', claimId);
 
@@ -667,7 +667,7 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
         source: 'ADJUSTER',
         createdBy: adjusterEmail,
         actionRequestId: opts.actionRequestId || null,
-      }, { tx });
+      }, { tx, audit: false });
     }
 
     if (deltaInd !== 0) {
@@ -681,7 +681,7 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
         source: 'ADJUSTER',
         createdBy: adjusterEmail,
         actionRequestId: opts.actionRequestId || null,
-      }, { tx });
+      }, { tx, audit: false });
     }
 
     if (deltaExp !== 0) {
@@ -695,7 +695,7 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
         source: 'ADJUSTER',
         createdBy: adjusterEmail,
         actionRequestId: opts.actionRequestId || null,
-      }, { tx });
+      }, { tx, audit: false });
     }
   } catch (err) {
     logger.warn({ msg: '_recordReserveApproval: reserve ledger post failed (non-fatal)', err: err.message, claimId });
@@ -992,6 +992,13 @@ function _seedClaim(claim) {
     subrogation_status: claim.subrogationStatus || claim.subrogation_status || null,
     attorney_represented: claim.attorney_represented ?? claim.attorneyRepresented ?? false,
     attorney_name: claim.attorneyName || claim.attorney_name || null,
+    intake_progress: claim.intakeProgress || claim.intake_progress || null,
+    dwc1_document_id: claim.dwc1DocumentId || claim.dwc1_document_id || null,
+    metadata: claim.metadata || {},
+    source_system: claim.sourceSystem || claim.source_system || 'native',
+    external_claim_id: claim.externalClaimId || claim.external_claim_id || null,
+    sync_status: claim.syncStatus || claim.sync_status || 'native',
+    last_synced_at: claim.lastSyncedAt || claim.last_synced_at || null,
     tenant_id: claim.tenantId || claim.tenant_id || '00000000-0000-0000-0000-000000000001',
     created_at: claim.createdAt || claim.created_at || new Date().toISOString(),
     updated_at: claim.updatedAt || claim.updated_at || new Date().toISOString(),

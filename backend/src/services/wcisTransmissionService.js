@@ -222,8 +222,10 @@ async function _applyAckBatch(batch) {
       tr:       batch.per_transaction.filter((p) => p.result === 'rejected').length,
     };
   }
-  await supabase.from('wcis_transmissions')
-    .update(tsmUpdate).eq('id', batch.transmission_id);
+  if (batch.transmission_id) {
+    await supabase.from('wcis_transmissions')
+      .update(tsmUpdate).eq('id', batch.transmission_id);
+  }
 
   // Per-transaction updates
   for (const entry of batch.per_transaction || []) {
