@@ -60,6 +60,7 @@ DECLARE
         'ai_decisions',
         'pr4_solicitations',
         'mmi_evaluations',
+        'msa_screenings',
         'supplemental_requests',
         'magic_link_tokens',
         'deferred_penalty_flags',
