@@ -27,8 +27,12 @@
  *   (the deadline monitor cron surfaces missed enqueues).
  */
 
-const { supabase } = require('./supabase');
-const logger       = require('../logger');
+const { supabase }         = require('./supabase');
+const config               = require('../config');
+const logger               = require('../logger');
+const { runInTransaction } = require('../db/unitOfWork');
+const auditLedger          = require('./auditLedgerService');
+const jobQueue             = require('./jobQueue');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const STATUTORY_CAP_WEEKS = 104;        // LC §4656(c)(2)
@@ -79,9 +83,29 @@ function _weeksFromDays(days) {
   return Math.round((days / DAYS_PER_WEEK) * 100) / 100;
 }
 
-async function _writeAuditLog(action, resourceId, description, newValue, actorEmail) {
+function _resolveActor(actorEmail, opts = {}) {
+  if (opts && opts.actor) return opts.actor;
+  if (typeof actorEmail === 'object' && actorEmail !== null) return actorEmail;
+  if (!actorEmail) return { type: 'system', id: 'system', role: 'system' };
+  return { type: 'human', id: actorEmail, role: 'adjuster' };
+}
+
+async function _writeAudit(action, resourceId, description, newValue, actorEmail, opts = {}, tx = null) {
+  const actor = _resolveActor(actorEmail, opts);
+  const auditAction = `td.${action.replace(/^td_/, '')}`;
   try {
-    await supabase.from('audit_log').insert({
+    await auditLedger.append({
+      actor,
+      action: auditAction,
+      entity: { type: 'td_period', id: resourceId },
+      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
+    }, { tx });
+  } catch (err) {
+    logger.warn({ msg: 'tdPeriodsService: auditLedger append failed', err: err.message, action });
+  }
+
+  try {
+    const row = {
       action,
       resource_type: 'td_period',
       resource_id:   resourceId,
@@ -89,39 +113,51 @@ async function _writeAuditLog(action, resourceId, description, newValue, actorEm
       new_value:     newValue,
       user_role:     'admin',
       created_at:    new Date().toISOString(),
-    });
-  } catch (err) {
-    logger.error({ msg: 'tdPeriodsService: audit_log write failed', err: err.message, action, resourceId, actorEmail });
+    };
+    if (tx) {
+      await tx.insert('audit_log', row).catch(() => null);
+    } else {
+      await supabase.from('audit_log').insert(row);
+    }
+  } catch {
+    // legacy dual-write non-fatal
   }
 }
 
-async function _writeClaimEvent(claimId, type, data) {
-  await supabase.from('claim_events').insert({
+async function _writeClaimEvent(claimId, type, data, tx = null) {
+  const row = {
     claim_id:  claimId,
     type,
     timestamp: new Date().toISOString(),
     data:      data || {},
-  });
+  };
+  if (tx) {
+    return tx.insert('claim_events', row);
+  }
+  return supabase.from('claim_events').insert(row);
 }
 
 // ── Read operations ──────────────────────────────────────────────────────────
 
 /**
- * Non-fatal WCIS enqueue. A trigger-queue failure must never block a
- * benefit change — it logs loudly and the WCIS deadline monitor cron
- * is the backstop for anything missed.
+ * WCIS trigger enqueue inside the unit of work.
  */
-async function _enqueueWcis(claimId, triggerEvent, sourceRecordId, eventDate, payloadContext) {
+async function _enqueueWcis(claimId, triggerEvent, sourceRecordId, eventDate, payloadContext, tx = null) {
   try {
-    const wcis = require('./wcisTriggerService');
-    await wcis.enqueueIfReportable({
-      claim_id:         claimId,
-      trigger_event:    triggerEvent,
-      source_service:   'tdPeriodsService',
-      source_record_id: sourceRecordId,
-      event_date:       eventDate,
-      payload_context:  payloadContext || {},
-    });
+    await jobQueue.enqueue({
+      queue: 'wcis.trigger',
+      claimId,
+      payload: {
+        trigger: {
+          claim_id:         claimId,
+          trigger_event:    triggerEvent,
+          source_service:   'tdPeriodsService',
+          source_record_id: sourceRecordId,
+          event_date:       eventDate,
+          payload_context:  payloadContext || {},
+        },
+      },
+    }, { tx });
   } catch (e) {
     logger.error({ msg: 'tdPeriodsService: WCIS enqueue failed (non-fatal)', triggerEvent, claimId, err: e.message });
   }
@@ -154,37 +190,47 @@ async function getById(periodId) {
 
 // ── Auto-complete TD_PAYMENT_SETUP diary on first period creation ────────────
 
-async function _completeTdSetupDiaryIfFirst(claimId, periodId) {
-  const periods = await listForClaim(claimId);
+async function _completeTdSetupDiaryIfFirst(claimId, periodId, tx = null) {
+  const periods = tx
+    ? await tx.select('td_periods', { claim_id: claimId })
+    : await listForClaim(claimId);
   if (periods.length !== 1) return;  // only on the very first period
 
-  const { data: open } = await supabase
-    .from('diaries')
-    .select('*')
-    .eq('claim_id', claimId)
-    .eq('diary_type', 'TD_PAYMENT_SETUP')
-    .eq('status', 'open');
+  const open = tx
+    ? await tx.select('diaries', { claim_id: claimId, diary_type: 'TD_PAYMENT_SETUP', status: 'open' })
+    : (await supabase.from('diaries').select('*').eq('claim_id', claimId).eq('diary_type', 'TD_PAYMENT_SETUP').eq('status', 'open')).data;
 
   if (!open || open.length === 0) return;
 
   const note = `Completed by td_period creation: ${periodId}`;
+  const now = new Date().toISOString();
   for (const d of open) {
-    await supabase
-      .from('diaries')
-      .update({
+    if (tx) {
+      await tx.update('diaries', {
         status:           'completed',
-        completed_at:     new Date().toISOString(),
+        completed_at:     now,
         completed_by:     'system',
         resolution_notes: note,
-        updated_at:       new Date().toISOString(),
-      })
-      .eq('id', d.id);
+        updated_at:       now,
+      }, { id: d.id });
+    } else {
+      await supabase
+        .from('diaries')
+        .update({
+          status:           'completed',
+          completed_at:     now,
+          completed_by:     'system',
+          resolution_notes: note,
+          updated_at:       now,
+        })
+        .eq('id', d.id);
+    }
   }
 }
 
 // ── createPeriod ──────────────────────────────────────────────────────────────
 
-async function createPeriod(claimId, input, actorEmail) {
+async function createPeriod(claimId, input, actorEmail, opts = {}) {
   const { benefit_type, start_date, weekly_rate, reason_started, notes } = input || {};
 
   if (!claimId) throw new Error('claimId is required');
@@ -201,119 +247,99 @@ async function createPeriod(claimId, input, actorEmail) {
     throw new Error(`reason_started must be one of: ${VALID_REASON_STARTED.join(', ')}`);
   }
 
-  const { data: claim } = await supabase.from('claims').select('id').eq('id', claimId).single();
-  if (!claim) throw new Error(`Claim not found: ${claimId}`);
+  const run = async (tx) => {
+    const claim = await tx.selectOne('claims', { id: claimId });
+    if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
-  const active = await getActive(claimId);
+    const existingPeriods = await tx.select('td_periods', { claim_id: claimId });
+    const active = existingPeriods.find(p => p.end_date == null) || null;
 
-  // If an active period exists, atomically close it (end_date = new
-  // start_date - 1 day). The reason_ended depends on the diff:
-  //   - benefit_type changed       → 'benefit_type_change'
-  //   - weekly_rate changed only   → 'rate_change'
-  //   - same type and rate         → 'rate_change' (still treat as a
-  //     supersede; should never reach here in practice unless adjuster
-  //     creates a duplicate)
-  if (active) {
-    const closingReason =
-      active.benefit_type !== benefit_type ? 'benefit_type_change' : 'rate_change';
-    const newStartDate = start_date;
-    const closeDate = _addDays(newStartDate, -1);
+    if (active) {
+      const closingReason =
+        active.benefit_type !== benefit_type ? 'benefit_type_change' : 'rate_change';
+      const newStartDate = start_date;
+      const closeDate = _addDays(newStartDate, -1);
 
-    if (closeDate < active.start_date) {
-      throw new Error('start_date must be on or after the active period start date');
-    }
+      if (closeDate < active.start_date) {
+        throw new Error('start_date must be on or after the active period start date');
+      }
 
-    await supabase
-      .from('td_periods')
-      .update({
+      await tx.update('td_periods', {
         end_date:     closeDate,
         reason_ended: closingReason,
         updated_at:   new Date().toISOString(),
-      })
-      .eq('id', active.id);
+      }, { id: active.id });
 
-    await _writeClaimEvent(claimId, 'td_period_closed', {
-      period_id:    active.id,
-      end_date:     closeDate,
-      reason_ended: closingReason,
-      auto_close:   true,
-      actor:        actorEmail,
-    });
+      await _writeClaimEvent(claimId, 'td_period_closed', {
+        period_id:    active.id,
+        end_date:     closeDate,
+        reason_ended: closingReason,
+        auto_close:   true,
+        actor:        typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+      }, tx);
 
-    await _writeAuditLog(
-      'td_period_auto_closed',
-      active.id,
-      `Auto-closed active TD period on supersede (${closingReason})`,
-      { end_date: closeDate, reason_ended: closingReason },
+      await _writeAudit(
+        'td_period_auto_closed',
+        active.id,
+        `Auto-closed active TD period on supersede (${closingReason})`,
+        { end_date: closeDate, reason_ended: closingReason },
+        actorEmail,
+        opts,
+        tx,
+      );
+    }
+
+    const insertReasonStarted =
+      reason_started || (active ? (active.benefit_type !== benefit_type ? 'benefit_type_change' : 'rate_change') : 'initial_disability');
+
+    const row = {
+      tenant_id:                 tx.tenantId || claim.tenant_id || config.tenancy.defaultTenantId,
+      claim_id:                  claimId,
+      benefit_type,
+      start_date,
+      end_date:                  null,
+      weekly_rate,
+      reason_started:            insertReasonStarted,
+      reason_ended:              null,
+      suspension_reason_code:    null,
+      reinstated_from_period_id: null,
+      notes:                     notes || null,
+      created_at:                new Date().toISOString(),
+      created_by:                typeof actorEmail === 'string' ? actorEmail : (opts.actor?.id || null),
+      updated_at:                new Date().toISOString(),
+    };
+
+    const inserted = await tx.insert('td_periods', row);
+
+    // Defense invariant: unique active period per claim
+    const allOpen = (await tx.select('td_periods', { claim_id: claimId })).filter(p => p.end_date == null);
+    if (allOpen.length > 1) {
+      throw new Error('UNIQUE_ACTIVE_TD_PERIOD_VIOLATION');
+    }
+
+    await _writeClaimEvent(claimId, 'td_period_started', {
+      period_id:    inserted.id,
+      benefit_type,
+      start_date,
+      weekly_rate,
+      actor:        typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    }, tx);
+
+    await _writeAudit(
+      'td_period_started',
+      inserted.id,
+      `Started ${benefit_type} period at $${weekly_rate}/wk effective ${start_date}`,
+      { benefit_type, start_date, weekly_rate, reason_started: insertReasonStarted },
       actorEmail,
+      opts,
+      tx,
     );
-  }
 
-  const insertReasonStarted =
-    reason_started || (active ? (active.benefit_type !== benefit_type ? 'benefit_type_change' : 'rate_change') : 'initial_disability');
+    // Auto-complete TD_PAYMENT_SETUP diary on first period
+    await _completeTdSetupDiaryIfFirst(claimId, inserted.id, tx);
 
-  const row = {
-    claim_id:                  claimId,
-    benefit_type,
-    start_date,
-    end_date:                  null,
-    weekly_rate,
-    reason_started:            insertReasonStarted,
-    reason_ended:              null,
-    suspension_reason_code:    null,
-    reinstated_from_period_id: null,
-    notes:                     notes || null,
-    created_at:                new Date().toISOString(),
-    created_by:                actorEmail || null,
-    updated_at:                new Date().toISOString(),
-  };
-
-  const { data: inserted, error } = await supabase
-    .from('td_periods')
-    .insert(row)
-    .select()
-    .single();
-  if (error) throw new Error(`tdPeriodsService.createPeriod: ${error.message}`);
-
-  // Service-side enforcement of the unique-active-per-claim invariant.
-  // The DB partial unique index also enforces this; this check is a
-  // defensive guard for the in-memory test mock which does not enforce
-  // partial unique indexes.
-  const allOpen = (await listForClaim(claimId)).filter(p => p.end_date == null);
-  if (allOpen.length > 1) {
-    // Roll back the insert
-    await supabase.from('td_periods').delete().eq('id', inserted.id);
-    throw new Error('UNIQUE_ACTIVE_TD_PERIOD_VIOLATION');
-  }
-
-  await _writeClaimEvent(claimId, 'td_period_started', {
-    period_id:    inserted.id,
-    benefit_type,
-    start_date,
-    weekly_rate,
-    actor:        actorEmail,
-  });
-
-  await _writeAuditLog(
-    'td_period_started',
-    inserted.id,
-    `Started ${benefit_type} period at $${weekly_rate}/wk effective ${start_date}`,
-    { benefit_type, start_date, weekly_rate, reason_started: insertReasonStarted },
-    actorEmail,
-  );
-
-  // Auto-complete the TD_PAYMENT_SETUP diary on first period creation.
-  await _completeTdSetupDiaryIfFirst(claimId, inserted.id);
-
-  // WCIS HOOK — SROI IP / CA / CB / RE / FS.
-  //   IP = first indemnity period ever on the claim
-  //   FS = salary continuation start (full salary in lieu of TD)
-  //   CA = rate change supersede; CB = benefit-type change supersede
-  //   RE = reduced earnings (explicit flag from recordReducedEarnings)
-  // Penalty hook (LC §4650(d)) remains deferred to the payment ledger.
-  {
-    const all = await listForClaim(claimId);
-    const isFirstEver = all.length === 1;
+    // WCIS hook
+    const isFirstEver = existingPeriods.length === 0;
     let wcisEvent = null;
     if (input && input.wcis_event_override) {
       wcisEvent = input.wcis_event_override;
@@ -324,23 +350,29 @@ async function createPeriod(claimId, input, actorEmail) {
     } else if (insertReasonStarted === 'rate_change') {
       wcisEvent = 'td_rate_changed';
     } else if (insertReasonStarted === 'initial_disability') {
-      // New period after a gap that wasn't a reinstatement — report as
-      // reinstatement of indemnity rather than a duplicate IP.
       wcisEvent = 'td_reinstated';
     }
+
     if (wcisEvent) {
       await _enqueueWcis(claimId, wcisEvent, inserted.id, start_date, {
         source: 'td_period', period_id: inserted.id, benefit_type, weekly_rate,
-      });
+      }, tx);
     }
-  }
 
-  return inserted;
+    return inserted;
+  };
+
+  if (opts.tx) return run(opts.tx);
+  return runInTransaction({
+    tenantId: opts.tenantId,
+    actorId: typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    label: 'td.create_period',
+  }, run);
 }
 
 // ── closePeriod ───────────────────────────────────────────────────────────────
 
-async function closePeriod(periodId, input, actorEmail) {
+async function closePeriod(periodId, input, actorEmail, opts = {}) {
   const { end_date, reason_ended, notes } = input || {};
 
   if (!end_date || !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
@@ -350,63 +382,64 @@ async function closePeriod(periodId, input, actorEmail) {
     throw new Error(`reason_ended must be one of: ${VALID_REASON_ENDED.join(', ')}`);
   }
 
-  const period = await getById(periodId);
-  if (!period) throw new Error(`TD period not found: ${periodId}`);
-  if (period.end_date != null) {
-    throw new Error('PERIOD_ALREADY_CLOSED');
-  }
-  if (end_date < period.start_date) {
-    throw new Error('end_date must be on or after the period start_date');
-  }
+  const run = async (tx) => {
+    const period = await tx.selectOne('td_periods', { id: periodId });
+    if (!period) throw new Error(`TD period not found: ${periodId}`);
+    if (period.end_date != null) {
+      throw new Error('PERIOD_ALREADY_CLOSED');
+    }
+    if (end_date < period.start_date) {
+      throw new Error('end_date must be on or after the period start_date');
+    }
 
-  const update = {
-    end_date,
-    reason_ended,
-    updated_at: new Date().toISOString(),
+    const update = {
+      end_date,
+      reason_ended,
+      updated_at: new Date().toISOString(),
+    };
+    if (notes) update.notes = period.notes ? `${period.notes}\n${notes}` : notes;
+
+    const [updated] = await tx.update('td_periods', update, { id: periodId });
+
+    await _writeClaimEvent(period.claim_id, 'td_period_closed', {
+      period_id:    periodId,
+      end_date,
+      reason_ended,
+      auto_close:   false,
+      actor:        typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    }, tx);
+
+    await _writeAudit(
+      'td_period_closed',
+      periodId,
+      `Closed TD period (${reason_ended}) effective ${end_date}`,
+      { end_date, reason_ended },
+      actorEmail,
+      opts,
+      tx,
+    );
+
+    const suspensionEvent = REASON_ENDED_TO_WCIS_EVENT[reason_ended];
+    if (suspensionEvent) {
+      await _enqueueWcis(period.claim_id, suspensionEvent, periodId, end_date, {
+        source: 'td_period', period_id: periodId, reason_ended,
+      }, tx);
+    }
+
+    return updated;
   };
-  if (notes) update.notes = period.notes ? `${period.notes}\n${notes}` : notes;
 
-  const { data: updated, error } = await supabase
-    .from('td_periods')
-    .update(update)
-    .eq('id', periodId)
-    .select()
-    .single();
-  if (error) throw new Error(`tdPeriodsService.closePeriod: ${error.message}`);
-
-  await _writeClaimEvent(period.claim_id, 'td_period_closed', {
-    period_id:    periodId,
-    end_date,
-    reason_ended,
-    auto_close:   false,
-    actor:        actorEmail,
-  });
-
-  await _writeAuditLog(
-    'td_period_closed',
-    periodId,
-    `Closed TD period (${reason_ended}) effective ${end_date}`,
-    { end_date, reason_ended },
-    actorEmail,
-  );
-
-  // WCIS HOOK — SROI Sx / Px per reason_ended (S1=rtw_full,
-  // P1=rtw_modified, S2=med_noncompliance, S3=administrative,
-  // S7=benefits exhausted). Reasons without an entry are reported by
-  // other services or deferred — see REASON_ENDED_TO_WCIS_EVENT.
-  const suspensionEvent = REASON_ENDED_TO_WCIS_EVENT[reason_ended];
-  if (suspensionEvent) {
-    await _enqueueWcis(period.claim_id, suspensionEvent, periodId, end_date, {
-      source: 'td_period', period_id: periodId, reason_ended,
-    });
-  }
-
-  return updated;
+  if (opts.tx) return run(opts.tx);
+  return runInTransaction({
+    tenantId: opts.tenantId,
+    actorId: typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    label: 'td.close_period',
+  }, run);
 }
 
 // ── reinstatePeriod ───────────────────────────────────────────────────────────
 
-async function reinstatePeriod(claimId, fromPeriodId, input, actorEmail) {
+async function reinstatePeriod(claimId, fromPeriodId, input, actorEmail, opts = {}) {
   const { start_date, weekly_rate, notes } = input || {};
 
   if (!start_date || !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
@@ -416,80 +449,88 @@ async function reinstatePeriod(claimId, fromPeriodId, input, actorEmail) {
     throw new Error('weekly_rate must be a positive number');
   }
 
-  const source = await getById(fromPeriodId);
-  if (!source) throw new Error(`Source TD period not found: ${fromPeriodId}`);
-  if (source.claim_id !== claimId) {
-    throw new Error('Source period does not belong to this claim');
-  }
-  if (source.end_date == null) {
-    throw new Error('Cannot reinstate from an already-active period');
-  }
+  const run = async (tx) => {
+    const claim = await tx.selectOne('claims', { id: claimId });
+    if (!claim) throw new Error(`Claim not found: ${claimId}`);
 
-  const active = await getActive(claimId);
-  if (active) {
-    throw new Error('Cannot reinstate while another active TD period exists');
-  }
+    const source = await tx.selectOne('td_periods', { id: fromPeriodId });
+    if (!source) throw new Error(`Source TD period not found: ${fromPeriodId}`);
+    if (source.claim_id !== claimId) {
+      throw new Error('Source period does not belong to this claim');
+    }
+    if (source.end_date == null) {
+      throw new Error('Cannot reinstate from an already-active period');
+    }
 
-  if (start_date <= source.end_date) {
-    throw new Error('reinstatement start_date must be after the source period end_date');
-  }
+    const periods = await tx.select('td_periods', { claim_id: claimId });
+    const active = periods.find(p => p.end_date == null) || null;
+    if (active) {
+      throw new Error('Cannot reinstate while another active TD period exists');
+    }
 
-  const row = {
-    claim_id:                  claimId,
-    benefit_type:              source.benefit_type,
-    start_date,
-    end_date:                  null,
-    weekly_rate,
-    reason_started:            'reinstatement',
-    reason_ended:              null,
-    suspension_reason_code:    null,
-    reinstated_from_period_id: fromPeriodId,
-    notes:                     notes || null,
-    created_at:                new Date().toISOString(),
-    created_by:                actorEmail || null,
-    updated_at:                new Date().toISOString(),
+    if (start_date <= source.end_date) {
+      throw new Error('reinstatement start_date must be after the source period end_date');
+    }
+
+    const row = {
+      tenant_id:                 tx.tenantId || claim.tenant_id || config.tenancy.defaultTenantId,
+      claim_id:                  claimId,
+      benefit_type:              source.benefit_type,
+      start_date,
+      end_date:                  null,
+      weekly_rate,
+      reason_started:            'reinstatement',
+      reason_ended:              null,
+      suspension_reason_code:    null,
+      reinstated_from_period_id: fromPeriodId,
+      notes:                     notes || null,
+      created_at:                new Date().toISOString(),
+      created_by:                typeof actorEmail === 'string' ? actorEmail : (opts.actor?.id || null),
+      updated_at:                new Date().toISOString(),
+    };
+
+    const inserted = await tx.insert('td_periods', row);
+
+    await _writeClaimEvent(claimId, 'td_period_reinstated', {
+      period_id:                 inserted.id,
+      reinstated_from_period_id: fromPeriodId,
+      start_date,
+      weekly_rate,
+      actor:                     typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    }, tx);
+
+    await _writeAudit(
+      'td_period_reinstated',
+      inserted.id,
+      `Reinstated TD period from ${fromPeriodId} at $${weekly_rate}/wk effective ${start_date}`,
+      { start_date, weekly_rate, source_period_id: fromPeriodId },
+      actorEmail,
+      opts,
+      tx,
+    );
+
+    await _enqueueWcis(claimId, 'td_reinstated', inserted.id, start_date, {
+      source: 'td_period', period_id: inserted.id,
+      reinstated_from_period_id: fromPeriodId, weekly_rate,
+    }, tx);
+
+    return inserted;
   };
 
-  const { data: inserted, error } = await supabase
-    .from('td_periods')
-    .insert(row)
-    .select()
-    .single();
-  if (error) throw new Error(`tdPeriodsService.reinstatePeriod: ${error.message}`);
-
-  await _writeClaimEvent(claimId, 'td_period_reinstated', {
-    period_id:                 inserted.id,
-    reinstated_from_period_id: fromPeriodId,
-    start_date,
-    weekly_rate,
-    actor:                     actorEmail,
-  });
-
-  await _writeAuditLog(
-    'td_period_reinstated',
-    inserted.id,
-    `Reinstated TD period from ${fromPeriodId} at $${weekly_rate}/wk effective ${start_date}`,
-    { start_date, weekly_rate, source_period_id: fromPeriodId },
-    actorEmail,
-  );
-
-  // WCIS HOOK — SROI RB "Reinstatement of Benefits".
-  await _enqueueWcis(claimId, 'td_reinstated', inserted.id, start_date, {
-    source: 'td_period', period_id: inserted.id,
-    reinstated_from_period_id: fromPeriodId, weekly_rate,
-  });
-
-  return inserted;
+  if (opts.tx) return run(opts.tx);
+  return runInTransaction({
+    tenantId: opts.tenantId,
+    actorId: typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    label: 'td.reinstate_period',
+  }, run);
 }
 
 // ── updatePeriodMetadata ──────────────────────────────────────────────────────
 
-async function updatePeriodMetadata(periodId, input, actorEmail) {
+async function updatePeriodMetadata(periodId, input, actorEmail, opts = {}) {
   const { notes, suspension_reason_code } = input || {};
 
-  // Reject any attempt to mutate the structural fields. Adjusters who
-  // need to change start_date / end_date / weekly_rate / benefit_type
-  // must close the existing period and open a new one.
+  // Reject any attempt to mutate the structural fields.
   const forbidden = ['start_date', 'end_date', 'weekly_rate', 'benefit_type'];
   for (const k of forbidden) {
     if (input && Object.prototype.hasOwnProperty.call(input, k)) {
@@ -497,30 +538,35 @@ async function updatePeriodMetadata(periodId, input, actorEmail) {
     }
   }
 
-  const period = await getById(periodId);
-  if (!period) throw new Error(`TD period not found: ${periodId}`);
+  const run = async (tx) => {
+    const period = await tx.selectOne('td_periods', { id: periodId });
+    if (!period) throw new Error(`TD period not found: ${periodId}`);
 
-  const update = { updated_at: new Date().toISOString() };
-  if (notes !== undefined)                  update.notes = notes;
-  if (suspension_reason_code !== undefined) update.suspension_reason_code = suspension_reason_code;
+    const update = { updated_at: new Date().toISOString() };
+    if (notes !== undefined)                  update.notes = notes;
+    if (suspension_reason_code !== undefined) update.suspension_reason_code = suspension_reason_code;
 
-  const { data: updated, error } = await supabase
-    .from('td_periods')
-    .update(update)
-    .eq('id', periodId)
-    .select()
-    .single();
-  if (error) throw new Error(`tdPeriodsService.updatePeriodMetadata: ${error.message}`);
+    const [updated] = await tx.update('td_periods', update, { id: periodId });
 
-  await _writeAuditLog(
-    'td_period_metadata_updated',
-    periodId,
-    `Updated TD period metadata`,
-    { notes, suspension_reason_code },
-    actorEmail,
-  );
+    await _writeAudit(
+      'td_period_metadata_updated',
+      periodId,
+      `Updated TD period metadata`,
+      { notes, suspension_reason_code },
+      actorEmail,
+      opts,
+      tx,
+    );
 
-  return updated;
+    return updated;
+  };
+
+  if (opts.tx) return run(opts.tx);
+  return runInTransaction({
+    tenantId: opts.tenantId,
+    actorId: typeof actorEmail === 'string' ? actorEmail : opts.actor?.id,
+    label: 'td.update_period_metadata',
+  }, run);
 }
 
 // ── summary ───────────────────────────────────────────────────────────────────

@@ -49,10 +49,7 @@ async function _nextClaimNumber() {
   return `HHW-${year}-${num}`;
 }
 
-// ── Test override store ───────────────────────────────────────────────────────
-// Populated only via _seedClaim(). getClaim checks here first so that
-// tests that seed data synchronously bypass the Supabase mock.
-const _testStore = new Map();
+
 
 // Ledger actor for callers that only pass an email string (legacy call
 // sites). Callers holding a verified session pass opts.actor — a principal
@@ -75,7 +72,13 @@ function _toClaim(row) {
     claimNumber:      row.claim_number,
     tenantId:         row.tenant_id || null,
     employerId:       row.employer_id,
+    agencyId:         row.agency_id || null,
+    hostEmployerId:   row.host_employer_id || null,
+    assignmentId:     row.assignment_id || null,
     status:           row.status,
+    adminStatus:          row.admin_status || (row.status === 'closed' ? 'closed' : (['new_claim', 'intake_complete'].includes(row.status) ? 'intake' : 'open')),
+    compensabilityStatus: row.compensability_status || (row.status === 'denied' ? 'denied' : (['accepted', 'active_medical', 'p_and_s', 'pd_evaluation', 'settlement_discussions', 'closed'].includes(row.status) ? 'accepted' : 'pending_investigation')),
+    litigationStatus:     row.litigation_status || (row.status === 'litigated' ? 'application_filed' : (row.attorney_represented ? 'represented' : 'unrepresented')),
     employee:         row.employee || {},   // JSONB snapshot
     aww:              row.aww    != null ? parseFloat(row.aww)    : 0,
     tdRate:           row.td_rate != null ? parseFloat(row.td_rate) : 0,
@@ -98,6 +101,14 @@ function _toClaim(row) {
     subrogationStatus:   row.subrogation_status   || null,
     attorney_represented: row.attorney_represented ?? false,
     attorneyName:        row.attorney_name || null,
+    intakeProgress:      row.intake_progress || {
+      voice_complete: false,
+      media_complete: false,
+      mpn_acknowledged: false,
+      provider_selected: false,
+      appointment_confirmed: false,
+      dwc1_generated: false,
+    },
     createdAt:           row.created_at,
     updatedAt:           row.updated_at,
     events: ((row.claim_events || [])
@@ -183,6 +194,7 @@ async function createClaim(froiData, employerId) {
   // or nothing does. No external system is called inside the unit.
   await runInTransaction({ actorId: 'system:intake', label: 'claim.create' }, async (tx) => {
     const empRow = await tx.upsert('employees', {
+      tenant_id:           tx.tenantId || config.tenancy.defaultTenantId,
       adp_employee_id:     froiData.adpEmployeeId,
       adp_associate_oid:   employee.associateOID,
       first_name:          employee.firstName,
@@ -203,6 +215,7 @@ async function createClaim(froiData, employerId) {
 
     await tx.insert('claims', {
       id:               claimId,
+      tenant_id:        tx.tenantId || config.tenancy.defaultTenantId,
       claim_number:     claimNumber,
       employer_id:      employerId,
       employee_id:      empRow?.id || null,
@@ -217,6 +230,12 @@ async function createClaim(froiData, employerId) {
       injury_type:      froiData.injuryType,
       injury_description: froiData.injuryDescription,
       employer_name:    froiData.employerName,
+      agency_id:            froiData.agencyId || null,
+      host_employer_id:     froiData.hostEmployerId || null,
+      assignment_id:        froiData.assignmentId || null,
+      admin_status:         'intake',
+      compensability_status:'pending_investigation',
+      litigation_status:    'unrepresented',
       filed_at:             now,
       filehandler_id:       null,
       ai_analysis:          null,
@@ -228,6 +247,24 @@ async function createClaim(froiData, employerId) {
       created_at:           now,
       updated_at:           now,
     });
+
+    if (Array.isArray(froiData.bodyParts) && froiData.bodyParts.length > 0) {
+      for (const bp of froiData.bodyParts) {
+        if (bp && bp.code && bp.name) {
+          await tx.insert('claim_body_parts', {
+            id:                    crypto.randomUUID(),
+            tenant_id:             tx.tenantId || config.tenancy.defaultTenantId,
+            claim_id:              claimId,
+            body_part_code:        bp.code,
+            body_part_name:        bp.name,
+            side:                  bp.side || null,
+            compensability_status: 'pending_investigation',
+            created_at:            now,
+            updated_at:            now,
+          });
+        }
+      }
+    }
 
     await tx.insert('claim_events', [
       {
@@ -447,19 +484,21 @@ async function _seedInitialDiaries(tx, claimId, doi, filedAt, aww, tdRate) {
 
 // ── Async AI analysis ─────────────────────────────────────────────────────────
 async function _runAnalysis(claimId) {
-  // Use getClaim so test-seeded claims (in _testStore) are also found
   const claim = await getClaim(claimId);
   if (!claim) return;
 
   logger.info({ msg: '_runAnalysis: start', claimId, claimNumber: claim.claimNumber });
 
   try {
-    const analysis = await aiService.analyzeCompensability(claim);
+    const rawAnalysis = await aiService.analyzeCompensability(claim);
 
-    if (!analysis) {
+    if (!rawAnalysis) {
       logger.warn({ msg: '_runAnalysis: no analysis returned — skipping', claimId });
       return;
     }
+
+    const modelGateway = require('./modelGateway');
+    const analysis = modelGateway.validateCompensabilityAnalysis(rawAnalysis);
 
     const updatedAt = new Date().toISOString();
 
@@ -469,13 +508,7 @@ async function _runAnalysis(claimId) {
       updated_at:  updatedAt,
     }).eq('id', claimId);
 
-    // Also update test-seeded claims in _testStore
-    if (_testStore.has(claimId)) {
-      const tc = _testStore.get(claimId);
-      tc.aiAnalysis = analysis;
-      tc.priority = analysis.priority;
-      tc.updatedAt = updatedAt;
-    }
+
 
     await supabase.from('claim_events').insert({
       claim_id:  claimId,
@@ -533,9 +566,15 @@ async function triggerAnalysis(claimId) {
 // ── Read operations ───────────────────────────────────────────────────────────
 
 async function getClaim(claimId) {
-  // Test seeds bypass Supabase
-  if (_testStore.has(claimId)) return _testStore.get(claimId);
-  return _fetchClaim(claimId);
+  const claim = await _fetchClaim(claimId);
+  if (!claim) return null;
+  try {
+    const reserveLedgerService = require('./reserveLedgerService');
+    claim.reserveBalances = await reserveLedgerService.getBalances(claimId);
+  } catch (err) {
+    // Non-fatal
+  }
+  return claim;
 }
 
 async function listClaims(filters = {}) {
@@ -544,6 +583,7 @@ async function listClaims(filters = {}) {
     .select('*, claim_events(*), diaries(*)')
     .order('created_at', { ascending: false });
 
+  if (filters.tenantId)   query = query.eq('tenant_id',   filters.tenantId);
   if (filters.employerId) query = query.eq('employer_id', filters.employerId);
   if (filters.status)     query = query.eq('status',      filters.status);
 
@@ -553,15 +593,7 @@ async function listClaims(filters = {}) {
     throw new Error(error.message);
   }
 
-  // Merge Supabase rows with any test-seeded claims
-  const fromDb = (data || []).map(_toClaim);
-  const seeded = Array.from(_testStore.values()).filter(c => {
-    if (filters.employerId && c.employerId !== filters.employerId) return false;
-    if (filters.status     && c.status     !== filters.status)     return false;
-    return true;
-  });
-
-  const all = [...fromDb, ...seeded];
+  const all = (data || []).map(_toClaim);
   return all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
@@ -579,23 +611,14 @@ async function approveReserves(claimId, reserves, adjusterEmail, opts = {}) {
   if (!claim.filehandlerId) throw new Error('Claim is not yet synced to FileHandler');
 
   // One unit of work (ADR-0006): the reserves row, its event, the ledger
-  // entry and the FileHandler outbox row commit together — or not at all.
-  // Inside an approval execution (opts.tx) it joins that transaction.
+  // entry, the immutable reserve ledger and the FileHandler outbox row commit together —
+  // or not at all. Inside an approval execution (opts.tx) it joins that transaction.
   const work = (tx) => _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts);
   const now = opts.tx
     ? await work(opts.tx)
     : await runInTransaction({
       tenantId: claim.tenantId, actorId: _ledgerActorFor(adjusterEmail, opts).id, label: 'reserve.approve',
     }, work);
-
-  // For test-seeded claims, update the in-memory object too
-  if (_testStore.has(claimId)) {
-    const c = _testStore.get(claimId);
-    c.events = c.events || [];
-    c.events.push({ type: 'reserves_approved', timestamp: now, data: { approvedBy: adjusterEmail, ...reserves } });
-    c.updatedAt = now;
-    return c;
-  }
 
   return opts.tx ? claim : getClaim(claimId);
 }
@@ -606,6 +629,7 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
   const reason = reserves.reason || 'Adjuster reserve approval';
 
   await tx.insert('reserves', {
+    tenant_id:   claim.tenantId,
     claim_id:    claimId,
     medical:     reserves.medical   || 0,
     indemnity:   reserves.indemnity || 0,
@@ -615,6 +639,67 @@ async function _recordReserveApproval(tx, claim, reserves, adjusterEmail, opts) 
     approved_by: adjusterEmail,
     created_at:  now,
   });
+
+  // Post to the immutable append-only reserve ledger (Phase 3)
+  try {
+    const reserveLedgerService = require('./reserveLedgerService');
+    const balances = await reserveLedgerService.getBalances(claimId);
+    const currentMed = balances.categories.medical.outstanding;
+    const currentInd = balances.categories.indemnity.outstanding;
+    const currentExp = balances.categories.expense.outstanding;
+
+    const targetMed = Number(reserves.medical   || 0);
+    const targetInd = Number(reserves.indemnity || 0);
+    const targetExp = Number(reserves.expense   || 0);
+
+    const deltaMed = Math.round((targetMed - currentMed) * 100) / 100;
+    const deltaInd = Math.round((targetInd - currentInd) * 100) / 100;
+    const deltaExp = Math.round((targetExp - currentExp) * 100) / 100;
+
+    if (deltaMed !== 0) {
+      await reserveLedgerService.postTransaction({
+        tenantId: claim.tenantId,
+        claimId,
+        category: 'medical',
+        amountDelta: deltaMed,
+        transactionType: currentMed === 0 ? 'initial_reserve' : 'reserve_revision',
+        reason,
+        source: 'ADJUSTER',
+        createdBy: adjusterEmail,
+        actionRequestId: opts.actionRequestId || null,
+      }, { tx });
+    }
+
+    if (deltaInd !== 0) {
+      await reserveLedgerService.postTransaction({
+        tenantId: claim.tenantId,
+        claimId,
+        category: 'indemnity',
+        amountDelta: deltaInd,
+        transactionType: currentInd === 0 ? 'initial_reserve' : 'reserve_revision',
+        reason,
+        source: 'ADJUSTER',
+        createdBy: adjusterEmail,
+        actionRequestId: opts.actionRequestId || null,
+      }, { tx });
+    }
+
+    if (deltaExp !== 0) {
+      await reserveLedgerService.postTransaction({
+        tenantId: claim.tenantId,
+        claimId,
+        category: 'expense',
+        amountDelta: deltaExp,
+        transactionType: currentExp === 0 ? 'initial_reserve' : 'reserve_revision',
+        reason,
+        source: 'ADJUSTER',
+        createdBy: adjusterEmail,
+        actionRequestId: opts.actionRequestId || null,
+      }, { tx });
+    }
+  } catch (err) {
+    logger.warn({ msg: '_recordReserveApproval: reserve ledger post failed (non-fatal)', err: err.message, claimId });
+  }
 
   await tx.insert('claim_events', {
     claim_id:  claimId,
@@ -701,7 +786,26 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
       throw new Error(`Invalid status transition: ${prev} → ${newStatus}`);
     }
 
-    if (row) await tx.update('claims', { status: newStatus, updated_at: now }, { id: claimId });
+    const multiAxisPatch = { status: newStatus, updated_at: now };
+    if (newStatus === 'closed') {
+      multiAxisPatch.admin_status = 'closed';
+    } else if (['new_claim', 'intake_complete'].includes(newStatus)) {
+      multiAxisPatch.admin_status = 'intake';
+    } else {
+      multiAxisPatch.admin_status = 'open';
+    }
+
+    if (newStatus === 'denied') {
+      multiAxisPatch.compensability_status = 'denied';
+    } else if (['accepted', 'active_medical', 'p_and_s', 'pd_evaluation', 'settlement_discussions', 'closed'].includes(newStatus)) {
+      multiAxisPatch.compensability_status = 'accepted';
+    }
+
+    if (newStatus === 'litigated') {
+      multiAxisPatch.litigation_status = 'application_filed';
+    }
+
+    if (row) await tx.update('claims', multiAxisPatch, { id: claimId });
 
     await tx.insert('claim_events', {
       claim_id:  claimId,
@@ -794,15 +898,7 @@ async function updateStatus(claimId, newStatus, changedBy, opts = {}) {
       tenantId: claim.tenantId, actorId: _ledgerActorFor(changedBy, opts).id, label: 'claim.status_change',
     }, work);
 
-  // Keep test store in sync
-  if (_testStore.has(claimId)) {
-    const c = _testStore.get(claimId);
-    c.status    = newStatus;
-    c.updatedAt = now;
-    c.events = c.events || [];
-    c.events.push({ type: 'status_changed', timestamp: now, data: { from: prev, to: newStatus, changedBy } });
-    return c;
-  }
+
   // Inside a caller's transaction the committed view is not visible yet.
   return opts.tx ? { ...claim, status: newStatus, updatedAt: now } : getClaim(claimId);
 }
@@ -864,20 +960,53 @@ async function _legacyWriteBackUpdate(claimId, change) {
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Insert a claim directly into the test override store.
+ * Seed a claim into the underlying store for test environments.
  * Bypasses ADP + FileHandler — use in tests only.
  */
 function _seedClaim(claim) {
-  _testStore.set(claim.id, claim);
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('_seedClaim is forbidden in production');
+  }
+  const row = {
+    id: claim.id,
+    claim_number: claim.claimNumber || claim.claim_number || `HHW-2026-${String(claim.id).slice(-3)}`,
+    employer_id: claim.employerId || claim.employer_id || null,
+    employee_id: claim.employeeId || claim.employee_id || null,
+    status: claim.status || 'new_claim',
+    employee: claim.employee || {},
+    aww: claim.aww != null ? claim.aww : null,
+    td_rate: claim.tdRate != null ? claim.tdRate : (claim.td_rate != null ? claim.td_rate : null),
+    weeks_calculated: claim.weeksCalculated != null ? claim.weeksCalculated : (claim.weeks_calculated != null ? claim.weeks_calculated : null),
+    date_of_injury: claim.dateOfInjury || claim.date_of_injury || '2026-01-01',
+    policy_id: claim.policyId || claim.policy_id || null,
+    body_part: claim.bodyPart || claim.body_part || 'Unspecified',
+    injury_type: claim.injuryType || claim.injury_type || 'Specific',
+    injury_description: claim.injuryDescription || claim.injury_description || '',
+    employer_name: claim.employerName || claim.employer_name || '',
+    filed_at: claim.filedAt || claim.filed_at || new Date().toISOString(),
+    filehandler_id: claim.filehandlerId || claim.filehandler_id || null,
+    ai_analysis: claim.aiAnalysis || claim.ai_analysis || null,
+    priority: claim.priority || null,
+    motor_vehicle_fields: claim.motorVehicleFields || claim.motor_vehicle_fields || null,
+    employer_contests: claim.employerContests ?? claim.employer_contests ?? false,
+    subrogation_status: claim.subrogationStatus || claim.subrogation_status || null,
+    attorney_represented: claim.attorney_represented ?? claim.attorneyRepresented ?? false,
+    attorney_name: claim.attorneyName || claim.attorney_name || null,
+    tenant_id: claim.tenantId || claim.tenant_id || '00000000-0000-0000-0000-000000000001',
+    created_at: claim.createdAt || claim.created_at || new Date().toISOString(),
+    updated_at: claim.updatedAt || claim.updated_at || new Date().toISOString(),
+  };
+
+  if (typeof supabase._seedClaimRow === 'function') {
+    supabase._seedClaimRow(row, claim.events || [], claim.diaries || []);
+  }
   return claim;
 }
 
 /**
- * Clear the test override store and reset the local sequence counter.
- * Also resets the Supabase mock store's claims/events/diaries if available.
+ * Reset claims sequence counter and test tables in the mock store.
  */
 function _resetClaims() {
-  _testStore.clear();
   _claimSeq = 42;
   // If the mock client exposes _resetStore, wipe claims-related tables too
   if (typeof supabase._resetStore === 'function') {

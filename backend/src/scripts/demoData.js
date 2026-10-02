@@ -26,11 +26,11 @@
 // today - N days so the demo never goes stale.
 //
 const EMPLOYER_BRIGHTCARE = {
-  id:   'employer-brightcare-001',
+  id:   'e0000000-0000-0000-0000-000000000001',
   name: 'BrightCare Home Health, Inc.',
 };
 const EMPLOYER_WESTSIDE = {
-  id:   'employer-westside-001',
+  id:   'e0000000-0000-0000-0000-000000000002',
   name: 'Westside Home Care Services',
 };
 

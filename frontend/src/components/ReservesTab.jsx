@@ -1,15 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { approveReserveWorksheet, fetchReserveWorksheet } from '../services/claims.js';
+import { approveReserveWorksheet, fetchReserveWorksheet, fetchReserveLedger, fetchPaymentLedger } from '../services/claims.js';
 import { C } from '../theme.js';
 import { fmt$ } from '../utils.js';
 import { Btn, Lbl, SectionHead, Spinner } from '../ui/primitives.jsx';
 
 // ═══════════════════════════════════════════════════════════
-// RESERVES TAB (CL-RSV1) — the itemized reserve worksheet.
-// Line items grouped by category with subtotals and a grand
-// total. The worksheet only PROPOSES: applying its rollup goes
-// through the same M3 adjuster approval the flat numbers always
-// did (PATCH /claims/:id/reserves).
+// RESERVES TAB (CL-RSV1 + Phase 3 True Ledgers)
 // ═══════════════════════════════════════════════════════════
 
 const CAT_META = {
@@ -32,20 +28,32 @@ export default function ReservesTab({ claimId, notify }) {
     queryFn: () => fetchReserveWorksheet(claimId),
   });
 
+  const { data: ledgerData } = useQuery({
+    queryKey: ['reserve-ledger', claimId],
+    queryFn: () => fetchReserveLedger(claimId),
+  });
+
+  const { data: paymentData } = useQuery({
+    queryKey: ['payment-ledger', claimId],
+    queryFn: () => fetchPaymentLedger(claimId),
+  });
+
   if (isLoading) return <Spinner/>;
   if (!ws) return <div style={{ fontSize: 12.5, color: C.muted }}>Worksheet unavailable.</div>;
 
   const proposal = ws.proposal || {};
   const approved = ws.approved_reserves;
+  const ledgerTotals = ledgerData?.balances || { outstanding_reserves: ws.grand_total || 0, paid_to_date: 0, total_incurred: ws.grand_total || 0 };
+  const transactions = ledgerData?.transactions || [];
+  const payments = paymentData?.payments || [];
 
   const applyRollup = async () => {
     try {
-      // Version-bound: the server recomputes the rollup and rejects with
-      // a conflict if the worksheet changed since these totals rendered.
       await approveReserveWorksheet(claimId, {
         medical: proposal.medical, indemnity: proposal.indemnity, expense: proposal.expense,
       });
       qc.invalidateQueries({ queryKey: ['reserve-worksheet', claimId] });
+      qc.invalidateQueries({ queryKey: ['reserve-ledger', claimId] });
       qc.invalidateQueries({ queryKey: ['claim', claimId] });
       notify('Worksheet rollup approved — reserves updated through the approval workflow');
     } catch (e) {
@@ -58,6 +66,28 @@ export default function ReservesTab({ claimId, notify }) {
 
   return (
     <div>
+      {/* ── Financial Ledger Balances (Phase 3) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 18 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
+          <div style={{ fontSize: 11, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Outstanding Reserves</div>
+          <div style={{ fontFamily: C.mono, fontSize: 18, fontWeight: 700, color: C.cyan, marginTop: 4 }}>
+            {fmt$(ledgerTotals.outstanding_reserves)}
+          </div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
+          <div style={{ fontSize: 11, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Paid to Date</div>
+          <div style={{ fontFamily: C.mono, fontSize: 18, fontWeight: 700, color: C.green, marginTop: 4 }}>
+            {fmt$(ledgerTotals.paid_to_date)}
+          </div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
+          <div style={{ fontSize: 11, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Incurred</div>
+          <div style={{ fontFamily: C.mono, fontSize: 18, fontWeight: 700, color: C.amber, marginTop: 4 }}>
+            {fmt$(ledgerTotals.total_incurred)}
+          </div>
+        </div>
+      </div>
+
       <SectionHead title="Itemized Reserve Worksheet"/>
       {Object.entries(CAT_META).map(([cat, meta]) => {
         const items = ws.items?.[cat] || [];
@@ -83,7 +113,7 @@ export default function ReservesTab({ claimId, notify }) {
       })}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.card, border: `1px solid ${C.borderMid || C.border}`, borderRadius: 10, padding: '13px 16px', marginTop: 6 }}>
-        <Lbl>Grand total</Lbl>
+        <Lbl>Worksheet Total</Lbl>
         <span data-testid="grand-total" style={{ fontFamily: C.mono, fontWeight: 700, fontSize: 17, color: C.cyan }}>{fmt$(ws.grand_total || 0)}</span>
       </div>
 
@@ -108,6 +138,74 @@ export default function ReservesTab({ claimId, notify }) {
           <Btn small onClick={applyRollup}>Approve worksheet totals as reserves</Btn>
         )}
       </div>
+
+      {/* ── Transaction Ledger History ── */}
+      {transactions.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <SectionHead title="Reserve Transaction Ledger (Immutable)"/>
+          <div style={{ maxHeight: 220, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 8 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Date</th>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Type</th>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Category</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, textAlign: 'right' }}>Delta</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, textAlign: 'right' }}>Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map(t => (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${C.border}33` }}>
+                    <td style={{ padding: '6px 10px', color: C.dim }}>{new Date(t.created_at).toLocaleDateString()}</td>
+                    <td style={{ padding: '6px 10px', color: C.text }}>{t.transaction_type.replace('_', ' ')}</td>
+                    <td style={{ padding: '6px 10px', color: CAT_META[t.category]?.color || C.text }}>{t.category}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: C.mono, color: t.amount_delta >= 0 ? C.green : C.amber }}>
+                      {t.amount_delta >= 0 ? `+${fmt$(t.amount_delta)}` : fmt$(t.amount_delta)}
+                    </td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: C.mono, color: C.text }}>
+                      {fmt$(t.resulting_balance)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Payment Ledger ── */}
+      {payments.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <SectionHead title="Disbursed Payments"/>
+          <div style={{ maxHeight: 180, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 8 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Date</th>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Type</th>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Method</th>
+                  <th style={{ padding: '6px 10px', color: C.muted }}>Status</th>
+                  <th style={{ padding: '6px 10px', color: C.muted, textAlign: 'right' }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map(p => (
+                  <tr key={p.id} style={{ borderBottom: `1px solid ${C.border}33` }}>
+                    <td style={{ padding: '6px 10px', color: C.dim }}>{new Date(p.created_at).toLocaleDateString()}</td>
+                    <td style={{ padding: '6px 10px', color: C.text }}>{p.payment_type.replace('_', ' ')}</td>
+                    <td style={{ padding: '6px 10px', color: C.dim }}>{p.method}</td>
+                    <td style={{ padding: '6px 10px', color: p.status === 'cleared' ? C.green : C.cyan }}>{p.status}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: C.mono, fontWeight: 600, color: C.text }}>
+                      {fmt$(p.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

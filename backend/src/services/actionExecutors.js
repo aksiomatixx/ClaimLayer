@@ -72,6 +72,34 @@ const EXECUTORS = {
       return { rfa_id: payload.rfa_id, decision: updated.decision };
     },
   },
+
+  'payment.issue': {
+    async execute({ tx, request, payload, approver }) {
+      const paymentLedger = require('./paymentLedgerService');
+      const amount = fromCents(payload.amount_cents);
+      const row = await paymentLedger.issuePayment({
+        tenantId: request.tenant_id,
+        claimId: request.claim_id,
+        payeeId: payload.payee_id,
+        category: payload.category,
+        paymentType: payload.payment_type,
+        amount,
+        method: payload.method,
+        checkNumber: payload.check_number,
+        memo: payload.memo,
+        periodStart: payload.period_start,
+        periodEnd: payload.period_end,
+        actionRequestId: request.id,
+        createdBy: approver.id,
+      }, { tx });
+      return {
+        payment_id: row.id,
+        amount_cents: payload.amount_cents,
+        category: row.category,
+        payment_type: row.payment_type,
+      };
+    },
+  },
 };
 
 function getExecutor(actionId) {

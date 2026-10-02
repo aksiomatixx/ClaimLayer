@@ -28,6 +28,7 @@ const { supabase } = require('./supabase');
 const config = require('../config');
 const logger       = require('../logger');
 const wcisTriggerService = require('./wcisTriggerService');
+const wcisAckParser      = require('./wcisAckParser');
 
 const ADAPTERS = {
   stub:   require('./wcis_adapters/stubAdapter'),
@@ -373,9 +374,61 @@ async function _createCriticalDiary(txn, diaryType, notes) {
   await supabase.from('diaries').insert(row);
 }
 
+/**
+ * Ingest and process a raw IAIABC 3.1 EDI acknowledgment flat file.
+ * Automatically parses records, correlates with active transactions, and applies state updates.
+ */
+async function ingestRawAckFile(rawContent, environment = 'production') {
+  const parsed = wcisAckParser.parseAckFlatFile(rawContent);
+  const nowIso = new Date().toISOString();
+
+  const perTransaction = [];
+  let matchedCount = 0;
+
+  for (const rec of parsed.records) {
+    const { data: txns } = await supabase
+      .from('wcis_transactions')
+      .select('id, transmission_id, claim_id, mtc_code')
+      .eq('environment', environment)
+      .eq('mtc_code', rec.mtcCode)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (txns && txns.length > 0) {
+      matchedCount++;
+      perTransaction.push({
+        transaction_id: txns[0].id,
+        result:         rec.result,
+        jcn:            rec.jcn,
+        errors:         rec.errors,
+      });
+    }
+  }
+
+  const batch = {
+    transmission_id: null,
+    ack_type:        '824',
+    received_at:     nowIso,
+    ack_raw:         rawContent,
+    per_transaction: perTransaction,
+  };
+
+  if (perTransaction.length > 0) {
+    await _applyAckBatch(batch);
+  }
+
+  return {
+    parsedRecords: parsed.records.length,
+    matchedTransactions: matchedCount,
+    summary: parsed.summary,
+  };
+}
+
 module.exports = {
   batchAndTransmit,
   pollAcksForEnvironment,
+  ingestRawAckFile,
+  wcisAckParser,
   getActiveAdapter,
   setAdapter,
   // Exported for tests

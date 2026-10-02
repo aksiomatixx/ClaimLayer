@@ -220,13 +220,13 @@ async function _seedCarriersAndPolicies() {
     created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
   });
   await supabase.from('policies').insert({
-    id: 'pol_demo_brightcare_2026', employer_id: EMPLOYER_BRIGHTCARE.id,
+    id: 'b0000000-0000-0000-0000-000000000001', employer_id: EMPLOYER_BRIGHTCARE.id,
     insurer_id: 'ins_demo_pacific', policy_number: 'WC-2026-88421',
     effective_date: '2026-01-01', expiration_date: '2026-12-31', self_insured: false,
     created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
   });
   await supabase.from('policies').insert({
-    id: 'pol_demo_westside_2026', employer_id: EMPLOYER_WESTSIDE.id,
+    id: 'b0000000-0000-0000-0000-000000000002', employer_id: EMPLOYER_WESTSIDE.id,
     insurer_id: null, policy_number: 'SI-CERT-04417',
     effective_date: '2026-01-01', expiration_date: null, self_insured: true,
     created_at: isoDaysAgo(400), updated_at: isoDaysAgo(400),
@@ -583,7 +583,7 @@ async function _seedOneClaim(id, idx, plan, persona) {
     const pending  = plan.rfa.decision === 'pending_adjuster_review';
     const received = pending ? isoDaysAgo(2) : isoDaysAgo(Math.max(0, plan.daysAgo - 5));
     await supabase.from('rfas').insert({
-      id:                   `rfa_demo_${idx + 1}`,
+      id:                   `dddddddd-dddd-4${String(idx + 1).padStart(3, '0')}-8ddd-000000000001`,
       claim_id:             id,
       received_at:          received,
       requesting_physician: plan.rfa.physician || 'Dr. A. Demo',
@@ -602,7 +602,7 @@ async function _seedOneClaim(id, idx, plan, persona) {
   // seed rows — NOT computed here.
   if (plan.pdEval) {
     await supabase.from('pd_evaluations').insert({
-      id:                    `pdeval_demo_${idx + 1}`,
+      id:                    `eeeeeeee-eeee-4${String(idx + 1).padStart(3, '0')}-8eee-000000000001`,
       claim_id:              id,
       wpi:                   plan.pdEval.wpi,
       pd_percent:            plan.pdEval.pdPercent,
@@ -619,7 +619,7 @@ async function _seedOneClaim(id, idx, plan, persona) {
   // C&R offer if specified
   if (plan.settlementOffer) {
     await supabase.from('settlement_offers').insert({
-      id:               `so_demo_${idx + 1}`,
+      id:               `11111111-1111-4${String(idx + 1).padStart(3, '0')}-8111-000000000001`,
       claim_id:         id,
       offer_type:       'cnr',
       stip_value:       plan.settlementOffer.stipValue,
@@ -1002,7 +1002,8 @@ async function _seedTdPeriods(claimId, plan, persona) {
     }
 
     const rate = persona.tdRate * (spec.weeklyRateMul || 1);
-    const periodId = `tdp_demo_${claimId}_${i + 1}`;
+    const claimNum = (claimId.match(/\d+/) || ['0'])[0];
+    const periodId = `22222222-2222-4${String(claimNum).padStart(3, '0')}-8222-${String(i + 1).padStart(12, '0')}`;
     const reinstFrom = spec.reinstatedFromIdx != null ? insertedIds[spec.reinstatedFromIdx] : null;
 
     await supabase.from('td_periods').insert({

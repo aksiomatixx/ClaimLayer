@@ -159,3 +159,17 @@ export async function declineDiaryAction(diaryId, reason) {
 export async function editDiaryAction(diaryId, patch) {
   return _json(await fetch(`${BASE}/diaries/${encodeURIComponent(diaryId)}`, _opts('PATCH', patch)));
 }
+
+// ── Double-entry financial ledgers (Phase 3) ─────────────────────────────────
+
+export async function fetchReserveLedger(claimId) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/ledger/reserves`, _opts()));
+}
+
+export async function fetchPaymentLedger(claimId) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/ledger/payments`, _opts()));
+}
+
+export async function issueClaimPayment(claimId, payment) {
+  return _json(await fetch(`${BASE}/claims/${claimId}/ledger/payments`, _opts('POST', payment)));
+}

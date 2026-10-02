@@ -279,6 +279,8 @@ function _empOut(r) {
 
 // ── employers ─────────────────────────────────────────────────────────────────
 const EMPLOYER_SEED = new Map([
+  ['e0000000-0000-0000-0000-000000000001', { id:'e0000000-0000-0000-0000-000000000001', name:'BrightCare Home Health',  address_line1:'1200 W 7th St, Suite 300',      city:'Los Angeles',    state:'CA', zip:'90017', phone:'(213) 555-2000', primary_contact_email:'hr@brightcarehh.com' }],
+  ['e0000000-0000-0000-0000-000000000002', { id:'e0000000-0000-0000-0000-000000000002', name:'Westside Home Care Services', address_line1:'500 N Brand Blvd, Suite 700',   city:'Glendale',       state:'CA', zip:'92103', phone:'(818) 555-3000', primary_contact_email:'hr@carewellservices.com' }],
   ['employer-brightcare-001', { id:'employer-brightcare-001', name:'BrightCare Home Health',  address_line1:'1200 W 7th St, Suite 300',      city:'Los Angeles',    state:'CA', zip:'90017', phone:'(213) 555-2000', primary_contact_email:'hr@brightcarehh.com' }],
   ['employer-carewell-001',   { id:'employer-carewell-001',   name:'CareWell Services',         address_line1:'500 N Brand Blvd, Suite 700',   city:'Glendale',       state:'CA', zip:'91203', phone:'(818) 555-3000', primary_contact_email:'hr@carewellservices.com' }],
   ['employer-sunrise-001',    { id:'employer-sunrise-001',    name:'SunRise Home Care',         address_line1:'22700 Ventura Blvd, Suite 200', city:'Woodland Hills', state:'CA', zip:'91364', phone:'(818) 555-4000', primary_contact_email:'hr@sunrisehomecare.com' }],

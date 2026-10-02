@@ -122,7 +122,37 @@ const ACTIONS = {
   'payment.issue': {
     domain: 'financial', agentAutonomy: AUTONOMY.PREPARE_FOR_APPROVAL, financial: true,
     requiresMfa: true,
-    description: 'Issue a benefit or expense payment. (Executor arrives with the payment ledger.)',
+    description: 'Issue a benefit or expense payment via the authoritative payment ledger.',
+    validate(payload) {
+      const p = _plainPayload(payload);
+      const out = {};
+      try {
+        assertCents(p.amount_cents, 'amount_cents');
+      } catch (e) {
+        throw new PayloadError(e.message);
+      }
+      if (p.amount_cents <= 0) {
+        throw new PayloadError('amount_cents must be positive');
+      }
+      if (!['indemnity', 'medical', 'expense'].includes(p.category)) {
+        throw new PayloadError('category must be indemnity, medical, or expense');
+      }
+      if (!p.payment_type || typeof p.payment_type !== 'string') {
+        throw new PayloadError('payment_type is required');
+      }
+      out.amount_cents = p.amount_cents;
+      out.category = p.category;
+      out.payment_type = p.payment_type;
+      out.payee_id = p.payee_id || null;
+      out.method = p.method || 'check';
+      out.check_number = p.check_number || null;
+      out.memo = p.memo ? String(p.memo).slice(0, 500) : null;
+      out.period_start = p.period_start || null;
+      out.period_end = p.period_end || null;
+      return out;
+    },
+    amountCents: (p) => p.amount_cents,
+    entityOf: (_p, claimId) => ({ type: 'claim', id: claimId }),
   },
   'claim.compensability.accept': {
     domain: 'claims', agentAutonomy: AUTONOMY.PREPARE_FOR_APPROVAL, financial: false,

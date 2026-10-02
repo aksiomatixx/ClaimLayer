@@ -122,6 +122,8 @@ app.use('/api/v1',               require('./routes/diaries'));
 app.use('/api/v1',               require('./routes/reserveWorksheet'));
 app.use('/api/v1',               require('./routes/supervisorAlerts'));
 app.use('/api/v1',               require('./routes/actionRequests'));
+app.use('/api/v1/staffing',       require('./routes/staffing'));
+app.use('/api/v1/financials',     require('./routes/financials'));
 // (webhooks router is mounted above, before body parsing)
 
 // ── Optional employer portal router (present in M4+) ─────────────────────────

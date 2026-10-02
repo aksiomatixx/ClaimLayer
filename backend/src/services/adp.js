@@ -153,29 +153,33 @@ async function getPayStatements(associateOID) {
  *   Min: $252.03 / week
  *   Max: $1,680.29 / week
  */
-function calculateTDRate(payStatements) {
+function calculateTDRate(payStatements, opts = {}) {
   if (!payStatements || payStatements.length === 0) {
     throw new Error('Cannot calculate AWW: no pay statements provided');
   }
 
-  const TD_MIN = 252.03;
-  const TD_MAX = 1_680.29;
+  const statutory = require('./statutoryCalculators');
+  let frequency = opts.payFrequency || 'biweekly';
+  if (payStatements[0]?.payFrequency) {
+    frequency = payStatements[0].payFrequency;
+  } else if (payStatements[0]?.periodStart && payStatements[0]?.periodEnd) {
+    const ms = new Date(payStatements[0].periodEnd) - new Date(payStatements[0].periodStart);
+    const days = ms / (1000 * 60 * 60 * 24);
+    if (days <= 8) frequency = 'weekly';
+  }
 
-  const totalGross = payStatements.reduce((sum, ps) => sum + ps.grossPay, 0);
-  const aww        = totalGross / (payStatements.length * 2);
-  const rawTD      = aww * (2 / 3);
-  const tdRate     = Math.max(TD_MIN, Math.min(TD_MAX, rawTD));
+  const res = statutory.calculateTDRate({
+    payStatements,
+    payFrequency: frequency,
+    dateOfInjury: opts.dateOfInjury || null,
+  });
 
   return {
-    aww:             round2(aww),
-    tdRate:          round2(tdRate),
-    weeksCalculated: payStatements.length,
-    totalGross:      round2(totalGross),
+    aww:             res.aww,
+    tdRate:          res.tdRate,
+    weeksCalculated: res.weeksCalculated,
+    totalGross:      res.totalGross,
   };
-}
-
-function round2(n) {
-  return Math.round(n * 100) / 100;
 }
 
 // ── Convenience: pull everything in one call ──────────────────────────────────

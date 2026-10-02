@@ -474,6 +474,46 @@ const supabase = {
     resetStore(tableNames);
   },
 
+  /** Seed a claim directly into the mock tables without using _testStore. */
+  _seedClaimRow(claimRow, events = [], diaries = []) {
+    const cTbl = getTable('claims');
+    cTbl.set(claimRow.id, { ...claimRow });
+
+    if (events && events.length) {
+      const eTbl = getTable('claim_events');
+      events.forEach(e => {
+        const id = e.id || uid();
+        eTbl.set(id, {
+          id,
+          claim_id: claimRow.id,
+          type: e.type,
+          timestamp: e.timestamp || e.created_at || new Date().toISOString(),
+          data: e.data || {},
+          created_at: e.created_at || new Date().toISOString(),
+        });
+      });
+    }
+
+    if (diaries && diaries.length) {
+      const dTbl = getTable('diaries');
+      diaries.forEach(d => {
+        const id = d.id || d.diaryId || uid();
+        dTbl.set(id, {
+          id,
+          claim_id: claimRow.id,
+          diary_type: d.diary_type || d.type,
+          due_date: d.due_date || d.dueDate,
+          assigned_to: d.assigned_to || d.assignedTo || 'adjuster@homecaretpa.com',
+          priority: d.priority || 'standard',
+          notes: d.notes || '',
+          status: d.status || 'open',
+          fh_diary_id: d.fh_diary_id || d.diaryId || id,
+          created_at: d.created_at || new Date().toISOString(),
+        });
+      });
+    }
+  },
+
   /** Insert the provisioned public.users rows for the mock auth users. */
   _provisionAuthUsers() {
     provisionAuthUsers();

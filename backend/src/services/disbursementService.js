@@ -29,6 +29,8 @@ const { supabase } = require('./supabase');
 const config = require('../config');
 const logger       = require('../logger');
 const jobQueue     = require('./jobQueue');
+const { runInTransaction } = require('../db/unitOfWork');
+const auditLedger          = require('./auditLedgerService');
 
 // Lazy requires to break cycles.
 function _getPdService()         { return require('./pdService'); }
@@ -51,7 +53,7 @@ const DISBURSEMENT_POLICY = {
 
 // ── Public exports (Pass 1 scaffolds — bodies filled in Pass 2) ──────────────
 
-async function proposeDisbursement({ claimId, awardType, stipulationId, settlementOfferId, extraction, awardDocumentId }) {
+async function proposeDisbursement({ claimId, awardType, stipulationId, settlementOfferId, extraction, awardDocumentId }, opts = {}) {
   if (!claimId) throw new Error('claimId is required');
   if (!['stip_f_and_a', 'cnr_oacr'].includes(awardType)) {
     throw new Error(`UNKNOWN_AWARD_TYPE: ${awardType}`);
@@ -92,19 +94,10 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
   }
 
   // (11) Service-date missing flag (we used a fallback for the NOT NULL column).
-  // When the service date is unknown we must still persist the bundle (NOT NULL
-  // columns require a value), so we fall back to awardDate / accruedStartDate.
-  // Consequence: the §5814 statutory pay-by date is derived from the fallback
-  // and is UNRELIABLE for compliance until the adjuster corrects the service
-  // date via re-extraction or manual update. PAYMENT_DUE_PROVISIONAL marks
-  // that downstream consumers should treat pay-by as advisory, not binding.
   if (!extraction.awardServiceDate) {
     flags.push('SERVICE_DATE_MISSING');
     flags.push('PAYMENT_DUE_PROVISIONAL');
   }
-
-  // (3) Statutory pay-by (not persisted on the row — recomputed at recordDisbursementPayment).
-  // Intentional: the PAY_BY_DATE is derivable from (awardServiceDate, awardType).
 
   // (5) Week arithmetic. Apportionment is ALREADY baked into totalAward by the judge;
   // weekly rate is invariant under apportionment.
@@ -208,7 +201,9 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
   // (13) interest_owed = 0 at propose time.
   // (14) INSERT award_disbursements row.
   const now = new Date().toISOString();
+  const tenantId = claim.tenantId || claim.tenant_id || opts.tenantId || config.tenancy.defaultTenantId;
   const insertRow = {
+    tenant_id:                tenantId,
     claim_id:                 claimId,
     stipulation_id:           stipulationId      || null,
     settlement_offer_id:      settlementOfferId  || null,
@@ -240,37 +235,64 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
     updated_at:                now,
   };
 
-  const { data: row, error } = await supabase
-    .from('award_disbursements').insert(insertRow).select().single();
-  if (error) throw new Error(`disbursementService.proposeDisbursement: insert failed — ${error.message}`);
+  const payBy    = _computeStatutoryPayBy(awardType, awardServiceDate);
+  const diaryDue = _addCalendarDays(payBy, -DISBURSEMENT_POLICY.APPROVAL_DIARY_LEAD_DAYS);
 
-  // (15) CRITICAL approval diary.
-  // (authorizes a WC payment). For now routed to system@homecaretpa.com.
-  const payBy       = _computeStatutoryPayBy(awardType, awardServiceDate);
-  const diaryDue    = _addCalendarDays(payBy, -DISBURSEMENT_POLICY.APPROVAL_DIARY_LEAD_DAYS);
-  await supabase.from('diaries').insert({
-    claim_id:    claimId,
-    diary_type:  'DISBURSEMENT_APPROVAL',
-    due_date:    diaryDue,
-    assigned_to: config.adjuster.email,
-    priority:    'CRITICAL',
-    notes:       `Disbursement bundle ready for approval. Pay-by ${payBy}. Net-now $${netToWorkerNow.toLocaleString()}. Flags: ${flags.join(', ') || 'none'}.`,
-    status:      'open',
-    no_snooze:   true,
-    fh_diary_id: `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    created_at:  now,
-  });
+  const run = async (tx) => {
+    let row;
+    if (tx) {
+      row = await tx.insert('award_disbursements', insertRow);
+    } else {
+      const { data, error } = await supabase
+        .from('award_disbursements').insert(insertRow).select().single();
+      if (error) throw new Error(`disbursementService.proposeDisbursement: insert failed — ${error.message}`);
+      row = data;
+    }
 
-  await _writeAuditLog(
-    'disbursement_proposed', row.id,
-    `Disbursement proposed: ${awardType}, $${totalAward.toLocaleString()} award, net-now $${netToWorkerNow.toLocaleString()}`,
-    { awardType, totalAward, netToWorkerNow, flags },
-  );
+    const diaryRow = {
+      tenant_id:   tenantId,
+      claim_id:    claimId,
+      diary_type:  'DISBURSEMENT_APPROVAL',
+      due_date:    diaryDue,
+      assigned_to: config.adjuster.email,
+      priority:    'CRITICAL',
+      notes:       `Disbursement bundle ready for approval. Pay-by ${payBy}. Net-now $${netToWorkerNow.toLocaleString()}. Flags: ${flags.join(', ') || 'none'}.`,
+      status:      'open',
+      no_snooze:   true,
+      fh_diary_id: `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      created_at:  now,
+    };
+    if (tx) {
+      await tx.insert('diaries', diaryRow);
+    } else {
+      await supabase.from('diaries').insert(diaryRow);
+    }
 
-  await supabase.from('claim_events').insert({
-    claim_id: claimId, type: 'disbursement_proposed', timestamp: now,
-    data:     { disbursementId: row.id, awardType, totalAward, flags },
-  });
+    await _writeAuditLog(
+      'disbursement_proposed', row.id,
+      `Disbursement proposed: ${awardType}, $${totalAward.toLocaleString()} award, net-now $${netToWorkerNow.toLocaleString()}`,
+      { awardType, totalAward, netToWorkerNow, flags },
+      tx,
+      opts.actor,
+      claimId,
+    );
+
+    const eventRow = {
+      claim_id: claimId, type: 'disbursement_proposed', timestamp: now,
+      data:     { disbursementId: row.id, awardType, totalAward, flags },
+    };
+    if (tx) {
+      await tx.insert('claim_events', eventRow);
+    } else {
+      await supabase.from('claim_events').insert(eventRow);
+    }
+
+    return row;
+  };
+
+  const row = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'disbursement.propose' }, run);
 
   logger.info({
     msg: 'disbursementService.proposeDisbursement: complete',
@@ -280,7 +302,7 @@ async function proposeDisbursement({ claimId, awardType, stipulationId, settleme
   return row;
 }
 
-async function approveDisbursement(disbursementId, { adjusterId, notes }) {
+async function approveDisbursement(disbursementId, { adjusterId, notes } = {}, opts = {}) {
   const { data: row, error: fetchErr } = await supabase
     .from('award_disbursements').select('*').eq('id', disbursementId).single();
   if (fetchErr || !row) throw new Error(`Disbursement not found: ${disbursementId}`);
@@ -289,53 +311,89 @@ async function approveDisbursement(disbursementId, { adjusterId, notes }) {
   }
 
   const now = new Date().toISOString();
-  const { data: updated, error } = await supabase.from('award_disbursements')
-    .update({
-      status:         'approved',
-      approved_by:    adjusterId || null,
-      approved_at:    now,
-      approval_notes: notes || null,
-      updated_at:     now,
-    })
-    .eq('id', disbursementId)
-    .select()
-    .single();
-  if (error) throw new Error(`disbursementService.approveDisbursement: ${error.message}`);
+  const tenantId = row.tenant_id || opts.tenantId || config.tenancy.defaultTenantId;
 
-  // ai_decisions audit row — M14.5 disbursement approvals land here so the
-  // human-review of the AI-extracted award is captured alongside the extract.
-  try {
-    await supabase.from('ai_decisions').insert({
-      claim_id:       row.claim_id,
-      decision_type:  'disbursement_approval',
-      input_snapshot: { disbursementId, priorStatus: 'proposed', flags: row.flags || [] },
-      output_raw:     JSON.stringify({ approvedBy: adjusterId, notes }),
-      output_parsed:  { approvedBy: adjusterId, notes },
-      review_action:  'approved',
-      reviewed_by:    adjusterId || null,
-      review_notes:   notes || null,
-      reviewed_at:    now,
-      created_at:     now,
-    });
-  } catch (err) {
-    logger.error({ msg: 'disbursementService: ai_decisions approval write failed (non-fatal)', err: err.message });
-  }
+  const run = async (tx) => {
+    let updated;
+    if (tx) {
+      await tx.update('award_disbursements', {
+        status:         'approved',
+        approved_by:    adjusterId || null,
+        approved_at:    now,
+        approval_notes: notes || null,
+        updated_at:     now,
+      }, { id: disbursementId });
+      updated = await tx.selectOne('award_disbursements', { id: disbursementId });
+    } else {
+      const { data, error } = await supabase.from('award_disbursements')
+        .update({
+          status:         'approved',
+          approved_by:    adjusterId || null,
+          approved_at:    now,
+          approval_notes: notes || null,
+          updated_at:     now,
+        })
+        .eq('id', disbursementId)
+        .select()
+        .single();
+      if (error) throw new Error(`disbursementService.approveDisbursement: ${error.message}`);
+      updated = data;
+    }
 
-  await _writeAuditLog(
-    'disbursement_approved', disbursementId,
-    `Disbursement approved by ${adjusterId || 'unknown'}`,
-    { adjusterId, notes },
-  );
-  await supabase.from('claim_events').insert({
-    claim_id: row.claim_id, type: 'disbursement_approved', timestamp: now,
-    data:     { disbursementId, adjusterId },
-  });
+    try {
+      const aiDecisionRow = {
+        tenant_id:      tenantId,
+        claim_id:       row.claim_id,
+        decision_type:  'disbursement_approval',
+        input_snapshot: { disbursementId, priorStatus: 'proposed', flags: row.flags || [] },
+        output_raw:     JSON.stringify({ approvedBy: adjusterId, notes }),
+        output_parsed:  { approvedBy: adjusterId, notes },
+        review_action:  'approved',
+        reviewed_by:    adjusterId || null,
+        review_notes:   notes || null,
+        reviewed_at:    now,
+        created_at:     now,
+      };
+      if (tx) {
+        await tx.insert('ai_decisions', aiDecisionRow);
+      } else {
+        await supabase.from('ai_decisions').insert(aiDecisionRow);
+      }
+    } catch (err) {
+      logger.error({ msg: 'disbursementService: ai_decisions approval write failed (non-fatal)', err: err.message });
+    }
+
+    await _writeAuditLog(
+      'disbursement_approved', disbursementId,
+      `Disbursement approved by ${adjusterId || 'unknown'}`,
+      { adjusterId, notes },
+      tx,
+      opts.actor,
+      row.claim_id,
+    );
+
+    const eventRow = {
+      claim_id: row.claim_id, type: 'disbursement_approved', timestamp: now,
+      data:     { disbursementId, adjusterId },
+    };
+    if (tx) {
+      await tx.insert('claim_events', eventRow);
+    } else {
+      await supabase.from('claim_events').insert(eventRow);
+    }
+
+    return updated;
+  };
+
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'disbursement.approve' }, run);
 
   logger.info({ msg: 'disbursementService.approveDisbursement: complete', disbursementId });
   return updated;
 }
 
-async function rejectDisbursement(disbursementId, { adjusterId, reason }) {
+async function rejectDisbursement(disbursementId, { adjusterId, reason } = {}, opts = {}) {
   if (!reason) throw new Error('reason is required');
 
   const { data: row, error: fetchErr } = await supabase
@@ -346,37 +404,72 @@ async function rejectDisbursement(disbursementId, { adjusterId, reason }) {
   }
 
   const now = new Date().toISOString();
-  const { data: updated, error } = await supabase.from('award_disbursements')
-    .update({
-      status:          'rejected',
-      rejected_reason: reason,
-      updated_at:      now,
-    })
-    .eq('id', disbursementId)
-    .select()
-    .single();
-  if (error) throw new Error(`disbursementService.rejectDisbursement: ${error.message}`);
+  const tenantId = row.tenant_id || opts.tenantId || config.tenancy.defaultTenantId;
 
-  // Close the approval diary — no further action on this bundle.
-  await supabase.from('diaries')
-    .update({ status: 'completed', updated_at: now })
-    .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
+  const run = async (tx) => {
+    let updated;
+    if (tx) {
+      await tx.update('award_disbursements', {
+        status:          'rejected',
+        rejected_reason: reason,
+        updated_at:      now,
+      }, { id: disbursementId });
+      updated = await tx.selectOne('award_disbursements', { id: disbursementId });
 
-  await _writeAuditLog(
-    'disbursement_rejected', disbursementId,
-    `Disbursement rejected by ${adjusterId || 'unknown'}: ${reason}`,
-    { adjusterId, reason },
-  );
-  await supabase.from('claim_events').insert({
-    claim_id: row.claim_id, type: 'disbursement_rejected', timestamp: now,
-    data:     { disbursementId, adjusterId, reason },
-  });
+      await tx.update('diaries', { status: 'completed', updated_at: now }, {
+        claim_id:   row.claim_id,
+        diary_type: 'DISBURSEMENT_APPROVAL',
+        status:     'open',
+      });
+    } else {
+      const { data, error } = await supabase.from('award_disbursements')
+        .update({
+          status:          'rejected',
+          rejected_reason: reason,
+          updated_at:      now,
+        })
+        .eq('id', disbursementId)
+        .select()
+        .single();
+      if (error) throw new Error(`disbursementService.rejectDisbursement: ${error.message}`);
+      updated = data;
+
+      await supabase.from('diaries')
+        .update({ status: 'completed', updated_at: now })
+        .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
+    }
+
+    await _writeAuditLog(
+      'disbursement_rejected', disbursementId,
+      `Disbursement rejected by ${adjusterId || 'unknown'}: ${reason}`,
+      { adjusterId, reason },
+      tx,
+      opts.actor,
+      row.claim_id,
+    );
+
+    const eventRow = {
+      claim_id: row.claim_id, type: 'disbursement_rejected', timestamp: now,
+      data:     { disbursementId, adjusterId, reason },
+    };
+    if (tx) {
+      await tx.insert('claim_events', eventRow);
+    } else {
+      await supabase.from('claim_events').insert(eventRow);
+    }
+
+    return updated;
+  };
+
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'disbursement.reject' }, run);
 
   logger.info({ msg: 'disbursementService.rejectDisbursement: complete', disbursementId });
   return updated;
 }
 
-async function recordDisbursementPayment(disbursementId, { paidDate, reference }) {
+async function recordDisbursementPayment(disbursementId, { paidDate, reference } = {}, opts = {}) {
   if (!paidDate) throw new Error('paidDate is required');
 
   const { data: row, error: fetchErr } = await supabase
@@ -413,95 +506,174 @@ async function recordDisbursementPayment(disbursementId, { paidDate, reference }
     }
   }
 
-  // Finalize the row.
-  const { data: updated, error } = await supabase.from('award_disbursements')
-    .update({
-      status:        'disbursed',
-      disbursed_at:  now,
-      interest_owed: interestOwed,
-      flags:         mergedFlags,
-      updated_at:    now,
-    })
-    .eq('id', disbursementId)
-    .select()
-    .single();
-  if (error) throw new Error(`disbursementService.recordDisbursementPayment: ${error.message}`);
+  const tenantId = row.tenant_id || opts.tenantId || config.tenancy.defaultTenantId;
 
-  // Close the approval diary.
-  await supabase.from('diaries')
-    .update({ status: 'completed', updated_at: now })
-    .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
+  const run = async (tx) => {
+    let updated;
+    if (tx) {
+      await tx.update('award_disbursements', {
+        status:        'disbursed',
+        disbursed_at:  now,
+        interest_owed: interestOwed,
+        flags:         mergedFlags,
+        updated_at:    now,
+      }, { id: disbursementId });
+      updated = await tx.selectOne('award_disbursements', { id: disbursementId });
 
-  // Penalty bridge row — M17A will consume these into penalty_exposures and
-  // drop the deferred_penalty_flags table. Do not build new features against
-  // this table beyond M14.5.
-  if (interestOwed > 0) {
-    const penaltyEstimate = Math.min(
-      Math.round(totalAward * DISBURSEMENT_POLICY.PENALTY_ESTIMATE_PCT * 100) / 100,
-      DISBURSEMENT_POLICY.PENALTY_ESTIMATE_CAP,
-    );
-    await supabase.from('deferred_penalty_flags').insert({
-      claim_id:         row.claim_id,
-      source_type:      'award_disbursement',
-      source_id:        disbursementId,
-      statute:          'LC_5814',
-      event_date:       paidDate,
-      deadline_date:    payBy,
-      amount_at_risk:   totalAward,
-      penalty_estimate: penaltyEstimate,
-      notes:            `Late payment — paid ${paidDate} vs pay-by ${payBy}; interest $${interestOwed.toFixed(2)}. ${reference ? `Ref: ${reference}. ` : ''}Estimate clamped at $${DISBURSEMENT_POLICY.PENALTY_ESTIMATE_CAP.toLocaleString()}.`,
-      created_at:       now,
-    });
-  }
+      await tx.update('diaries', { status: 'completed', updated_at: now }, {
+        claim_id:   row.claim_id,
+        diary_type: 'DISBURSEMENT_APPROVAL',
+        status:     'open',
+      });
+    } else {
+      const { data, error } = await supabase.from('award_disbursements')
+        .update({
+          status:        'disbursed',
+          disbursed_at:  now,
+          interest_owed: interestOwed,
+          flags:         mergedFlags,
+          updated_at:    now,
+        })
+        .eq('id', disbursementId)
+        .select()
+        .single();
+      if (error) throw new Error(`disbursementService.recordDisbursementPayment: ${error.message}`);
+      updated = data;
 
-  // Claim status transitions.
-  if (row.award_type === 'stip_f_and_a') {
-    // Look up the stipulation to determine future_medical.
-    let futureMedical = false;
-    if (row.stipulation_id) {
-      const { data: stip } = await supabase
-        .from('stipulations').select('*').eq('id', row.stipulation_id).single();
-      if (stip) futureMedical = !!stip.future_medical;
+      await supabase.from('diaries')
+        .update({ status: 'completed', updated_at: now })
+        .eq('claim_id', row.claim_id).eq('diary_type', 'DISBURSEMENT_APPROVAL').eq('status', 'open');
     }
-    const newClaimStatus = futureMedical ? 'future_medical_only' : 'closed';
 
-    const { data: claim } = await supabase.from('claims').select('*').eq('id', row.claim_id).single();
-    const priorStatus = claim ? claim.status : null;
-    await supabase.from('claims')
-      .update({ status: newClaimStatus, updated_at: now })
-      .eq('id', row.claim_id);
+    // Phase 3: Authoritative Payment Ledger Recording
+    try {
+      const paymentLedger = require('./paymentLedgerService');
+      const paymentAmount = Number(row.net_to_worker_now || row.total_award || 0);
+      if (paymentAmount > 0) {
+        await paymentLedger.issuePayment({
+          tenantId,
+          claimId: row.claim_id,
+          category: 'indemnity',
+          paymentType: row.award_type === 'stip_f_and_a' ? 'stip_award' : 'cnr_settlement',
+          amount: paymentAmount,
+          method: 'check',
+          checkNumber: reference || null,
+          memo: `Disbursement payout for ${row.award_type} (Disbursement ${disbursementId})`,
+          disbursementId,
+          createdBy: opts.actor?.id || 'adjuster',
+        }, { tx });
+      }
+    } catch (payErr) {
+      logger.warn({ msg: 'disbursementService: payment ledger recording warning (non-fatal)', err: payErr.message, disbursementId });
+    }
+
+    if (interestOwed > 0) {
+      const penaltyEstimate = Math.min(
+        Math.round(totalAward * DISBURSEMENT_POLICY.PENALTY_ESTIMATE_PCT * 100) / 100,
+        DISBURSEMENT_POLICY.PENALTY_ESTIMATE_CAP,
+      );
+      const penaltyRow = {
+        tenant_id:        tenantId,
+        claim_id:         row.claim_id,
+        source_type:      'award_disbursement',
+        source_id:        disbursementId,
+        statute:          'LC_5814',
+        event_date:       paidDate,
+        deadline_date:    payBy,
+        amount_at_risk:   totalAward,
+        penalty_estimate: penaltyEstimate,
+        notes:            `Late payment — paid ${paidDate} vs pay-by ${payBy}; interest $${interestOwed.toFixed(2)}. ${reference ? `Ref: ${reference}. ` : ''}Estimate clamped at $${DISBURSEMENT_POLICY.PENALTY_ESTIMATE_CAP.toLocaleString()}.`,
+        created_at:       now,
+      };
+      if (tx) {
+        await tx.insert('deferred_penalty_flags', penaltyRow);
+      } else {
+        await supabase.from('deferred_penalty_flags').insert(penaltyRow);
+      }
+    }
+
+    // Claim status transitions.
+    if (row.award_type === 'stip_f_and_a') {
+      let futureMedical = false;
+      if (row.stipulation_id) {
+        let stip;
+        if (tx) {
+          stip = await tx.selectOne('stipulations', { id: row.stipulation_id });
+        } else {
+          const res = await supabase.from('stipulations').select('*').eq('id', row.stipulation_id).single();
+          stip = res.data;
+        }
+        if (stip) futureMedical = !!stip.future_medical;
+      }
+      const newClaimStatus = futureMedical ? 'future_medical_only' : 'closed';
+
+      let claim;
+      if (tx) {
+        claim = await tx.selectOne('claims', { id: row.claim_id });
+      } else {
+        const res = await supabase.from('claims').select('*').eq('id', row.claim_id).single();
+        claim = res.data;
+      }
+      const priorStatus = claim ? claim.status : null;
+      if (tx) {
+        await tx.update('claims', { status: newClaimStatus, updated_at: now }, { id: row.claim_id });
+      } else {
+        await supabase.from('claims')
+          .update({ status: newClaimStatus, updated_at: now })
+          .eq('id', row.claim_id);
+      }
+
+      await _writeAuditLog(
+        'claim_status_changed', disbursementId,
+        `Claim ${row.claim_id}: ${priorStatus} → ${newClaimStatus} (stip paid, future_medical=${futureMedical})`,
+        { priorStatus, newClaimStatus, futureMedical, disbursementId },
+        tx,
+        opts.actor,
+        row.claim_id,
+      );
+      const eventStatusRow = {
+        claim_id: row.claim_id, type: 'status_changed', timestamp: now,
+        data:     { from: priorStatus, to: newClaimStatus, changedBy: 'system', reason: 'stip disbursement paid', disbursementId },
+      };
+      if (tx) {
+        await tx.insert('claim_events', eventStatusRow);
+      } else {
+        await supabase.from('claim_events').insert(eventStatusRow);
+      }
+    }
 
     await _writeAuditLog(
-      'claim_status_changed', disbursementId,
-      `Claim ${row.claim_id}: ${priorStatus} → ${newClaimStatus} (stip paid, future_medical=${futureMedical})`,
-      { priorStatus, newClaimStatus, futureMedical, disbursementId },
+      'disbursement_paid', disbursementId,
+      `Disbursement paid on ${paidDate}. Interest owed: $${interestOwed.toFixed(2)}.`,
+      { paidDate, reference, interestOwed, flags: mergedFlags },
+      tx,
+      opts.actor,
+      row.claim_id,
     );
-    await supabase.from('claim_events').insert({
-      claim_id: row.claim_id, type: 'status_changed', timestamp: now,
-      data:     { from: priorStatus, to: newClaimStatus, changedBy: 'system', reason: 'stip disbursement paid', disbursementId },
-    });
-  }
-  // cnr_oacr: cnrService.recordPayment already transitioned claim → closed.
 
-  await _writeAuditLog(
-    'disbursement_paid', disbursementId,
-    `Disbursement paid on ${paidDate}. Interest owed: $${interestOwed.toFixed(2)}.`,
-    { paidDate, reference, interestOwed, flags: mergedFlags },
-  );
-  await supabase.from('claim_events').insert({
-    claim_id: row.claim_id, type: 'disbursement_paid', timestamp: now,
-    data:     { disbursementId, paidDate, interestOwed, reference: reference || null },
-  });
+    const eventPaidRow = {
+      claim_id: row.claim_id, type: 'disbursement_paid', timestamp: now,
+      data:     { disbursementId, paidDate, interestOwed, reference: reference || null },
+    };
+    if (tx) {
+      await tx.insert('claim_events', eventPaidRow);
+    } else {
+      await supabase.from('claim_events').insert(eventPaidRow);
+    }
 
-  // ── WCIS hook — M22A ──────────────────────────────────────────
-  // Fire SROI PY with stip breakdown payload. If stipulation
-  // future_medical = false, follow with SROI FN. If true, no FN
-  // (claim stays future-medical-only).
-  await jobQueue.enqueue({
-    queue: 'wcis.disbursement_paid', claimId: row.claim_id,
-    payload: { disbursementId, claimId: row.claim_id, stipulationId: row.stipulation_id || null, paidDate },
-    idempotencyKey: `wcis.disbursement_paid:${disbursementId}`,
-  });
+    // WCIS hook
+    await jobQueue.enqueue({
+      queue: 'wcis.disbursement_paid', claimId: row.claim_id,
+      payload: { disbursementId, claimId: row.claim_id, stipulationId: row.stipulation_id || null, paidDate },
+      idempotencyKey: `wcis.disbursement_paid:${disbursementId}`,
+    }, { tx });
+
+    return updated;
+  };
+
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'disbursement.record_payment' }, run);
 
   logger.info({
     msg: 'disbursementService.recordDisbursementPayment: complete',
@@ -663,9 +835,23 @@ function _computeStatutoryPayBy(awardType, awardServiceDate) {
   throw new Error(`UNKNOWN_AWARD_TYPE: ${awardType}`);
 }
 
-async function _writeAuditLog(action, resourceId, description, newValue) {
+async function _writeAuditLog(action, resourceId, description, newValue, tx = null, actor = null, claimId = null) {
   try {
-    await supabase.from('audit_log').insert({
+    await auditLedger.append({
+      tenant_id: tx?.tenantId || config.tenancy.defaultTenantId,
+      claim_id: claimId,
+      actor: actor || { type: 'system', id: 'system', role: 'system' },
+      action: `disbursement.${action.replace(/^disbursement_/, '')}`,
+      entity: { type: 'award_disbursement', id: resourceId },
+      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
+    }, { tx });
+  } catch (err) {
+    logger.warn({ msg: 'disbursementService: auditLedger append failed', err: err.message, action });
+  }
+
+  try {
+    const row = {
+      tenant_id:     tx?.tenantId || config.tenancy.defaultTenantId,
       action,
       resource_type: 'award_disbursement',
       resource_id:   resourceId,
@@ -673,7 +859,12 @@ async function _writeAuditLog(action, resourceId, description, newValue) {
       new_value:     newValue,
       user_role:     'system',
       created_at:    new Date().toISOString(),
-    });
+    };
+    if (tx) {
+      await tx.insert('audit_log', row).catch(() => null);
+    } else {
+      await supabase.from('audit_log').insert(row);
+    }
   } catch (err) {
     logger.error({ msg: 'disbursementService: audit_log write failed', err: err.message, action, resourceId });
   }

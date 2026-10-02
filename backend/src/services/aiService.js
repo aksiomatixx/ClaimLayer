@@ -16,6 +16,7 @@ const fs     = require('fs');
 const path   = require('path');
 const config = require('../config');
 const logger = require('../logger');
+const modelGateway = require('./modelGateway');
 
 const PROMPTS_DIR = path.join(__dirname, '../../prompts');
 
@@ -128,6 +129,9 @@ async function analyzeCompensability(claim) {
     throw new Error(`Claude compensability response missing fields: ${missing.join(', ')}`);
   }
 
+  // Validate and sanitize output using model gateway guardrails (Defect D-8)
+  const validated = modelGateway.validateCompensabilityAnalysis(result);
+
   // Regulated decision: audit persistence is required — a failure fails
   // the analysis rather than continuing unaudited.
   const aid = require('./aiDecisionsService');
@@ -137,14 +141,14 @@ async function analyzeCompensability(claim) {
     prompt_name:    'compensability_analysis',
     model:          config.anthropic.model,
     input_snapshot: inputSnapshot,
-    output_parsed:  result,
+    output_parsed:  validated,
     output_raw:     raw,
     ...meta,
-    confidence:     typeof result.compensabilityScore === 'number' ? result.compensabilityScore : null,
+    confidence:     typeof validated.compensabilityScore === 'number' ? validated.compensabilityScore : null,
     guardrail_actions: [],
   }, { required: true });
 
-  return result;
+  return validated;
 }
 
 // ── RFA / MTUS evaluation ─────────────────────────────────────────────────────

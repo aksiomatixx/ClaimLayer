@@ -13,6 +13,7 @@ const adp                  = require('../services/adp');
 const claimService         = require('../services/claimService');
 const notificationService  = require('../services/notificationService');
 const db                   = require('../services/db');
+const { supabase }         = require('../services/supabase');
 const logger               = require('../logger');
 const { requireAuth, requireRole, generateMagicToken } = require('../middleware/auth');
 
@@ -86,7 +87,7 @@ router.post(
     const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
 
     // 4. Register token for single-use enforcement ──────────────────────────────
-    db.magicLinkTokens.create({
+    await db.magicLinkTokens.create({
       jti,
       claim_id:        claim.id,
       adp_employee_id: adpEmployeeId,
@@ -94,12 +95,16 @@ router.post(
       expires_at:      expiresAt,
     });
 
-    // 5. Push magic_link_sent event ─────────────────────────────────────────────
-    claim.events.push({
+    // 5. Persist magic_link_sent event ──────────────────────────────────────────
+    const nowIso = new Date().toISOString();
+    const { error: evErr } = await supabase.from('claim_events').insert({
+      claim_id:  claim.id,
       type:      'magic_link_sent',
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
+      tenant_id: claim.tenantId || claim.tenant_id,
       data:      { jti, expiresAt, channel: employee.email ? 'email' : 'none' },
     });
+    if (evErr) logger.error({ msg: 'employer/froi: magic_link_sent event insert failed', err: evErr.message });
 
     // 6. Send email notification ────────────────────────────────────────────────
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';

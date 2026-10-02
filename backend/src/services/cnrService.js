@@ -33,6 +33,8 @@ const config = require('../config');
 const logger       = require('../logger');
 const jobQueue     = require('./jobQueue');
 const { isRepresented } = require('../utils/representation');
+const { runInTransaction } = require('../db/unitOfWork');
+const auditLedger          = require('./auditLedgerService');
 
 // ── Lazy requires (avoid cycles) ─────────────────────────────────────────────
 function _getClaimService() { return require('./claimService'); }
@@ -78,15 +80,34 @@ function _assertTransition(offer, nextStatus) {
   }
 }
 
-async function _writeEvent(claimId, type, data) {
-  await supabase.from('claim_events').insert({
+async function _writeEvent(claimId, type, data, tx = null) {
+  const row = {
     claim_id: claimId, type, timestamp: new Date().toISOString(), data,
-  });
+  };
+  if (tx) {
+    await tx.insert('claim_events', row);
+  } else {
+    await supabase.from('claim_events').insert(row);
+  }
 }
 
-async function _writeAuditLog(action, offerId, description, newValue) {
+async function _writeAuditLog(action, offerId, description, newValue, tx = null, actor = null, claimId = null) {
   try {
-    await supabase.from('audit_log').insert({
+    await auditLedger.append({
+      tenant_id: tx?.tenantId || config.tenancy.defaultTenantId,
+      claim_id: claimId,
+      actor: actor || { type: 'system', id: 'system', role: 'system' },
+      action: `cnr.${action.replace(/^cnr_/, '')}`,
+      entity: { type: 'settlement_offer', id: offerId },
+      payload: typeof newValue === 'object' ? newValue : { description, value: newValue },
+    }, { tx });
+  } catch (err) {
+    logger.warn({ msg: 'cnrService: auditLedger append failed', err: err.message, action });
+  }
+
+  try {
+    const row = {
+      tenant_id:     tx?.tenantId || config.tenancy.defaultTenantId,
       action,
       resource_type: 'settlement_offer',
       resource_id:   offerId,
@@ -94,19 +115,23 @@ async function _writeAuditLog(action, offerId, description, newValue) {
       new_value:     newValue,
       user_role:     'system',
       created_at:    new Date().toISOString(),
-    });
+    };
+    if (tx) {
+      await tx.insert('audit_log', row).catch(() => null);
+    } else {
+      await supabase.from('audit_log').insert(row);
+    }
   } catch (err) {
     logger.error({ msg: 'cnrService: audit_log write failed', err: err.message, action, offerId });
   }
 }
 
-async function _createDiary(claimId, diaryType, dueDate, priority, notes, opts = {}) {
+async function _createDiary(claimId, diaryType, dueDate, priority, notes, opts = {}, tx = null) {
   const row = {
-    claim_id:   claimId,
-    diary_type: diaryType,
-    due_date:   dueDate,
-    // (CNR_ADJUSTER_SIGN, CNR_PAYMENT_DUE, CNR_OFFER_DECISION) to the
-    // licensed adjuster on the claim instead of the system inbox.
+    tenant_id:   tx?.tenantId || config.tenancy.defaultTenantId,
+    claim_id:    claimId,
+    diary_type:  diaryType,
+    due_date:    dueDate,
     assigned_to: config.adjuster.email,
     priority,
     notes,
@@ -115,26 +140,35 @@ async function _createDiary(claimId, diaryType, dueDate, priority, notes, opts =
     fh_diary_id: `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     created_at:  new Date().toISOString(),
   };
-  await supabase.from('diaries').insert(row);
+  if (tx) {
+    await tx.insert('diaries', row);
+  } else {
+    await supabase.from('diaries').insert(row);
+  }
   await _writeEvent(claimId, 'diary_created', {
     diaryType, dueDate, priority, noSnooze: row.no_snooze,
-  });
+  }, tx);
   return row;
 }
 
-async function _closeDiary(claimId, diaryType) {
-  await supabase.from('diaries')
-    .update({ status: 'completed', updated_at: new Date().toISOString() })
-    .eq('claim_id', claimId).eq('diary_type', diaryType).eq('status', 'open');
+async function _closeDiary(claimId, diaryType, tx = null) {
+  const patch = { status: 'completed', updated_at: new Date().toISOString() };
+  if (tx) {
+    await tx.update('diaries', patch, { claim_id: claimId, diary_type: diaryType, status: 'open' });
+  } else {
+    await supabase.from('diaries')
+      .update(patch)
+      .eq('claim_id', claimId).eq('diary_type', diaryType).eq('status', 'open');
+  }
 }
 
-async function _closeAllOpenCnrDiaries(claimId) {
+async function _closeAllOpenCnrDiaries(claimId, tx = null) {
   const types = [
     'CNR_WORKER_FOLLOWUP', 'CNR_ATTORNEY_TRANSMIT',
     'CNR_ADJUSTER_SIGN', 'CNR_EAMS_FILE',
     'CNR_OACR_FOLLOWUP', 'CNR_PAYMENT_DUE',
   ];
-  for (const t of types) await _closeDiary(claimId, t);
+  for (const t of types) await _closeDiary(claimId, t, tx);
 }
 
 async function _getLatestMsaScreening(claimId) {
@@ -151,8 +185,14 @@ async function _isRepresented(claimId) {
   return isRepresented(data);
 }
 
-async function _transitionClaimStatus(claimId, expectedFrom, newStatus, reason) {
-  const { data: claim } = await supabase.from('claims').select('*').eq('id', claimId).single();
+async function _transitionClaimStatus(claimId, expectedFrom, newStatus, reason, tx = null) {
+  let claim;
+  if (tx) {
+    claim = await tx.selectOne('claims', { id: claimId });
+  } else {
+    const res = await supabase.from('claims').select('*').eq('id', claimId).single();
+    claim = res.data;
+  }
   if (!claim) return;
   if (claim.status === newStatus) return;
   if (expectedFrom && claim.status !== expectedFrom) {
@@ -162,14 +202,22 @@ async function _transitionClaimStatus(claimId, expectedFrom, newStatus, reason) 
     });
   }
   const now = new Date().toISOString();
-  await supabase.from('claims')
-    .update({ status: newStatus, updated_at: now }).eq('id', claimId);
+  if (tx) {
+    await tx.update('claims', { status: newStatus, updated_at: now }, { id: claimId });
+  } else {
+    await supabase.from('claims')
+      .update({ status: newStatus, updated_at: now }).eq('id', claimId);
+  }
   await _writeEvent(claimId, 'status_changed', {
     from: claim.status, to: newStatus, changedBy: 'system', reason,
-  });
+  }, tx);
 }
 
-async function _updateOffer(offerId, patch) {
+async function _updateOffer(offerId, patch, tx = null) {
+  if (tx) {
+    await tx.update('settlement_offers', patch, { id: offerId });
+    return tx.selectOne('settlement_offers', { id: offerId });
+  }
   const { data, error } = await supabase
     .from('settlement_offers').update(patch).eq('id', offerId).select().single();
   if (error) throw new Error(`cnrService: offer update failed — ${error.message}`);
@@ -179,7 +227,7 @@ async function _updateOffer(offerId, patch) {
 // ═════════════════════════════════════════════════════════════════════════════
 // offerCnr — draft → offered
 // ═════════════════════════════════════════════════════════════════════════════
-async function offerCnr(offerId, { offeredTo }) {
+async function offerCnr(offerId, { offeredTo }, opts = {}) {
   if (!['worker', 'attorney'].includes(offeredTo)) {
     throw new Error("offerCnr: offeredTo must be 'worker' or 'attorney'");
   }
@@ -211,42 +259,58 @@ async function offerCnr(offerId, { offeredTo }) {
 
   const now = new Date().toISOString();
 
-  const updated = await _updateOffer(offerId, {
-    status:     'offered',
-    offered_at: now,
-    offered_to: offeredTo,
-    msa_screening_id: offer.msa_screening_id || msa.id,
-    updated_at: now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:     'offered',
+      offered_at: now,
+      offered_to: offeredTo,
+      msa_screening_id: offer.msa_screening_id || msa.id,
+      updated_at: now,
+    }, tx);
 
-  // Claim → settlement_discussions (if not already)
-  await _transitionClaimStatus(
-    offer.claim_id, 'pd_evaluation', 'settlement_discussions', 'C&R offered',
-  );
-
-  // Follow-up diary
-  if (offeredTo === 'attorney') {
-    await _createDiary(
-      offer.claim_id, 'CNR_ATTORNEY_TRANSMIT',
-      _addCalendarDays(now.split('T')[0], 3), 'HIGH',
-      `C&R offered to attorney on ${now.split('T')[0]}. Confirm attorney receipt and schedule worker signature.`,
+    // Claim → settlement_discussions (if not already)
+    await _transitionClaimStatus(
+      offer.claim_id, 'pd_evaluation', 'settlement_discussions', 'C&R offered', tx,
     );
-  } else {
-    await _createDiary(
-      offer.claim_id, 'CNR_WORKER_FOLLOWUP',
-      _addCalendarDays(now.split('T')[0], 21), 'MEDIUM',
-      `C&R offered to worker on ${now.split('T')[0]}. Follow up if not signed within 21 days.`,
-    );
-  }
 
-  await _writeAuditLog(
-    'cnr_offered', offerId,
-    `C&R offered to ${offeredTo}. Value: $${offer.cnr_value}`,
-    { offeredTo, cnrValue: offer.cnr_value, msaScreeningId: msa.id },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_offered', {
-    offerId, offeredTo, cnrValue: offer.cnr_value,
-  });
+    // Follow-up diary
+    if (offeredTo === 'attorney') {
+      await _createDiary(
+        offer.claim_id, 'CNR_ATTORNEY_TRANSMIT',
+        _addCalendarDays(now.split('T')[0], 3), 'HIGH',
+        `C&R offered to attorney on ${now.split('T')[0]}. Confirm attorney receipt and schedule worker signature.`,
+        {},
+        tx,
+      );
+    } else {
+      await _createDiary(
+        offer.claim_id, 'CNR_WORKER_FOLLOWUP',
+        _addCalendarDays(now.split('T')[0], 21), 'MEDIUM',
+        `C&R offered to worker on ${now.split('T')[0]}. Follow up if not signed within 21 days.`,
+        {},
+        tx,
+      );
+    }
+
+    await _writeAuditLog(
+      'cnr_offered', offerId,
+      `C&R offered to ${offeredTo}. Value: $${offer.cnr_value}`,
+      { offeredTo, cnrValue: offer.cnr_value, msaScreeningId: msa.id },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_offered', {
+      offerId, offeredTo, cnrValue: offer.cnr_value,
+    }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.offer' }, run);
 
   // Link the adjuster's decision to extend the offer back to the
   // AI cnr_pricing decision (if any) so the audit trail closes the
@@ -264,31 +328,45 @@ async function offerCnr(offerId, { offeredTo }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // recordWorkerAcceptance — offered → accepted
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordWorkerAcceptance(offerId) {
+async function recordWorkerAcceptance(offerId, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'accepted');
 
   const now = new Date().toISOString();
 
-  const updated = await _updateOffer(offerId, {
-    status:           'accepted',
-    worker_signed_at: now,
-    updated_at:       now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:           'accepted',
+      worker_signed_at: now,
+      updated_at:       now,
+    }, tx);
 
-  await _closeDiary(offer.claim_id, 'CNR_WORKER_FOLLOWUP');
-  await _closeDiary(offer.claim_id, 'CNR_ATTORNEY_TRANSMIT');
+    await _closeDiary(offer.claim_id, 'CNR_WORKER_FOLLOWUP', tx);
+    await _closeDiary(offer.claim_id, 'CNR_ATTORNEY_TRANSMIT', tx);
 
-  await _createDiary(
-    offer.claim_id, 'CNR_ADJUSTER_SIGN',
-    _addCalendarDays(now.split('T')[0], 3), 'HIGH',
-    'Worker signed C&R. Adjuster signature needed before EAMS filing.',
-  );
+    await _createDiary(
+      offer.claim_id, 'CNR_ADJUSTER_SIGN',
+      _addCalendarDays(now.split('T')[0], 3), 'HIGH',
+      'Worker signed C&R. Adjuster signature needed before EAMS filing.',
+      {},
+      tx,
+    );
 
-  await _writeAuditLog(
-    'cnr_worker_accepted', offerId, 'Worker signed C&R', { workerSignedAt: now },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_worker_accepted', { offerId });
+    await _writeAuditLog(
+      'cnr_worker_accepted', offerId, 'Worker signed C&R', { workerSignedAt: now },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_worker_accepted', { offerId }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.worker_acceptance' }, run);
 
   logger.info({ msg: 'cnrService.recordWorkerAcceptance: complete', offerId });
   return updated;
@@ -297,37 +375,51 @@ async function recordWorkerAcceptance(offerId) {
 // ═════════════════════════════════════════════════════════════════════════════
 // recordAdjusterSignature — accepted → signed → eams_ready (single-step)
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordAdjusterSignature(offerId, adjusterId) {
+async function recordAdjusterSignature(offerId, adjusterId, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'signed');
 
   const now = new Date().toISOString();
 
-  // Single-step: signed → eams_ready.
-  const updated = await _updateOffer(offerId, {
-    status:              'eams_ready',
-    adjuster_signed_at:  now,
-    adjuster_signed_by:  adjusterId,
-    eams_package_ready:  true,
-    updated_at:          now,
-  });
+  const run = async (tx) => {
+    // Single-step: signed → eams_ready.
+    const updated = await _updateOffer(offerId, {
+      status:              'eams_ready',
+      adjuster_signed_at:  now,
+      adjuster_signed_by:  adjusterId,
+      eams_package_ready:  true,
+      updated_at:          now,
+    }, tx);
 
-  await _closeDiary(offer.claim_id, 'CNR_ADJUSTER_SIGN');
+    await _closeDiary(offer.claim_id, 'CNR_ADJUSTER_SIGN', tx);
 
-  await _createDiary(
-    offer.claim_id, 'CNR_EAMS_FILE',
-    _addCalendarDays(now.split('T')[0], 7), 'HIGH',
-    'C&R EAMS package ready (DWC-CA form 10214(c)). File manually at DWC. Mark filed when complete.',
-  );
+    await _createDiary(
+      offer.claim_id, 'CNR_EAMS_FILE',
+      _addCalendarDays(now.split('T')[0], 7), 'HIGH',
+      'C&R EAMS package ready (DWC-CA form 10214(c)). File manually at DWC. Mark filed when complete.',
+      {},
+      tx,
+    );
 
-  await _writeAuditLog(
-    'cnr_adjuster_signed', offerId,
-    'Adjuster signed C&R. EAMS package ready for manual filing.',
-    { adjusterId, eamsReady: true },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_adjuster_signed', {
-    offerId, adjusterId, eamsReady: true,
-  });
+    await _writeAuditLog(
+      'cnr_adjuster_signed', offerId,
+      'Adjuster signed C&R. EAMS package ready for manual filing.',
+      { adjusterId, eamsReady: true },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_adjuster_signed', {
+      offerId, adjusterId, eamsReady: true,
+    }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.adjuster_signature' }, run);
 
   logger.info({ msg: 'cnrService.recordAdjusterSignature: complete', offerId });
   return updated;
@@ -336,34 +428,48 @@ async function recordAdjusterSignature(offerId, adjusterId) {
 // ═════════════════════════════════════════════════════════════════════════════
 // recordEAMSFiled — eams_ready → filed
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordEAMSFiled(offerId, { filedDate, filedBy }) {
+async function recordEAMSFiled(offerId, { filedDate, filedBy }, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'filed');
   if (!filedDate) throw new Error('filedDate is required');
 
   const now = new Date().toISOString();
 
-  const updated = await _updateOffer(offerId, {
-    status:         'filed',
-    eams_filed_at:  filedDate,
-    eams_filed_by:  filedBy || null,
-    updated_at:     now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:         'filed',
+      eams_filed_at:  filedDate,
+      eams_filed_by:  filedBy || null,
+      updated_at:     now,
+    }, tx);
 
-  await _closeDiary(offer.claim_id, 'CNR_EAMS_FILE');
+    await _closeDiary(offer.claim_id, 'CNR_EAMS_FILE', tx);
 
-  // Judge review typically 30–45 days; no statutory deadline → MEDIUM not CRITICAL.
-  await _createDiary(
-    offer.claim_id, 'CNR_OACR_FOLLOWUP',
-    _addCalendarDays(filedDate, 45), 'MEDIUM',
-    `C&R filed with WCAB on ${filedDate}. Follow up on OACR (Order Approving C&R) if not received by due date.`,
-  );
+    // Judge review typically 30–45 days; no statutory deadline → MEDIUM not CRITICAL.
+    await _createDiary(
+      offer.claim_id, 'CNR_OACR_FOLLOWUP',
+      _addCalendarDays(filedDate, 45), 'MEDIUM',
+      `C&R filed with WCAB on ${filedDate}. Follow up on OACR (Order Approving C&R) if not received by due date.`,
+      {},
+      tx,
+    );
 
-  await _writeAuditLog(
-    'cnr_eams_filed', offerId, `C&R filed at WCAB on ${filedDate}`,
-    { filedDate, filedBy },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_eams_filed', { offerId, filedDate });
+    await _writeAuditLog(
+      'cnr_eams_filed', offerId, `C&R filed at WCAB on ${filedDate}`,
+      { filedDate, filedBy },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_eams_filed', { offerId, filedDate }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.eams_filed' }, run);
 
   logger.info({ msg: 'cnrService.recordEAMSFiled: complete', offerId, filedDate });
   return updated;
@@ -372,7 +478,7 @@ async function recordEAMSFiled(offerId, { filedDate, filedBy }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // recordOACRReceived — filed → oacr_received
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordOACRReceived(offerId, { oacrDate }) {
+async function recordOACRReceived(offerId, { oacrDate }, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'oacr_received');
   if (!oacrDate) throw new Error('oacrDate is required');
@@ -382,30 +488,43 @@ async function recordOACRReceived(offerId, { oacrDate }) {
   // CCR §10880: 25 days + 5 for service = 30 effective calendar days.
   const paymentDueDate = _addCalendarDays(oacrDate, 30);
 
-  const updated = await _updateOffer(offerId, {
-    status:                'oacr_received',
-    wcab_oacr_received_at: oacrDate,
-    payment_due_date:      paymentDueDate,
-    updated_at:            now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:                'oacr_received',
+      wcab_oacr_received_at: oacrDate,
+      payment_due_date:      paymentDueDate,
+      updated_at:            now,
+    }, tx);
 
-  await _closeDiary(offer.claim_id, 'CNR_OACR_FOLLOWUP');
+    await _closeDiary(offer.claim_id, 'CNR_OACR_FOLLOWUP', tx);
 
-  await _createDiary(
-    offer.claim_id, 'CNR_PAYMENT_DUE',
-    paymentDueDate, 'CRITICAL',
-    `C&R PAYMENT DUE: ${paymentDueDate}. Payment must issue by this date. Late payment triggers LC §5814 10% self-assessed penalty. OACR received ${oacrDate}.`,
-    { noSnooze: true },
-  );
+    await _createDiary(
+      offer.claim_id, 'CNR_PAYMENT_DUE',
+      paymentDueDate, 'CRITICAL',
+      `C&R PAYMENT DUE: ${paymentDueDate}. Payment must issue by this date. Late payment triggers LC §5814 10% self-assessed penalty. OACR received ${oacrDate}.`,
+      { noSnooze: true },
+      tx,
+    );
 
-  await _writeAuditLog(
-    'cnr_oacr_received', offerId,
-    `OACR received on ${oacrDate}. Payment due ${paymentDueDate}.`,
-    { oacrDate, paymentDueDate },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_oacr_received', {
-    offerId, oacrDate, paymentDueDate,
-  });
+    await _writeAuditLog(
+      'cnr_oacr_received', offerId,
+      `OACR received on ${oacrDate}. Payment due ${paymentDueDate}.`,
+      { oacrDate, paymentDueDate },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_oacr_received', {
+      offerId, oacrDate, paymentDueDate,
+    }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.oacr_received' }, run);
 
   logger.info({
     msg: 'cnrService.recordOACRReceived: complete', offerId, oacrDate, paymentDueDate,
@@ -416,44 +535,53 @@ async function recordOACRReceived(offerId, { oacrDate }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // recordPayment — oacr_received → paid (and claim → closed)
 // ═════════════════════════════════════════════════════════════════════════════
-async function recordPayment(offerId, { paidDate }) {
+async function recordPayment(offerId, { paidDate }, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'paid');
   if (!paidDate) throw new Error('paidDate is required');
 
   const now = new Date().toISOString();
 
-  const updated = await _updateOffer(offerId, {
-    status:     'paid',
-    paid_at:    paidDate,
-    updated_at: now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:     'paid',
+      paid_at:    paidDate,
+      updated_at: now,
+    }, tx);
 
-  await _closeDiary(offer.claim_id, 'CNR_PAYMENT_DUE');
+    await _closeDiary(offer.claim_id, 'CNR_PAYMENT_DUE', tx);
 
-  // C&R closes ALL rights to future benefits — claim → closed, NOT
-  // future_medical_only. That's the structural difference from a stip.
-  await _transitionClaimStatus(
-    offer.claim_id, 'settlement_discussions', 'closed', 'C&R paid',
-  );
+    // C&R closes ALL rights to future benefits — claim → closed, NOT
+    // future_medical_only. That's the structural difference from a stip.
+    await _transitionClaimStatus(
+      offer.claim_id, 'settlement_discussions', 'closed', 'C&R paid', tx,
+    );
 
-  await _writeAuditLog(
-    'cnr_paid', offerId, `C&R paid on ${paidDate}. Claim closed.`,
-    { paidDate },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_paid', { offerId, paidDate });
+    await _writeAuditLog(
+      'cnr_paid', offerId, `C&R paid on ${paidDate}. Claim closed.`,
+      { paidDate },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_paid', { offerId, paidDate }, tx);
 
-  // ── WCIS hook — M22A ──────────────────────────────────────────
-  // Fire SROI PY with C&R breakdown payload, then SROI FN.
-  // Both enqueued atomically; scanner batches them together.
-  // Note: _transitionClaimStatus above directly updates claims.status
-  // without going through claimService.updateStatus, so no
-  // suppressWcisClose flag is needed — there's no competing enqueue.
-  await jobQueue.enqueue({
-    queue: 'wcis.cnr_paid', claimId: offer.claim_id,
-    payload: { offerId, claimId: offer.claim_id, paidDate },
-    idempotencyKey: `wcis.cnr_paid:${offerId}`,
-  });
+    // ── WCIS hook — M22A ──────────────────────────────────────────
+    // Fire SROI PY with C&R breakdown payload, then SROI FN.
+    // Both enqueued atomically; scanner batches them together.
+    await jobQueue.enqueue({
+      queue: 'wcis.cnr_paid', claimId: offer.claim_id,
+      payload: { offerId, claimId: offer.claim_id, paidDate },
+      idempotencyKey: `wcis.cnr_paid:${offerId}`,
+    }, { tx });
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.record_payment' }, run);
 
   logger.info({ msg: 'cnrService.recordPayment: complete', offerId, paidDate });
   return updated;
@@ -493,49 +621,73 @@ async function _wcisOnPayment({ offerId, claimId, paidDate }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // rejectOffer / withdrawOffer — terminal
 // ═════════════════════════════════════════════════════════════════════════════
-async function rejectOffer(offerId, { reason }) {
+async function rejectOffer(offerId, { reason }, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'rejected');
   const now = new Date().toISOString();
 
-  const updated = await _updateOffer(offerId, {
-    status:          'rejected',
-    rejected_at:     now,
-    rejected_reason: reason || null,
-    updated_at:      now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:          'rejected',
+      rejected_at:     now,
+      rejected_reason: reason || null,
+      updated_at:      now,
+    }, tx);
 
-  await _closeAllOpenCnrDiaries(offer.claim_id);
+    await _closeAllOpenCnrDiaries(offer.claim_id, tx);
 
-  await _writeAuditLog(
-    'cnr_rejected', offerId, `C&R rejected: ${reason || 'no reason'}`,
-    { reason, priorStatus: offer.status },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_rejected', { offerId, reason });
+    await _writeAuditLog(
+      'cnr_rejected', offerId, `C&R rejected: ${reason || 'no reason'}`,
+      { reason, priorStatus: offer.status },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_rejected', { offerId, reason }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.reject_offer' }, run);
 
   logger.info({ msg: 'cnrService.rejectOffer: complete', offerId });
   return updated;
 }
 
-async function withdrawOffer(offerId, { reason }) {
+async function withdrawOffer(offerId, { reason }, opts = {}) {
   const offer = await _fetchOffer(offerId);
   _assertTransition(offer, 'withdrawn');
   const now = new Date().toISOString();
 
-  const updated = await _updateOffer(offerId, {
-    status:           'withdrawn',
-    withdrawn_at:     now,
-    withdrawn_reason: reason || null,
-    updated_at:       now,
-  });
+  const run = async (tx) => {
+    const updated = await _updateOffer(offerId, {
+      status:           'withdrawn',
+      withdrawn_at:     now,
+      withdrawn_reason: reason || null,
+      updated_at:       now,
+    }, tx);
 
-  await _closeAllOpenCnrDiaries(offer.claim_id);
+    await _closeAllOpenCnrDiaries(offer.claim_id, tx);
 
-  await _writeAuditLog(
-    'cnr_withdrawn', offerId, `C&R withdrawn: ${reason || 'no reason'}`,
-    { reason, priorStatus: offer.status },
-  );
-  await _writeEvent(offer.claim_id, 'cnr_withdrawn', { offerId, reason });
+    await _writeAuditLog(
+      'cnr_withdrawn', offerId, `C&R withdrawn: ${reason || 'no reason'}`,
+      { reason, priorStatus: offer.status },
+      tx,
+      opts.actor,
+      offer.claim_id,
+    );
+    await _writeEvent(offer.claim_id, 'cnr_withdrawn', { offerId, reason }, tx);
+
+    return updated;
+  };
+
+  const tenantId = offer.tenant_id || opts.tenantId;
+  const updated = opts.tx
+    ? await run(opts.tx)
+    : await runInTransaction({ tenantId, label: 'cnr.withdraw_offer' }, run);
 
   logger.info({ msg: 'cnrService.withdrawOffer: complete', offerId });
   return updated;

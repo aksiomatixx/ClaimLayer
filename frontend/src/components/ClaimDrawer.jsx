@@ -392,7 +392,10 @@ export function ClaimDrawer({claimId,onClose,notify,jsPdfReady,onGenDWC1,onOpenC
             <div style={{fontSize:19,fontWeight:700}}>{empName}</div>
             <div style={{fontSize:12,color:C.muted,marginTop:2}}>{claim.employerName||claim.employer||'—'} · {claim.dateOfInjury}</div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center",paddingTop:4}}>
+          <div style={{display:"flex",gap:6,alignItems:"center",paddingTop:4,flexWrap:"wrap",justifyContent:"flex-end"}}>
+            {claim.adminStatus&&<span style={{display:"inline-block",background:`${C.blue}22`,color:C.blue,border:`1px solid ${C.blue}44`,padding:"2px 8px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase"}}>Admin: {claim.adminStatus}</span>}
+            {claim.compensabilityStatus&&<span style={{display:"inline-block",background:claim.compensabilityStatus==='accepted'?`${C.green}22`:claim.compensabilityStatus==='denied'?`${C.red}22`:`${C.amber}22`,color:claim.compensabilityStatus==='accepted'?C.green:claim.compensabilityStatus==='denied'?C.red:C.amber,border:`1px solid currentColor`,padding:"2px 8px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase"}}>{claim.compensabilityStatus.replace('_',' ')}</span>}
+            {claim.litigationStatus&&claim.litigationStatus!=='unrepresented'&&<span style={{display:"inline-block",background:`${C.red}22`,color:C.red,border:`1px solid ${C.red}44`,padding:"2px 8px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase"}}>{claim.litigationStatus.replace('_',' ')}</span>}
             <span style={{display:"inline-block",background:C.card,color:C.amber,border:`1px solid ${C.amber}33`,padding:"3px 9px",borderRadius:4,fontSize:10,fontFamily:C.mono,fontWeight:600,textTransform:"uppercase"}}>{STATUS_LABEL[claim.status]||claim.status}</span>
             <button onClick={onClose} style={{background:C.card,border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",width:28,height:28,borderRadius:6,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           </div>

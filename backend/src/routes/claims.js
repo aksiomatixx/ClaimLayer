@@ -7,6 +7,7 @@ const tdPeriodsService  = require('../services/tdPeriodsService');
 const pdfService        = require('../services/pdfService');
 const decisionBriefService = require('../services/decisionBriefService');
 const { supabase }      = require('../services/supabase');
+const config            = require('../config');
 const db                = require('../services/db');
 const logger            = require('../logger');
 const { requireAuth, requireRole } = require('../middleware/auth');
@@ -71,6 +72,11 @@ router.get(
     try {
       const filters = {};
 
+      // Multi-tenancy isolation: filter by caller tenant when scoped
+      if (req.user.tenantId) {
+        filters.tenantId = req.user.tenantId;
+      }
+
       // Employers only see their own claims; admins can see all or filter by employerId
       if (req.user.role === 'employer') {
         filters.employerId = req.user.employerId || req.user.sub;
@@ -115,6 +121,9 @@ router.get(
     try {
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
+      if (req.user?.tenantId && claim.tenantId && claim.tenantId !== req.user.tenantId) {
+        return res.status(404).json({ error: 'Claim not found' });
+      }
       res.json(claim);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -363,13 +372,22 @@ router.get(
       if (!data || data.claim_id !== req.params.id) {
         return res.status(404).json({ error: 'Document not found' });
       }
-      // Documents that arrived as actual files (PDF intake / email-in)
-      // carry the original — serve it. Text-channel documents fall back
-      // to the rendered rendition of their content.
-      let pdfBuffer;
-      if (data.pdf_buffer_b64) {
-        pdfBuffer = Buffer.from(data.pdf_buffer_b64, 'base64');
-      } else {
+      // Retrieve binary via enterprise storage adapter (verifying SHA-256 integrity),
+      // with fallback to inline rendition if text-only.
+      let pdfBuffer = null;
+      if (data.storage_key || data.pdf_buffer_b64) {
+        try {
+          const storageAdapter = require('../services/storageAdapter');
+          pdfBuffer = await storageAdapter.retrieveDocument(data);
+        } catch (storageErr) {
+          logger.warn({ msg: 'storageAdapter retrieval failed, using fallback', err: storageErr.message });
+          if (data.pdf_buffer_b64) {
+            pdfBuffer = Buffer.from(data.pdf_buffer_b64, 'base64');
+          }
+        }
+      }
+
+      if (!pdfBuffer) {
         const claim = await claimService.getClaim(req.params.id).catch(() => null);
         pdfBuffer = await pdfService.generateClaimDocumentPDF(data, claim);
       }
@@ -484,7 +502,8 @@ router.get(
 
 // ── POST /api/v1/claims/:id/dwc1/request-signature — DocuSign stub ────────────
 // M2 placeholder. Logs claim_event so adjuster knows to follow up manually.
-// Replace with DocuSign envelope creation in a future milestone.
+// ── POST /api/v1/claims/:id/dwc1/request-signature — DocuSign stub ────────────
+// Logs claim_event and creates an actionable diary so adjuster follows up.
 router.post(
   '/:id/dwc1/request-signature',
   requireAuth,
@@ -497,14 +516,34 @@ router.post(
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
 
-      claim.events.push({
+      const tenantId = claim.tenantId || claim.tenant_id;
+      const nowIso = new Date().toISOString();
+
+      const { error: evErr } = await supabase.from('claim_events').insert({
+        claim_id:  claim.id,
         type:      'dwc1_signature_pending',
-        timestamp: new Date().toISOString(),
+        timestamp: nowIso,
+        tenant_id: tenantId,
         data:      {
           requestedBy: req.user.sub,
           note:        'DocuSign not yet integrated — manual follow-up by adjuster required',
         },
       });
+      if (evErr) logger.error({ msg: 'dwc1/request-signature event insert failed', err: evErr.message });
+
+      const diaryDue = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const { error: diaryErr } = await supabase.from('diaries').insert({
+        claim_id:    claim.id,
+        diary_type:  'DWC1_SIGNATURE_FOLLOWUP',
+        due_date:    diaryDue,
+        status:      'open',
+        priority:    'HIGH',
+        assigned_to: claim.adjusterId || config.adjuster?.email || 'adjuster@claimlayer.com',
+        notes:       `Injured worker requested DWC-1 signature. DocuSign envelope pending manual completion. (User: ${req.user.sub})`,
+        fh_diary_id: `diy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        tenant_id:   tenantId,
+      });
+      if (diaryErr) logger.error({ msg: 'dwc1/request-signature diary insert failed', err: diaryErr.message });
 
       res.json({
         status:  'pending',
@@ -516,7 +555,7 @@ router.post(
   }
 );
 
-// ── POST /api/v1/claims/:id/intake-progress — update intake step flags ─────────
+// ── PATCH /api/v1/claims/:id/intake-progress — update intake step flags ─────────
 router.patch(
   '/:id/intake-progress',
   requireAuth,
@@ -535,15 +574,131 @@ router.patch(
       const claim = await claimService.getClaim(req.params.id);
       if (!claim) return res.status(404).json({ error: 'Claim not found' });
 
-      if (!claim.intakeProgress) {
-        claim.intakeProgress = {
-          voice_complete: false, media_complete: false, mpn_acknowledged: false,
-          provider_selected: false, appointment_confirmed: false, dwc1_generated: false,
-        };
-      }
-      claim.intakeProgress[req.body.step] = req.body.value;
-      res.json({ intake_progress: claim.intakeProgress });
+      const defaultIntake = {
+        voice_complete: false, media_complete: false, mpn_acknowledged: false,
+        provider_selected: false, appointment_confirmed: false, dwc1_generated: false,
+      };
+      const currentIntake = claim.intakeProgress || defaultIntake;
+      const updatedIntake = {
+        ...currentIntake,
+        [req.body.step]: req.body.value,
+      };
+
+      const nowIso = new Date().toISOString();
+      const { error: updateErr } = await supabase
+        .from('claims')
+        .update({
+          intake_progress: updatedIntake,
+          updated_at: nowIso,
+        })
+        .eq('id', req.params.id);
+
+      if (updateErr) throw new Error(updateErr.message);
+
+      const tenantId = claim.tenantId || claim.tenant_id;
+      await supabase.from('claim_events').insert({
+        claim_id:  claim.id,
+        type:      'intake_progress_updated',
+        timestamp: nowIso,
+        tenant_id: tenantId,
+        data:      {
+          step:  req.body.step,
+          value: req.body.value,
+          updatedIntake,
+        },
+      });
+
+      res.json({ intake_progress: updatedIntake });
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/ledger/reserves — Double-Entry Reserve Ledger ─────
+router.get(
+  '/:id/ledger/reserves',
+  requireAuth,
+  requireRole(['admin', 'supervisor', 'adjuster']),
+  requireClaimScope('params.id'),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const reserveLedger = require('../services/reserveLedgerService');
+      const balances = await reserveLedger.getBalances(req.params.id);
+      const transactions = await reserveLedger.getTransactions(req.params.id);
+      res.json({
+        claim_id: req.params.id,
+        balances: balances.totals,
+        categories: balances.categories,
+        transactions,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── GET /api/v1/claims/:id/ledger/payments — Payment Ledger ──────────────────
+router.get(
+  '/:id/ledger/payments',
+  requireAuth,
+  requireRole(['admin', 'supervisor', 'adjuster']),
+  requireClaimScope('params.id'),
+  [param('id').notEmpty()],
+  validate,
+  async (req, res) => {
+    try {
+      const paymentLedger = require('../services/paymentLedgerService');
+      const payments = await paymentLedger.getPayments(req.params.id);
+      res.json({ claim_id: req.params.id, payments });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// ── POST /api/v1/claims/:id/ledger/payments — Issue Payment Directly ─────────
+router.post(
+  '/:id/ledger/payments',
+  requireAuth,
+  requireRole(['admin', 'supervisor', 'adjuster']),
+  requireClaimScope('params.id'),
+  [
+    param('id').notEmpty(),
+    body('amount').isFloat({ gt: 0 }).withMessage('amount must be greater than 0'),
+    body('category').isIn(['indemnity', 'medical', 'expense']).withMessage('category must be indemnity, medical, or expense'),
+    body('paymentType').notEmpty().withMessage('paymentType is required'),
+    body('method').optional().isIn(['check', 'ach', 'digital_card']),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const claim = await claimService.getClaim(req.params.id);
+      if (!claim) return res.status(404).json({ error: 'Claim not found' });
+
+      const paymentLedger = require('../services/paymentLedgerService');
+      const row = await paymentLedger.issuePayment({
+        tenantId: req.user.tenantId || claim.tenantId,
+        claimId: req.params.id,
+        payeeId: req.body.payeeId,
+        category: req.body.category,
+        paymentType: req.body.paymentType,
+        amount: req.body.amount,
+        method: req.body.method || 'check',
+        checkNumber: req.body.checkNumber,
+        memo: req.body.memo,
+        periodStart: req.body.periodStart,
+        periodEnd: req.body.periodEnd,
+        createdBy: req.user.sub || req.user.email,
+      });
+
+      res.status(201).json({ status: 'issued', payment: row });
+    } catch (err) {
+      if (err.message.includes('DUPLICATE_PAYMENT_DETECTED')) {
+        return res.status(409).json({ error: err.message, code: 'DUPLICATE_PAYMENT' });
+      }
       res.status(500).json({ error: err.message });
     }
   }

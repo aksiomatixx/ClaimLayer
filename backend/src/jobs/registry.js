@@ -91,6 +91,16 @@ const QUEUES = {
     maxAttempts: 5,
     run: (p) => svc('documentPushService').pushToFileHandler(p.documentId),
   },
+  // fileQaSupervisor.runFileQASweep
+  'qa.file_sweep': {
+    maxAttempts: 3,
+    run: (p) => svc('fileQaSupervisor').runFileQASweep({ tenantId: p.tenantId }),
+  },
+  // lossFundService.reconcileClearedPayments
+  'loss_fund.reconcile': {
+    maxAttempts: 3,
+    run: (p) => svc('lossFundService').reconcileClearedPayments(p.clearedFeed),
+  },
 };
 
 function get(queue) {
