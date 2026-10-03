@@ -68,6 +68,45 @@ async function expectError(client, name, sql, pattern, params) {
   });
 }
 
+/**
+ * Split a migration into top-level statements (dollar quotes, quoted strings
+ * and comments respected) — how a SQL editor that runs a script statement by
+ * statement sees it.
+ */
+function splitStatements(sql) {
+  const out = [];
+  let cur = '';
+  let i = 0;
+  let dollar = null;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (dollar) {
+      if (sql.startsWith(dollar, i)) { cur += dollar; i += dollar.length; dollar = null; continue; }
+      cur += ch; i += 1; continue;
+    }
+    if (ch === '-' && sql[i + 1] === '-') {
+      const nl = sql.indexOf('\n', i);
+      i = nl === -1 ? sql.length : nl;
+      continue;
+    }
+    if (ch === "'") {
+      const close = sql.indexOf("'", i + 1);
+      cur += sql.slice(i, close + 1); i = close + 1; continue;
+    }
+    if (ch === '$') {
+      const m = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
+      if (m) { dollar = m[0]; cur += dollar; i += dollar.length; continue; }
+    }
+    if (ch === ';') {
+      if (cur.trim()) out.push(cur.trim());
+      cur = ''; i += 1; continue;
+    }
+    cur += ch; i += 1;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 async function main() {
   const client = new Client({ connectionString: DATABASE_URL });
   await client.connect();
@@ -95,6 +134,23 @@ async function main() {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8');
     await client.query(sql);
     console.log(`  ✓ ${f} (second apply)`);
+  }
+
+  // The Supabase SQL editor can run a pasted script one statement at a time,
+  // outside a transaction (a temporary table created ON COMMIT DROP then
+  // vanishes before the next statement). Every tenancy / ledger migration
+  // must also apply that way.
+  console.log('── Re-applying the 20261004–20261005 migrations statement by statement (autocommit)');
+  for (const f of files.filter(f => /^(20261004|20261005)/.test(f))) {
+    const stmts = splitStatements(fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8'))
+      .filter(st => !/^(BEGIN|COMMIT)$/i.test(st));
+    try {
+      for (const st of stmts) await client.query(st);
+      console.log(`  ✓ ${f} (${stmts.length} statements, autocommit)`);
+    } catch (e) {
+      failed += 1;
+      console.error(`  ✕ ${f} (autocommit)\n      ${e.message}`);
+    }
   }
 
   console.log('── Schema-contract assertions (code-shaped writes)');

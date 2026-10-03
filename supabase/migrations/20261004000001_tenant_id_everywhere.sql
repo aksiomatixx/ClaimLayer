@@ -37,34 +37,35 @@ $$;
 
 GRANT EXECUTE ON FUNCTION app.current_tenant_id() TO authenticated, anon, service_role;
 
--- ── 2. Add tenant_id where it is missing ────────────────────────────────────
+-- ── 2 + 3. Add tenant_id where it is missing; backfill it from the claim ───
+-- One DO block, one statement: it also applies when a SQL editor runs the
+-- script statement by statement outside a transaction (no temporary table).
 -- The default keeps today's single-tenant writers working (claims has the same
--- default); explicit tenant stamping on every write is increment 2b.
-CREATE TEMP TABLE _tenant_tables (name text PRIMARY KEY) ON COMMIT DROP;
-INSERT INTO _tenant_tables VALUES
-    ('employers'), ('employees'), ('policies'), ('insurers'),
-    ('claim_events'), ('diaries'), ('reserves'), ('reserve_line_items'),
-    ('claim_documents'), ('documents'), ('td_periods'), ('rfas'),
-    ('rfa_evaluations'), ('qme_panels'), ('pd_evaluations'), ('pd_advances'),
-    ('pd_advance_payments'), ('settlement_offers'), ('stipulations'),
-    ('award_disbursements'), ('benefit_notices'), ('benefit_notice_channels'),
-    ('notices'), ('wcis_trigger_queue'), ('wcis_transactions'),
-    ('wcis_claim_state'), ('wcis_transmissions'), ('integration_outbox'),
-    ('claim_links'), ('supervisor_alerts'), ('appointments'), ('providers'),
-    ('ai_decisions'), ('pr4_solicitations'), ('mmi_evaluations'),
-    ('msa_screenings'), ('supplemental_requests'), ('magic_link_tokens'),
-    ('deferred_penalty_flags'), ('legacy_claims'), ('legacy_updates'),
-    ('legacy_diaries'), ('legacy_documents'), ('pdrs_lookup');
-
+-- default); explicit tenant stamping on every write is increment 2b. The
+-- backfill touches only the tables stamped here, only rows that disagree, and
+-- never claim_events (handled below).
 DO $$
 DECLARE
     tbl text;
+    tables text[] := ARRAY[
+        'employers', 'employees', 'policies', 'insurers',
+        'claim_events', 'diaries', 'reserves', 'reserve_line_items',
+        'claim_documents', 'documents', 'td_periods', 'rfas',
+        'rfa_evaluations', 'qme_panels', 'pd_evaluations', 'pd_advances',
+        'pd_advance_payments', 'settlement_offers', 'stipulations', 'award_disbursements',
+        'benefit_notices', 'benefit_notice_channels', 'notices', 'wcis_trigger_queue',
+        'wcis_transactions', 'wcis_claim_state', 'wcis_transmissions', 'integration_outbox',
+        'claim_links', 'supervisor_alerts', 'appointments', 'providers',
+        'ai_decisions', 'pr4_solicitations', 'mmi_evaluations', 'msa_screenings',
+        'supplemental_requests', 'magic_link_tokens', 'deferred_penalty_flags', 'legacy_claims',
+        'legacy_updates', 'legacy_diaries', 'legacy_documents', 'pdrs_lookup'
+    ];
 BEGIN
-    FOR tbl IN
-        SELECT t.name FROM _tenant_tables t
-        JOIN information_schema.tables i
-          ON i.table_schema = 'public' AND i.table_name = t.name AND i.table_type = 'BASE TABLE'
-    LOOP
+    FOREACH tbl IN ARRAY tables LOOP
+        CONTINUE WHEN NOT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = tbl AND table_type = 'BASE TABLE');
+
         IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = tbl AND column_name = 'tenant_id'
@@ -75,30 +76,16 @@ BEGIN
                    REFERENCES tenants(id)', tbl);
         END IF;
         EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (tenant_id)', 'idx_' || tbl || '_tenant_id', tbl);
-    END LOOP;
-END;
-$$;
 
--- ── 3. Backfill tenant_id from the parent claim ─────────────────────────────
--- Only the tables this migration stamped, and only rows that disagree.
-DO $$
-DECLARE
-    tbl text;
-BEGIN
-    FOR tbl IN
-        SELECT t.name FROM _tenant_tables t
-        WHERE t.name <> 'claim_events'
-          AND EXISTS (SELECT 1 FROM information_schema.columns c
-                       WHERE c.table_schema = 'public' AND c.table_name = t.name
-                         AND c.column_name = 'claim_id')
-          AND EXISTS (SELECT 1 FROM information_schema.tables i
-                       WHERE i.table_schema = 'public' AND i.table_name = t.name
-                         AND i.table_type = 'BASE TABLE')
-    LOOP
-        EXECUTE format(
-            'UPDATE %I t SET tenant_id = c.tenant_id
-               FROM claims c
-              WHERE t.claim_id = c.id AND t.tenant_id IS DISTINCT FROM c.tenant_id', tbl);
+        IF tbl <> 'claim_events' AND EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = tbl AND column_name = 'claim_id'
+        ) THEN
+            EXECUTE format(
+                'UPDATE %I t SET tenant_id = c.tenant_id
+                   FROM claims c
+                  WHERE t.claim_id = c.id AND t.tenant_id IS DISTINCT FROM c.tenant_id', tbl);
+        END IF;
     END LOOP;
 END;
 $$;
